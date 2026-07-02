@@ -18,16 +18,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install backend dependencies
-        working-directory: editor/backend
-        run: npm ci
-
       - name: Install frontend dependencies
         working-directory: editor/frontend
         run: npm ci
 
       - name: Typecheck
+        working-directory: editor/frontend
         run: npm run typecheck
 
       - name: Build
+        working-directory: editor/frontend
         run: npm run build

@@ -1,8 +1,5 @@
-import type { FastifyInstance } from 'fastify'
-import fs from 'fs'
-import path from 'path'
-
-const DEFAULT_PRESETS = [
+// 音效预设（前端内置，不再从后端读取）
+export const EFFECT_PRESETS = [
   { id: 'button_default', category: '组合', label: '标准按钮', desc: '按压+悬停' },
   { id: 'press_scale_92', category: '按压', label: '按压 0.92', desc: '轻按缩放' },
   { id: 'press_scale_85_bounce', category: '按压', label: '重按+弹回', desc: '缩到0.85' },
@@ -14,21 +11,3 @@ const DEFAULT_PRESETS = [
   { id: 'loop_pulse', category: '循环', label: '脉冲', desc: '持续缩放' },
   { id: 'loop_floating', category: '循环', label: '浮动', desc: '上下浮动' },
 ]
-
-export async function registerEffectRoutes(app: FastifyInstance) {
-  // 获取动效预设清单
-  app.get('/api/effects/presets', async () => {
-    // 尝试从工程目录读取 manifest
-    const configPath = path.resolve(process.cwd(), 'djui_config.json')
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
-      const manifestPath = config.effectManifestPath
-      if (manifestPath && fs.existsSync(manifestPath)) {
-        try {
-          return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
-        } catch { /* fall through */ }
-      }
-    }
-    return DEFAULT_PRESETS
-  })
-}

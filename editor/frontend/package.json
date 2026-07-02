@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 7321",
+    "dev": "vite --host --port 7321 --strictPort",
     "typecheck": "tsc --noEmit",
     "build": "tsc -b && vite build",
     "preview": "vite preview"

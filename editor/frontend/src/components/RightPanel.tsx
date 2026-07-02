@@ -48,10 +48,10 @@ export default function RightPanel() {
   const selectedId = selectedIds[selectedIds.length - 1]
   const node = page && selectedId ? findNode(page.root, selectedId) : null
 
-  // 加载九宫格元数据
+  // 加载九宫格元数据（路径参数已忽略）
   useEffect(() => {
     if (config?.workspacePath) {
-      api.getSliceMeta(config.workspacePath).then(setSliceMeta)
+      api.getSliceMeta().then(setSliceMeta)
     }
   }, [config?.workspacePath])
 
@@ -62,7 +62,7 @@ export default function RightPanel() {
     }
 
     const loadSounds = () => {
-      api.getSoundConfig(config.starProjectPath)
+      api.getSoundConfig()
         .then(setSoundConfig)
         .catch(() => setSoundConfig({ version: 2, defaultButtonSoundId: null, sounds: [] }))
     }
@@ -83,7 +83,9 @@ export default function RightPanel() {
     if (!node?.appearance?.image || !config?.workspacePath) return
     setFittingSize(true)
     try {
-      const url = api.enginePathToUrl(node.appearance.image, config.workspacePath, config.starProjectPath)
+      // 异步获取图片 URL（pure-frontend FS API）
+      const url = await api.enginePathToUrl(node.appearance.image)
+      if (!url) return
       const img = await new Promise<HTMLImageElement | null>((resolve) => {
         const im = new window.Image()
         im.crossOrigin = 'anonymous'
@@ -189,7 +191,7 @@ export default function RightPanel() {
         open={assetPickerOpen}
         onClose={() => setAssetPickerOpen(false)}
         onSelect={handleAssetSelected}
-        customRootDir={assetPickerField === '__referenceImage' ? (config?.workspacePath ?? undefined) : undefined}
+        customRootDir={assetPickerField === '__referenceImage' ? '.' : undefined}
         rawAbsolutePath={assetPickerField === '__referenceImage'}
         storageKey={assetPickerField}
       />
@@ -200,7 +202,7 @@ export default function RightPanel() {
           image={node.appearance.image}
           onSaved={() => {
             if (config?.workspacePath) {
-              api.getSliceMeta(config.workspacePath).then(setSliceMeta)
+              api.getSliceMeta().then(setSliceMeta)
             }
             window.dispatchEvent(new CustomEvent('djui:sliceMetaChanged'))
           }}
@@ -1162,7 +1164,7 @@ function FontSelect({ node, updateNodeField }: {
 
   useEffect(() => {
     if (!config?.starProjectPath) return
-    api.getFonts(config.starProjectPath).then(list => setFonts(list))
+    api.getFonts().then(list => setFonts(list))
   }, [config?.starProjectPath])
 
   const currentFont = node.text?.font ?? null
@@ -1293,7 +1295,7 @@ function PaletteColorPicker({ value, onChange }: {
   const wsPath = config?.workspacePath ?? ''
   useEffect(() => {
     if (!wsPath) return
-    api.getPalette(wsPath).then(setPalette)
+    api.getPalette().then(setPalette)
   }, [wsPath])
 
   useEffect(() => {
@@ -1314,13 +1316,13 @@ function PaletteColorPicker({ value, onChange }: {
 
   const addToPalette = async (color: string) => {
     if (!wsPath) return
-    await api.addPaletteColor(wsPath, color)
+    await api.addPaletteColor('', color)
     setPalette(prev => [...prev, color])
   }
 
   const removeFromPalette = async (color: string) => {
     if (!wsPath) return
-    await api.removePaletteColor(wsPath, color)
+    await api.removePaletteColor('', color)
     setPalette(prev => prev.filter(c => c !== color))
   }
 

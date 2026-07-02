@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Modal, InputNumber, Button, Space } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import * as api from '@/api/client'
-import { useProjectStore } from '@/store/projectStore'
+import { useEngineImage } from '@/hooks/useImageUrl'
 
 interface SliceEditorModalProps {
   open: boolean
@@ -14,37 +14,36 @@ interface SliceEditorModalProps {
 interface Edges { left: number; top: number; right: number; bottom: number }
 
 export default function SliceEditorModal({ open, onClose, image, onSaved }: SliceEditorModalProps) {
-  const { config } = useProjectStore()
-  const workspacePath = config?.workspacePath ?? ''
-  const projectPath = config?.starProjectPath ?? ''
-
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null)
   const [edges, setEdges] = useState<Edges>({ left: 0, top: 0, right: 0, bottom: 0 })
+  // 异步获取引擎图片 URL（pure-frontend FS API）
+  const engineUrl = useEngineImage(open ? image : null)
   const [imgUrl, setImgUrl] = useState<string>('')
   const [scale, setScale] = useState(1)
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ which: 'v1' | 'v2' | 'h1' | 'h2'; startX: number; startY: number; startVal: number } | null>(null)
 
-  // 加载图片和已有元数据
+  // 当引擎 URL 就绪时，加载图片尺寸
   useEffect(() => {
-    if (!open || !image) return
-    const url = api.enginePathToUrl(image, workspacePath, projectPath)
-    setImgUrl(url)
+    if (!open || !engineUrl) { setImgUrl(''); return }
+    setImgUrl(engineUrl)
     const im = new window.Image()
     im.crossOrigin = 'anonymous'
     im.onload = () => {
       setImgSize({ w: im.naturalWidth, h: im.naturalHeight })
     }
-    im.src = url
-    // 加载已有元数据
-    if (workspacePath) {
-      api.getSliceMeta(workspacePath).then(meta => {
-        const e = meta[image]
-        if (e) setEdges(e)
-        else setEdges({ left: 0, top: 0, right: 0, bottom: 0 })
-      })
-    }
-  }, [open, image, workspacePath, projectPath])
+    im.src = engineUrl
+  }, [open, engineUrl])
+
+  // 加载已有切片元数据（路径参数已忽略）
+  useEffect(() => {
+    if (!open || !image) return
+    api.getSliceMeta().then(meta => {
+      const e = meta[image]
+      if (e) setEdges(e)
+      else setEdges({ left: 0, top: 0, right: 0, bottom: 0 })
+    })
+  }, [open, image])
 
   // 计算缩放比例（适配弹窗）
   useEffect(() => {
@@ -89,9 +88,8 @@ export default function SliceEditorModal({ open, onClose, image, onSaved }: Slic
   }, [open, scale, imgSize])
 
   const handleSave = async () => {
-    if (!workspacePath) return
     const hasValue = edges.left || edges.top || edges.right || edges.bottom
-    await api.setSliceMeta(workspacePath, image, hasValue ? edges : null)
+    await api.setSliceMeta('', image, hasValue ? edges : null)
     onSaved?.()
     onClose()
   }

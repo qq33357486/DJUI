@@ -7,11 +7,8 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },
-  server: {
-    proxy: {
-      '/api': 'http://localhost:37241',
-    },
-  },
+  // Runtime .cs 和 scripts 作为静态资源打包（用 ?raw 导入原始文本）
+  // 见 src/lib/bundledAssets.ts
   build: {
     chunkSizeWarningLimit: 1200,
     rollupOptions: {

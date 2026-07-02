@@ -4,6 +4,7 @@ import { useEditorStore, createNode, findNode, findParent, getClipboard, setClip
 import { useProjectStore } from '@/store/projectStore'
 import { UiNode } from '@/types/layout'
 import * as api from '@/api/client'
+import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
 import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/anchorPresets'
 import { solveLayout, Rect as LayoutRect } from '@/utils/layoutSolver'
 import type Konva from 'konva'
@@ -18,9 +19,14 @@ function useImage(url: string | null): HTMLImageElement | null {
     let cancelled = false
     image.onload = () => { if (!cancelled) setImg(image) }
     image.onerror = () => { if (!cancelled) setImg(null) }
-    // 加时间戳防止浏览器缓存旧图片
-    const sep = url.includes('?') ? '&' : '?'
-    image.src = `${url}${sep}_t=${Date.now()}`
+    // Blob URL（blob:...）不能追加 query string，否则 URL 失效
+    // 只有 HTTP URL 才需要时间戳防缓存
+    if (url.startsWith('blob:')) {
+      image.src = url
+    } else {
+      const sep = url.includes('?') ? '&' : '?'
+      image.src = `${url}${sep}_t=${Date.now()}`
+    }
     return () => { cancelled = true }
   }, [url])
   return img
@@ -223,7 +229,9 @@ function RefImageLayer({ refPath, visible, opacity, width, height }: {
 }) {
   const [img, setImg] = useState<HTMLImageElement | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle')
-  const url = refPath ? api.assetFileUrl(refPath.replace(/\\/g, '/')) : null
+  // 异步获取参考图 Blob URL（pure-frontend FS API）
+  const normalizedRefPath = refPath ? refPath.replace(/\\/g, '/') : null
+  const url = useWorkspaceImage(normalizedRefPath)
 
   useEffect(() => {
     if (!url) { setImg(null); setStatus('idle'); return }
@@ -276,9 +284,8 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
 }) {
   const appPreview = node.appearance ?? {}
-  const imgUrl = appPreview.image
-    ? api.enginePathToUrl(appPreview.image, workspacePath, projectPath)
-    : null
+  // 异步获取引擎图片 URL（pure-frontend FS API）
+  const imgUrl = useEngineImage(appPreview.image ?? null)
   const image = useImage(imgUrl)
 
   if (node.editorHidden) return null
@@ -403,9 +410,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
 
   // ★ 所有 hooks 必须在任何 return null 之前调用
   const app_preview = node.appearance ?? {}
-  const imgUrl = app_preview.image
-    ? api.enginePathToUrl(app_preview.image, workspacePath, projectPath)
-    : null
+  // 异步获取引擎图片 URL（pure-frontend FS API）
+  const imgUrl = useEngineImage(app_preview.image ?? null)
   const image = useImage(imgUrl)
 
   // 编辑器隐藏：不渲染（子节点也跟着隐藏）
@@ -967,7 +973,7 @@ export default function CanvasArea() {
   const [sliceMeta, setSliceMeta] = useState<Record<string, { left: number; top: number; right: number; bottom: number }>>({})
   const reloadSliceMeta = useCallback(() => {
     if (config?.workspacePath) {
-      api.getSliceMeta(config.workspacePath).then(setSliceMeta)
+      api.getSliceMeta().then(setSliceMeta)
     }
   }, [config?.workspacePath])
   useEffect(() => { reloadSliceMeta() }, [reloadSliceMeta])

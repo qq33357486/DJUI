@@ -2,27 +2,24 @@ import { useState, useEffect, useMemo } from 'react'
 import { Modal, Spin, Empty, Input, Breadcrumb, Tree } from 'antd'
 import { FolderOutlined, FileImageOutlined, SearchOutlined } from '@ant-design/icons'
 import * as api from '@/api/client'
-import { useProjectStore } from '@/store/projectStore'
+import { useAssetImage } from '@/hooks/useImageUrl'
 
 interface AssetPickerModalProps {
   open: boolean
   onClose: () => void
   onSelect: (assetPath: string) => void
-  /** 自定义根目录（绝对路径），不传则默认 workspacePath/成品素材 */
+  /** 自定义根目录（工作区内相对路径），不传则默认 "成品素材" */
   customRootDir?: string
-  /** 返回原始绝对路径而非引擎路径（用于非打包素材如效果图） */
+  /** 返回工作区相对路径而非引擎路径（用于非打包素材如效果图） */
   rawAbsolutePath?: boolean
   /** 存储键：用于记住上次浏览的目录（不同场景独立记忆） */
   storageKey?: string
 }
 
-const ROOT_KEY = '__root__'
+// 默认根素材目录：工作区内的 "成品素材"
+const DEFAULT_ROOT_DIR = '成品素材'
 
-// 根素材目录：workspacePath/成品素材
-function useRootDir(): string {
-  const { config } = useProjectStore()
-  return config?.workspacePath ? `${config.workspacePath}/成品素材` : ''
-}
+const ROOT_KEY = '__root__'
 
 function dirToKey(dir: string) {
   return dir || ROOT_KEY
@@ -46,8 +43,10 @@ function patchTreeChildren(nodes: any[], key: string, children: any[]): any[] {
 }
 
 export default function AssetPickerModal({ open, onClose, onSelect, customRootDir, rawAbsolutePath, storageKey }: AssetPickerModalProps) {
-  const defaultRootDir = useRootDir()
-  const rootDir = customRootDir || defaultRootDir
+  // 根目录：工作区内的相对路径（如 "成品素材"）
+  // '.' 表示工作区根目录
+  const rootDir = customRootDir || DEFAULT_ROOT_DIR
+  const isWsRoot = rootDir === '.'
   const dirStorageKey = storageKey ? `djui.lastDir.${storageKey}` : ''
   const [currentDir, setCurrentDir] = useState<string>(() => {
     // 从 localStorage 恢复上次目录
@@ -67,9 +66,14 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
   const [flatAssets, setFlatAssets] = useState<string[]>([])
   const [searching, setSearching] = useState(false)
 
-  const absCurrent = useMemo(
-    () => (rootDir && currentDir ? `${rootDir}/${currentDir}` : rootDir),
-    [rootDir, currentDir]
+  // 当前目录的工作区相对路径（如 "成品素材" 或 "成品素材/icons"）
+  // 如果 rootDir 是 '.'（工作区根），则直接用 currentDir
+  const relCurrent = useMemo(
+    () => {
+      if (isWsRoot) return currentDir || ''
+      return currentDir ? `${rootDir}/${currentDir}` : rootDir
+    },
+    [rootDir, currentDir, isWsRoot]
   )
 
   // 打开时恢复上次目录 + 刷新
@@ -84,13 +88,13 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
       setFilter('')
       setTreeData([{
         key: ROOT_KEY,
-        title: '成品素材',
+        title: isWsRoot ? '工作区' : rootDir,
         isLeaf: false,
       }])
       setExpandedKeys([ROOT_KEY])
       setRefreshKey(k => k + 1)
     }
-  }, [open])
+  }, [open, rootDir])
 
   // 关闭时保存当前目录
   useEffect(() => {
@@ -103,26 +107,26 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
 
   // 加载当前层级（open 变化或目录变化或手动刷新时重新加载）
   useEffect(() => {
-    if (!open || !absCurrent) return
+    if (!open || relCurrent === null) return
     setLoading(true)
-    api.listAssets(absCurrent)
+    api.listAssets(relCurrent)
       .then(res => {
         setDirs(res.dirs)
         setFiles(res.files)
         const key = dirToKey(currentDir)
-        const children = res.dirs.map(name => ({
+        const children = res.dirs.map((name: string) => ({
           key: dirToKey(joinRelDir(currentDir, name)),
           title: name,
           isLeaf: false,
         }))
-        setTreeData(prev => patchTreeChildren(prev.length ? prev : [{ key: ROOT_KEY, title: '成品素材', isLeaf: false }], key, children))
+        setTreeData(prev => patchTreeChildren(prev.length ? prev : [{ key: ROOT_KEY, title: isWsRoot ? '工作区' : rootDir, isLeaf: false }], key, children))
       })
       .catch(() => {
         setDirs([])
         setFiles([])
       })
       .finally(() => setLoading(false))
-  }, [open, absCurrent, refreshKey])
+  }, [open, relCurrent, refreshKey, currentDir, rootDir])
 
   // 进入子目录
   const enterDir = (name: string) => {
@@ -132,10 +136,11 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
 
   const loadTreeNode = async (node: any) => {
     const relDir = keyToDir(node.key)
-    const absDir = rootDir && relDir ? `${rootDir}/${relDir}` : rootDir
-    if (!absDir) return
-    const res = await api.listAssets(absDir)
-    const children = res.dirs.map(name => ({
+    // 工作区内相对路径
+    const wsRelDir = isWsRoot ? relDir : (relDir ? `${rootDir}/${relDir}` : rootDir)
+    if (!wsRelDir) return
+    const res = await api.listAssets(wsRelDir)
+    const children = res.dirs.map((name: string) => ({
       key: dirToKey(joinRelDir(relDir, name)),
       title: name,
       isLeaf: false,
@@ -146,11 +151,11 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
   // 面包屑分段：[根, ...currentDir 拆分]
   const breadcrumbs = useMemo(() => {
     const segs = currentDir ? currentDir.split('/').filter(Boolean) : []
-    return [{ label: '成品素材', path: '' }, ...segs.map((s, i) => ({
+    return [{ label: isWsRoot ? '工作区' : rootDir, path: '' }, ...segs.map((s, i) => ({
       label: s,
       path: segs.slice(0, i + 1).join('/'),
     }))]
-  }, [currentDir])
+  }, [currentDir, rootDir])
 
   // 触发搜索：用户输入时递归获取全部素材（只拉一次）
   useEffect(() => {
@@ -162,7 +167,7 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
     setSearching(true)
     let cancelled = false
     setFlatAssets([])
-    api.listAssetsFlat(rootDir)
+    api.listAssetsFlat(isWsRoot ? '' : rootDir)
       .then(list => { if (!cancelled) setFlatAssets(list) })
       .catch(() => { if (!cancelled) setFlatAssets([]) })
     return () => { cancelled = true }
@@ -183,30 +188,26 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
   const handleSelectFile = (fileName: string) => {
     const relToRoot = currentDir ? `${currentDir}/${fileName}` : fileName
     if (rawAbsolutePath) {
-      onSelect(`${rootDir}/${relToRoot}`.replace(/\\/g, '/'))
+      // 返回工作区相对路径
+      onSelect(isWsRoot ? relToRoot.replace(/\\/g, '/') : `${rootDir}/${relToRoot}`.replace(/\\/g, '/'))
     } else {
       onSelect(toEnginePath(relToRoot))
     }
     onClose()
   }
 
-  // 搜索结果选择（路径相对 root）
-  const handleSelectSearch = (relPath: string) => {
+  // 搜索结果选择（路径相对 root，flatAssets 返回的是工作区内完整相对路径如 "成品素材/icons/foo.png"）
+  const handleSelectSearch = (wsRelPath: string) => {
+    // 去掉 rootDir/ 前缀得到相对 root 的路径
+    const prefix = `${rootDir}/`
+    const relToRoot = wsRelPath.startsWith(prefix) ? wsRelPath.slice(prefix.length) : wsRelPath
     if (rawAbsolutePath) {
-      onSelect(`${rootDir}/${relPath}`.replace(/\\/g, '/'))
+      onSelect(wsRelPath.replace(/\\/g, '/'))
     } else {
-      onSelect(toEnginePath(relPath))
+      onSelect(toEnginePath(relToRoot))
     }
     onClose()
   }
-
-  // 图片 URL：HTTP 接口，避免 file:// 被浏览器拦截
-  // 加 refreshKey 防止浏览器缓存（每次打开弹窗刷新）
-  const imgSrc = (fileName: string) =>
-    api.assetFileUrl(`${absCurrent}/${fileName}`.replace(/\\/g, '/')) + `&_v=${refreshKey}`
-
-  const imgSrcSearch = (relPath: string) =>
-    api.assetFileUrl(`${rootDir}/${relPath}`.replace(/\\/g, '/')) + `&_v=${refreshKey}`
 
   return (
     <Modal
@@ -253,7 +254,7 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
                     key={rel}
                     title={rel.split('/').pop() || rel}
                     subtitle={rel}
-                    src={imgSrcSearch(rel)}
+                    relPath={rel}
                     onClick={() => handleSelectSearch(rel)}
                   />
                 ))}
@@ -327,7 +328,7 @@ export default function AssetPickerModal({ open, onClose, onSelect, customRootDi
                     <AssetThumb
                       key={`f-${name}`}
                       title={name}
-                      src={imgSrc(name)}
+                      relPath={`${relCurrent}/${name}`.replace(/\\/g, '/')}
                       onClick={() => handleSelectFile(name)}
                     />
                   ))}
@@ -380,16 +381,24 @@ function DirectoryPanel({
   )
 }
 
-// ===== 素材缩略图子组件 =====
+// ===== 素材缩略图子组件（使用 useAssetImage 异步加载 Blob URL） =====
 function AssetThumb({
-  title, subtitle, src, onClick,
+  title, subtitle, relPath, onClick,
 }: {
   title: string
   subtitle?: string
-  src: string
+  relPath: string
   onClick: () => void
 }) {
+  // relPath 是工作区内相对路径（如 "成品素材/icons/foo.png"）
+  const src = useAssetImage(relPath)
   const [err, setErr] = useState(false)
+
+  // 切换图片时重置错误状态
+  useEffect(() => {
+    setErr(false)
+  }, [relPath])
+
   return (
     <div
       onClick={onClick}
@@ -411,13 +420,15 @@ function AssetThumb({
       }}>
         {err ? (
           <FileImageOutlined style={{ fontSize: 28, color: '#5b6378' }} />
-        ) : (
+        ) : src ? (
           <img
             src={src}
             alt={title}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             onError={() => setErr(true)}
           />
+        ) : (
+          <Spin size="small" />
         )}
       </div>
       <div style={nameStyle}>{title}</div>

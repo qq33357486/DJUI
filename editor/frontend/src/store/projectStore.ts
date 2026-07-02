@@ -1,9 +1,7 @@
 import { create } from 'zustand'
 import { ProjectConfig } from '@/types/layout'
+import { projectContext } from '@/fs/projectContext'
 import * as api from '@/api/client'
-
-const STORAGE_KEY = 'djui.project.config'
-const PAGE_KEY = 'djui.project.lastPage'
 
 export interface AgentsState {
   status: 'ok' | 'outdated' | 'missing' | 'unknown'
@@ -21,17 +19,18 @@ export interface ScriptsState {
 
 interface ProjectState {
   config: ProjectConfig | null
+  handlesReady: boolean  // DirectoryHandle 权限是否已就绪
   lastPageId: string | null
   agents: AgentsState
   scripts: ScriptsState
 
-  loadConfig: () => void
+  initFromHandles: (handles: { star: boolean; ws: boolean }) => void
   setConfig: (config: ProjectConfig) => void
   clearConfig: () => void
   setLastPage: (pageId: string) => void
-  refreshAgents: (workspacePath?: string) => Promise<void>
+  refreshAgents: () => Promise<void>
   setAgents: (s: AgentsState) => void
-  refreshScripts: (workspacePath?: string) => Promise<void>
+  refreshScripts: () => Promise<void>
   setScripts: (s: ScriptsState) => void
 }
 
@@ -49,60 +48,46 @@ const initialScripts: ScriptsState = {
   message: null,
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
+export const useProjectStore = create<ProjectState>((set) => ({
   config: null,
+  handlesReady: false,
   lastPageId: null,
   agents: initialAgents,
   scripts: initialScripts,
 
-  loadConfig: () => {
-    // 先从 localStorage 快速加载（同步）
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      const config = raw ? JSON.parse(raw) : null
-      const lastPageId = localStorage.getItem(PAGE_KEY)
-      set({ config, lastPageId })
-    } catch {
-      set({ config: null, lastPageId: null })
+  initFromHandles: (handles) => {
+    // 从 projectContext 恢复配置
+    const stored = api.getStoredConfig()
+    if (stored) {
+      // 更新目录名（可能是不同目录）
+      stored.starProjectPath = projectContext.starName || stored.starProjectPath
+      stored.workspacePath = projectContext.wsName || stored.workspacePath
+      api.saveStoredConfig(stored)
     }
-
-    // 再从后端加载（权威源），覆盖 localStorage
-    api.getConfig().then((serverConfig) => {
-      if (serverConfig) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(serverConfig))
-        set({ config: serverConfig })
-      }
-    }).catch(() => {})
+    set({ config: stored, handlesReady: handles.star && handles.ws })
   },
 
   setConfig: (config) => {
-    // 同步写入 localStorage 和后端
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
-    set({ config })
-    // 异步同步到后端（不阻塞 UI）
-    api.saveConfig(config).catch(() => {})
+    api.saveStoredConfig(config)
+    set({ config, handlesReady: true })
   },
 
   clearConfig: () => {
-    localStorage.removeItem(STORAGE_KEY)
-    set({ config: null, agents: initialAgents, scripts: initialScripts })
+    api.clearStoredConfig()
+    projectContext.clear()
+    set({ config: null, handlesReady: false, agents: initialAgents, scripts: initialScripts })
   },
 
   setLastPage: (pageId) => {
-    localStorage.setItem(PAGE_KEY, pageId)
+    api.saveLastPageId(pageId)
     set({ lastPageId: pageId })
   },
 
   setAgents: (s) => set({ agents: s }),
 
-  refreshAgents: async (workspacePath?: string) => {
-    const ws = workspacePath ?? get().config?.workspacePath
-    if (!ws) {
-      set({ agents: initialAgents })
-      return
-    }
+  refreshAgents: async () => {
     try {
-      const r = await api.checkAgentsUpdate(ws)
+      const r = await api.checkAgentsUpdate('')
       set({
         agents: {
           status: r.status,
@@ -118,14 +103,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setScripts: (s) => set({ scripts: s }),
 
-  refreshScripts: async (workspacePath?: string) => {
-    const ws = workspacePath ?? get().config?.workspacePath
-    if (!ws) {
-      set({ scripts: initialScripts })
-      return
-    }
+  refreshScripts: async () => {
     try {
-      const r = await api.checkScriptsUpdate(ws)
+      const r = await api.checkScriptsUpdate('')
       set({
         scripts: {
           status: r.status,

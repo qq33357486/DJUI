@@ -4,12 +4,11 @@ import {
   UndoOutlined, RedoOutlined, SaveOutlined,
   FileAddOutlined, CloudUploadOutlined, FolderOpenOutlined,
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
-  InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, AuditOutlined, FontSizeOutlined,
+  InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
   SoundOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
-import ReviewPanel from './ReviewPanel'
 import SoundConfigModal from './SoundConfigModal'
 import * as api from '@/api/client'
 import { useState, useCallback, useEffect, useMemo } from 'react'
@@ -47,8 +46,6 @@ export default function TopBar(props: TopBarProps) {
   const [publishing, setPublishing] = useState(false)
   const [updatingAgents, setUpdatingAgents] = useState(false)
   const [updatingScripts, setUpdatingScripts] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)
-  const [pendingCount, setPendingCount] = useState(0)
   const [globalFontOpen, setGlobalFontOpen] = useState(false)
   const [unifyFontOpen, setUnifyFontOpen] = useState(false)
   const [soundConfigOpen, setSoundConfigOpen] = useState(false)
@@ -68,23 +65,10 @@ export default function TopBar(props: TopBarProps) {
   // 合并徽章：任一过期即显示
   const workspaceOutdated = agentsOutdated || scriptsOutdated
 
-  // 定期检查待审核数量
-  useEffect(() => {
-    if (!config?.workspacePath) return
-    const check = () => {
-      api.getPendingReview(config.workspacePath).then(g => {
-        setPendingCount(Object.values(g).flat().length)
-      }).catch(() => {})
-    }
-    check()
-    const interval = setInterval(check, 10000)
-    return () => clearInterval(interval)
-  }, [config?.workspacePath])
-
-  // 加载字体列表
+  // 加载字体列表（路径参数已忽略）
   useEffect(() => {
     if (config?.starProjectPath) {
-      api.getFonts(config.starProjectPath).then(setFontList)
+      api.getFonts().then(setFontList)
     }
   }, [config?.starProjectPath])
 
@@ -99,7 +83,7 @@ export default function TopBar(props: TopBarProps) {
     await api.savePage(page)
     setPublishing(true)
     try {
-      const result = await api.publishAssets(config.workspacePath, config.starProjectPath)
+      const result = await api.publishAssets()
       if (result.ok) {
         Modal.success({
           title: '发布成功',
@@ -133,7 +117,7 @@ export default function TopBar(props: TopBarProps) {
   // 检查 AGENTS 规范更新
   const handleCheckAgents = useCallback(async () => {
     if (!config?.workspacePath) return
-    await refreshAgents(config.workspacePath)
+    await refreshAgents()
     const s = useProjectStore.getState().agents
     if (s.status === 'ok') {
       message.success(`AGENTS.md 已是最新版本 v${s.latestVersion}`)
@@ -167,10 +151,10 @@ export default function TopBar(props: TopBarProps) {
         if (!config?.workspacePath) return
         setUpdatingAgents(true)
         try {
-          const r = await api.updateAgents(config.workspacePath)
+          const r = await api.updateAgents()
           if (r.ok) {
             message.success(r.message ?? 'AGENTS.md 已更新')
-            await refreshAgents(config.workspacePath)
+            await refreshAgents()
           } else {
             message.error(r.error ?? '更新失败')
           }
@@ -186,7 +170,7 @@ export default function TopBar(props: TopBarProps) {
   // 检查脚本区更新
   const handleCheckScripts = useCallback(async () => {
     if (!config?.workspacePath) return
-    await refreshScripts(config.workspacePath)
+    await refreshScripts()
     const s = useProjectStore.getState().scripts
     if (s.status === 'ok') {
       message.success(`脚本区已是最新版本 v${s.latestVersion}`)
@@ -222,10 +206,10 @@ export default function TopBar(props: TopBarProps) {
         if (!config?.workspacePath) return
         setUpdatingScripts(true)
         try {
-          const r = await api.updateScripts(config.workspacePath)
+          const r = await api.updateScripts()
           if (r.ok) {
             message.success(r.message ?? '脚本区已更新')
-            await refreshScripts(config.workspacePath)
+            await refreshScripts()
           } else {
             message.error(r.error ?? '更新失败')
           }
@@ -242,8 +226,8 @@ export default function TopBar(props: TopBarProps) {
   const handleCheckWorkspace = useCallback(async () => {
     if (!config?.workspacePath) return
     await Promise.all([
-      refreshAgents(config.workspacePath),
-      refreshScripts(config.workspacePath),
+      refreshAgents(),
+      refreshScripts(),
     ])
     const a = useProjectStore.getState().agents
     const s = useProjectStore.getState().scripts
@@ -296,12 +280,11 @@ export default function TopBar(props: TopBarProps) {
       cancelText: '稍后',
       onOk: async () => {
         if (!config?.workspacePath) return
-        const ws = config.workspacePath
         const results: string[] = []
         if (outdated.includes('AGENTS.md')) {
           setUpdatingAgents(true)
           try {
-            const r = await api.updateAgents(ws)
+            const r = await api.updateAgents()
             results.push(r.ok ? `AGENTS.md → v${r.version}` : `AGENTS.md 失败: ${r.error}`)
           } catch (e) { results.push(`AGENTS.md 失败: ${String(e)}`) }
           finally { setUpdatingAgents(false) }
@@ -309,12 +292,12 @@ export default function TopBar(props: TopBarProps) {
         if (outdated.includes('脚本区')) {
           setUpdatingScripts(true)
           try {
-            const r = await api.updateScripts(ws)
+            const r = await api.updateScripts()
             results.push(r.ok ? `脚本区 → v${r.version}（${r.copiedFiles?.length ?? 0} 文件）` : `脚本区 失败: ${r.error}`)
           } catch (e) { results.push(`脚本区 失败: ${String(e)}`) }
           finally { setUpdatingScripts(false) }
         }
-        await Promise.all([refreshAgents(ws), refreshScripts(ws)])
+        await Promise.all([refreshAgents(), refreshScripts()])
         Modal.success({
           title: '工作区更新完成',
           content: (
@@ -419,18 +402,6 @@ export default function TopBar(props: TopBarProps) {
   ]
 
   const publishMenu: MenuProps['items'] = [
-    {
-      key: 'pending-review',
-      label: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          待审核素材
-          {pendingCount > 0 && <Badge count={pendingCount} style={{ backgroundColor: '#faad14' }} size="small" />}
-        </span>
-      ),
-      icon: <AuditOutlined />,
-      onClick: () => setReviewOpen(true),
-    },
-    { type: 'divider' },
     {
       key: 'publish',
       label: '发布到星火工程',
@@ -587,7 +558,6 @@ export default function TopBar(props: TopBarProps) {
         </Space>
       </div>
 
-      <ReviewPanel open={reviewOpen} onClose={() => setReviewOpen(false)} />
       <SoundConfigModal open={soundConfigOpen} onClose={() => setSoundConfigOpen(false)} />
 
       {/* 全局字体设置 */}

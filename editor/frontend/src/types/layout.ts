@@ -193,8 +193,8 @@ export interface UiPage {
 }
 
 export interface ProjectConfig {
-  starProjectPath: string      // 星火工程目录（目标）
-  workspacePath: string        // UI 工作区目录（素材+配置+临时文件）
+  starProjectPath: string      // 星火工程目录名（显示用，来自 DirectoryHandle.name）
+  workspacePath: string        // UI 工作区目录名（显示用，来自 DirectoryHandle.name）
   orientation: 'landscape' | 'portrait'
   designWidth: number
   designHeight: number

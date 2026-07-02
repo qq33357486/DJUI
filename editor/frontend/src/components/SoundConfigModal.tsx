@@ -62,8 +62,8 @@ export default function SoundConfigModal({ open, onClose }: SoundConfigModalProp
     setLoading(true)
     try {
       const [entries, soundConfig] = await Promise.all([
-        api.getGameDataSounds(projectPath),
-        api.getSoundConfig(projectPath),
+        api.getGameDataSounds(),
+        api.getSoundConfig(),
       ])
       setGameDataSounds(entries)
       setSounds(soundConfig.sounds)
@@ -151,7 +151,7 @@ export default function SoundConfigModal({ open, onClose }: SoundConfigModalProp
         return
       }
 
-      const saved = await api.saveSoundConfig(projectPath, {
+      const saved = await api.saveSoundConfig('', {
         version: 2,
         defaultButtonSoundId: defaultSound?.id ?? null,
         sounds: normalizedSounds,

@@ -5,9 +5,6 @@ build
 coverage
 *.tsbuildinfo
 
-editor/backend/djui_config.json
-editor/backend/node_modules
-editor/backend/dist
 editor/frontend/node_modules
 editor/frontend/dist
 

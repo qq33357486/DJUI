@@ -1,16 +1,13 @@
-// DJUI workspace 的 AGENTS.md 模板源（唯一权威定义）
-//
-// 维护规则：
-//   - 修改本模板内容/分类规范时，**必须**把 AGENTS_VERSION 升一档
-//     （小修 patch，新增分类 minor，删除/重命名分类 major）
-//   - workspace 内的 AGENTS.md 顶部会写入对应的版本标记，
-//     编辑器启动时通过比较该标记与本常量判断是否过期，提示用户更新
+// AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
 export const AGENTS_VERSION = '0.3.1'
 
-// workspace AGENTS.md 顶部嵌入的版本标记（HTML 注释，不影响渲染）
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 export function readAgentsVersion(fileContent: string): string | null {
   const m = fileContent.match(
@@ -23,11 +20,6 @@ export function buildVersionTag(version: string = AGENTS_VERSION): string {
   return `${AGENTS_VERSION_TAG_PREFIX} ${version}${AGENTS_VERSION_TAG_SUFFIX}`
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-// 完整 AGENTS.md 模板（带版本头 + 详细成品素材分类规范）
 export function buildAgentsMd(): string {
   const versionTag = buildVersionTag()
   return `${versionTag}

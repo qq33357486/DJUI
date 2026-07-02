@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">DJUI 日常工作流</title>
+  <desc id="desc">展示准备素材、配置页面、发布到星火工程和 Runtime 打开窗口的流程。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155" />
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12" />
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #475569; }
+      .panel { rx: 18; filter: url(#shadow); stroke-width: 2; }
+      .panel-title { font: 700 21px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; }
+      .body { font: 400 15px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #334155; }
+      .small { font: 400 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #64748b; }
+      .arrow { stroke: #334155; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .lane { stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 7 7; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="500" />
+  <text class="title" x="60" y="58">创建好工程后的两条主线</text>
+  <text class="subtitle" x="60" y="88">一边准备可发布素材，一边配置页面和模板，最后发布给 Runtime 使用。</text>
+
+  <path class="lane" d="M80 150 H1120" />
+  <text class="small" x="80" y="137">素材线</text>
+  <path class="lane" d="M80 325 H1120" />
+  <text class="small" x="80" y="312">配置线</text>
+
+  <rect class="panel" x="90" y="170" width="220" height="110" fill="#ffffff" stroke="#a78bfa" />
+  <text class="panel-title" x="120" y="207">AI 生图与切图</text>
+  <text class="body" x="120" y="238">放入 UI 工程</text>
+  <text class="small" x="120" y="263">原始素材 / 临时文件</text>
+
+  <path class="arrow" d="M320 225 L390 225" />
+
+  <rect class="panel" x="405" y="170" width="220" height="110" fill="#ffffff" stroke="#f59e0b" />
+  <text class="panel-title" x="435" y="207">人工审核</text>
+  <text class="body" x="435" y="238">移动到成品素材</text>
+  <text class="small" x="435" y="263">只有这里会发布</text>
+
+  <path class="arrow" d="M635 225 L720 225" />
+
+  <rect class="panel" x="735" y="170" width="220" height="110" fill="#ffffff" stroke="#34d399" />
+  <text class="panel-title" x="765" y="207">发布素材</text>
+  <text class="body" x="765" y="238">复制到游戏工程</text>
+  <text class="small" x="765" y="263">ui/image/djui/</text>
+
+  <rect class="panel" x="90" y="345" width="220" height="110" fill="#ffffff" stroke="#38bdf8" />
+  <text class="panel-title" x="120" y="382">编辑页面</text>
+  <text class="body" x="120" y="413">窗口 / 模板</text>
+  <text class="small" x="120" y="438">控件、布局、外观</text>
+
+  <path class="arrow" d="M320 400 L390 400" />
+
+  <rect class="panel" x="405" y="345" width="220" height="110" fill="#ffffff" stroke="#ef4444" />
+  <text class="panel-title" x="435" y="382">配置反馈</text>
+  <text class="body" x="435" y="413">动效 / 点击音效</text>
+  <text class="small" x="435" y="438">音效引用 GameDataSound</text>
+
+  <path class="arrow" d="M635 400 L720 400" />
+
+  <rect class="panel" x="735" y="345" width="220" height="110" fill="#ffffff" stroke="#10b981" />
+  <text class="panel-title" x="765" y="382">发布页面</text>
+  <text class="body" x="765" y="413">进入 user_files</text>
+  <text class="small" x="765" y="438">djui/pages 与 sounds.json</text>
+
+  <path class="arrow" d="M965 312 C1030 312, 1050 312, 1090 312" />
+
+  <rect class="panel" x="990" y="240" width="155" height="145" fill="#fff7ed" stroke="#fb923c" />
+  <text class="panel-title" x="1018" y="280">运行时</text>
+  <text class="body" x="1018" y="315">Initialize</text>
+  <text class="body" x="1018" y="344">OpenWindow</text>
+  <text class="small" x="1018" y="370">游戏中打开 UI</text>
+</svg>

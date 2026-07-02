@@ -1,0 +1,12 @@
+{
+  "name": "djui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DJUI - StarEngine 2.0 可视化 UI 编辑器",
+  "scripts": {
+    "typecheck": "npm --prefix editor/backend run typecheck && npm --prefix editor/frontend run typecheck",
+    "build": "npm --prefix editor/frontend run build && npm --prefix editor/backend run build",
+    "dev:backend": "npm --prefix editor/backend run dev",
+    "dev:frontend": "npm --prefix editor/frontend run dev"
+  }
+}

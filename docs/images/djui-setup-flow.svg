@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">DJUI 首次配置流程</title>
+  <desc id="desc">首次打开 DJUI 后选择星火工程、UI 工程、设计分辨率，并初始化 Runtime 与工作区的流程。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569" />
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12" />
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #475569; }
+      .step { rx: 18; filter: url(#shadow); stroke-width: 2; }
+      .num { font: 700 24px Arial, sans-serif; fill: #ffffff; }
+      .step-title { font: 700 21px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; }
+      .body { font: 400 15px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #334155; }
+      .small { font: 400 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #64748b; }
+      .arrow { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="430" />
+  <text class="title" x="60" y="58">首次打开 DJUI：先确定工程边界</text>
+  <text class="subtitle" x="60" y="88">选好游戏工程、UI 工作区和设计分辨率后，再初始化 Runtime 与工作区。</text>
+
+  <rect class="step" x="60" y="145" width="240" height="180" fill="#ffffff" stroke="#38bdf8" />
+  <circle cx="95" cy="180" r="22" fill="#0ea5e9" />
+  <text class="num" x="88" y="188">1</text>
+  <text class="step-title" x="130" y="181">星火工程</text>
+  <text class="body" x="88" y="225">选择 StarEngine 2.0</text>
+  <text class="body" x="88" y="252">项目根目录</text>
+  <text class="small" x="88" y="286">Runtime 和页面 JSON</text>
+  <text class="small" x="88" y="308">会写入这里</text>
+
+  <path class="arrow" d="M310 235 L355 235" />
+
+  <rect class="step" x="370" y="145" width="240" height="180" fill="#ffffff" stroke="#a78bfa" />
+  <circle cx="405" cy="180" r="22" fill="#8b5cf6" />
+  <text class="num" x="398" y="188">2</text>
+  <text class="step-title" x="440" y="181">UI 工程</text>
+  <text class="body" x="398" y="225">选择独立工作区</text>
+  <text class="body" x="398" y="252">存放素材与规则</text>
+  <text class="small" x="398" y="286">请自行保存备份</text>
+
+  <path class="arrow" d="M620 235 L665 235" />
+
+  <rect class="step" x="680" y="145" width="240" height="180" fill="#ffffff" stroke="#34d399" />
+  <circle cx="715" cy="180" r="22" fill="#10b981" />
+  <text class="num" x="708" y="188">3</text>
+  <text class="step-title" x="750" y="181">设计分辨率</text>
+  <text class="body" x="708" y="225">选择横屏或竖屏</text>
+  <text class="body" x="708" y="252">确定基准画布尺寸</text>
+  <text class="small" x="708" y="286">新建窗口默认沿用</text>
+
+  <path class="arrow" d="M930 235 L975 235" />
+
+  <rect class="step" x="990" y="145" width="150" height="180" fill="#ffffff" stroke="#fb923c" />
+  <circle cx="1025" cy="180" r="22" fill="#f97316" />
+  <text class="num" x="1018" y="188">4</text>
+  <text class="step-title" x="1060" y="181">初始化</text>
+  <text class="body" x="1018" y="225">Runtime</text>
+  <text class="body" x="1018" y="252">UI 工作区</text>
+  <text class="small" x="1018" y="286">完成后开始编辑</text>
+
+  <rect x="250" y="360" width="700" height="42" rx="14" fill="#eef2ff" stroke="#818cf8" stroke-width="1.5" />
+  <text class="body" x="315" y="386">完成后即可新建页面、准备素材、配置音效，并发布到 StarEngine 工程。</text>
+</svg>

@@ -1,0 +1,44 @@
+/* DJUI 全局样式 */
+
+/* VS Code 风格菜单栏项 */
+.djui-menubar-item {
+  color: #cdd6e4;
+  transition: background 0.1s;
+}
+.djui-menubar-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* AntD Dropdown 菜单快捷键样式 */
+.djui-menubar-item .ant-dropdown-menu-shortcut,
+.ant-dropdown-menu-item .ant-dropdown-menu-shortcut {
+  margin-left: 24px;
+  color: #5b6378;
+  font-size: 11px;
+}
+
+/* 透明滚动条美化 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3142;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4258;
+}
+
+/* 禁止文字选中（编辑器界面） */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}

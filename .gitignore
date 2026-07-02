@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local DJUI state
+editor/backend/djui_config.json
+editor/backend/djui_config.*.json
+!editor/backend/djui_config.example.json
+
+# Logs and runtime dumps
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.seed
+*.stackdump
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+
+# Local scratch areas from early development
+/临时区/
+/代码区/
+/文档区/
+
+# Temporary screenshots from manual debugging
+/editor/screenshots/debug-*.png
+/editor/screenshots/m3-*.png
+/editor/screenshots/v2-*.png
+
+# Python tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated workspace backups
+AGENTS.md.bak
+脚本区.bak/

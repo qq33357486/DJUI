@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.log
+djui_config.json

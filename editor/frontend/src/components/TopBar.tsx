@@ -5,12 +5,13 @@ import {
   FileAddOutlined, CloudUploadOutlined, FolderOpenOutlined,
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
   InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
-  SoundOutlined,
+  SoundOutlined, BellOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import SoundConfigModal from './SoundConfigModal'
 import * as api from '@/api/client'
+import { APP_VERSION } from '@/lib/changelog'
 import { useState, useCallback, useEffect, useMemo } from 'react'
 
 interface TopBarProps {
@@ -438,6 +439,12 @@ export default function TopBar(props: TopBarProps) {
     },
     { type: 'divider' },
     {
+      key: 'whats-new',
+      label: '更新公告',
+      icon: <BellOutlined />,
+      onClick: () => window.dispatchEvent(new CustomEvent('djui:openWhatsNew')),
+    },
+    {
       key: 'about',
       label: '关于 DJUI',
       icon: <InfoCircleOutlined />,
@@ -447,6 +454,7 @@ export default function TopBar(props: TopBarProps) {
           content: (
             <div style={{ fontSize: 13 }}>
               <p>多杰 UI 编辑器 - StarEngine 2.0 可视化 UI 编辑工具</p>
+              <p style={{ color: '#888' }}>编辑器版本: v{APP_VERSION}</p>
               <p style={{ color: '#888' }}>协议版本: v4 JSON</p>
               <p style={{ color: '#888' }}>AGENTS 规范版本: v{agents.latestVersion ?? '未知'}</p>
               <p style={{ color: '#888' }}>脚本区版本: v{scripts.latestVersion ?? '未知'}</p>

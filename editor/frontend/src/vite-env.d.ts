@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+// package.json 导入（读取版本号）
+declare module '*.json' {
+  const value: any
+  export default value
+}
+
 // Vite ?raw 导入声明
 declare module '*?raw' {
   const content: string

@@ -98,7 +98,7 @@ function buildControlTree(
     ),
     children: node.starType === 'TemplateInstance'
       ? []
-      : node.children.map(c => buildControlTree(c, selectedIds, onToggleLock, onToggleHidden, renamingId, renamingValue, onRenameStart, onRenameChange, onRenameConfirm, onRenameCancel, onCtxRightClick)),
+      : (node.children ?? []).map(c => buildControlTree(c, selectedIds, onToggleLock, onToggleHidden, renamingId, renamingValue, onRenameStart, onRenameChange, onRenameConfirm, onRenameCancel, onCtxRightClick)),
   }
 }
 

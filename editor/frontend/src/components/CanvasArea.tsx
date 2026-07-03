@@ -454,7 +454,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
           />
         )
       })()}
-      {node.children.map(child => (
+      {(node.children ?? []).map(child => (
         <TemplatePreviewShape
           key={child.id}
           node={child}
@@ -531,7 +531,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   if (node.starType === 'TemplateInstance') {
     const templatePage = node.templateRef ? allPages[node.templateRef] : null
     const screenOrigin = { x: displayX, y: displayY }
-    const previewChildren = templatePage?.root.children.map(child => cloneNodeWithOverrides(child, node.templateOverrides)) ?? []
+    const previewChildren = (templatePage?.root.children ?? []).map(child => cloneNodeWithOverrides(child, node.templateOverrides))
     const templateLabel = node.templateRef ? `模板: ${node.templateRef}` : '未选择模板'
 
     return (
@@ -781,7 +781,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         />
       )}
       {/* 子节点 */}
-      {node.children.map(child => (
+      {(node.children ?? []).map(child => (
           <NodeShape
             key={child.id}
             node={child}

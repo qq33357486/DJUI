@@ -5,10 +5,12 @@ import LeftPanel from './components/LeftPanel'
 import CanvasArea from './components/CanvasArea'
 import RightPanel from './components/RightPanel'
 import ConfigModal from './components/ConfigModal'
+import WhatsNewModal from './components/WhatsNewModal'
 import { useProjectStore } from './store/projectStore'
 import { setDefaultButtonSoundId, useEditorStore } from './store/editorStore'
 import { projectContext } from './fs/projectContext'
 import * as api from './api/client'
+import { APP_VERSION } from './lib/changelog'
 import { UiPage } from './types/layout'
 
 const { Header, Sider, Content } = Layout
@@ -21,6 +23,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [configOpen, setConfigOpen] = useState(false)
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const [pages, setPages] = useState<string[]>([])
   const initialized = useRef(false)
 
@@ -54,6 +57,19 @@ export default function App() {
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 版本检测：首次打开或版本升级时自动弹出更新公告
+  useEffect(() => {
+    if (loading) return
+    const lastSeen = localStorage.getItem('djui.lastSeenVersion')
+    if (lastSeen !== APP_VERSION) {
+      setWhatsNewOpen(true)
+    }
+    // 监听 TopBar 菜单手动打开
+    const openWhatsNew = () => setWhatsNewOpen(true)
+    window.addEventListener('djui:openWhatsNew', openWhatsNew)
+    return () => window.removeEventListener('djui:openWhatsNew', openWhatsNew)
+  }, [loading])
 
   // 配置就绪后进入主流程
   useEffect(() => {
@@ -343,6 +359,7 @@ export default function App() {
         onClose={() => setConfigOpen(false)}
         onSave={handleConfigSaved}
       />
+      <WhatsNewModal open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
     </Layout>
   )
 }

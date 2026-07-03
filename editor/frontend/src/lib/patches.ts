@@ -1,6 +1,7 @@
 // 补丁/迁移逻辑（从后端 patches.ts 移植，改造为异步 DirectoryHandle 操作）
 
 import * as fs from '../fs/fsAccess'
+import { normalizePage, normalizeDetectChanges } from './normalize'
 
 export const SOUND_CONFIG_VERSION = 2
 export const PAGE_SCHEMA_VERSION = 5
@@ -230,14 +231,23 @@ export function patchPageData(page: unknown, defaultButtonSoundId: string | null
     missingButtonSounds: 0,
   }
 
-  if (!isRecord(page)) return result
+  // 数据边界关卡：先归一化结构，确保 root/children 安全
+  const normalized = normalizePage(page)
+  if (!normalized) return result
 
-  if (page.version !== PAGE_SCHEMA_VERSION) {
-    page.version = PAGE_SCHEMA_VERSION
+  // 把归一化后的数据写回原对象（保持引用语义）
+  const pageObj = page as Record<string, unknown>
+  if (isRecord(page)) {
+    Object.keys(pageObj).forEach(k => delete pageObj[k])
+    Object.assign(pageObj, normalized)
+  }
+
+  if (pageObj.version !== PAGE_SCHEMA_VERSION) {
+    pageObj.version = PAGE_SCHEMA_VERSION
     result.changed = true
   }
 
-  patchNode(page.root, defaultButtonSoundId, result)
+  patchNode(pageObj.root, defaultButtonSoundId, result)
   return result
 }
 
@@ -320,6 +330,7 @@ export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle
   const jsonFiles = await fs.walkJsonFiles(pagesDir)
   const migratedAnchorFiles: string[] = []
   const patchedButtonFiles: string[] = []
+  const normalizedFiles: string[] = []
   let totalMissingButtonSounds = 0
 
   for (const file of jsonFiles) {
@@ -329,15 +340,27 @@ export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle
       continue
     }
 
+    // 检测是否需要结构归一化修复
+    const needsNormalize = normalizeDetectChanges(page)
+
     const pagePatch = patchPageData(page, soundConfig.defaultButtonSoundId)
     totalMissingButtonSounds += pagePatch.missingButtonSounds
 
-    if (pagePatch.changed) {
+    if (pagePatch.changed || needsNormalize) {
       await fs.writeFileJson(pagesDir, file, page)
       result.changed = true
+      if (needsNormalize) normalizedFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
       if (pagePatch.migratedAnchors > 0) migratedAnchorFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
       if (pagePatch.patchedButtonSounds > 0) patchedButtonFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
     }
+  }
+
+  if (normalizedFiles.length > 0) {
+    result.patches.push({
+      id: 'page-structure-normalize',
+      changedFiles: normalizedFiles,
+      message: `已修复 ${normalizedFiles.length} 个页面的节点结构（补全缺失字段）`,
+    })
   }
 
   if (migratedAnchorFiles.length > 0) {

@@ -17,6 +17,7 @@ import {
   getDefaultSoundConfig,
   SOUND_CONFIG_VERSION,
 } from '@/lib/patches'
+import { normalizePage, normalizeDetectChanges } from '@/lib/normalize'
 import { AGENTS_VERSION, readAgentsVersion, buildAgentsMd } from '@/lib/agentsTemplate'
 import { EFFECT_PRESETS } from '@/lib/effectsPresets'
 import {
@@ -181,7 +182,19 @@ export async function listPages(): Promise<string[]> {
 export async function loadPage(pageId: string): Promise<UiPage | null> {
   const star = projectContext.star
   if (!star) return null
-  return await fs.readFileJson<UiPage>(star, `${PAGES_DIR}/${pageId}.json`)
+  const raw = await fs.readFileJson<unknown>(star, `${PAGES_DIR}/${pageId}.json`)
+  // 数据边界关卡：normalizePage 确保返回的结构 100% 符合 UiPage 接口
+  const page = normalizePage(raw)
+  if (page && normalizeDetectChanges(raw)) {
+    // 静默持久化修复（和 patches 系统一致的行为）
+    try {
+      const ws = projectContext.ws
+      const sliceMeta = ws ? await getSliceMetaData() : {}
+      const soundConfig = await readSoundConfig(star)
+      await patchAndSavePage(star, page, sliceMeta, soundConfig.defaultButtonSoundId)
+    } catch { /* 持久化失败不影响内存加载 */ }
+  }
+  return page
 }
 
 export async function savePage(page: UiPage): Promise<void> {

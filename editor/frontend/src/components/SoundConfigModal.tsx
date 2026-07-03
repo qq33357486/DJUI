@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal, Space, Button, Select, Input, Empty, Spin, message, Tag, Tooltip } from 'antd'
+import { Modal, Space, Button, Select, Input, Empty, Spin, message, Tag, Tooltip, Alert } from 'antd'
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { COMPONENT_LIBRARY } from '@/types/layout'
 import { useProjectStore } from '@/store/projectStore'
@@ -219,7 +219,14 @@ export default function SoundConfigModal({ open, onClose }: SoundConfigModalProp
             />
           </div>
 
-          {gameDataSounds.length === 0 && <Empty description="未找到 GameDataSound 数编" />}
+          {gameDataSounds.length === 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message="未找到 GameDataSound 数编"
+              description="请先在星火数编里新增一个音频数据，再回 DJUI 重新扫描；如果项目暂时不需要按钮音效，也可以不配置。"
+            />
+          )}
 
           <Space direction="vertical" style={{ width: '100%' }} size={8}>
             {sounds.length > 0 && (

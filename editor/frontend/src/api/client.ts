@@ -7,6 +7,7 @@ import * as fs from '@/fs/fsAccess'
 import {
   type DjuiSoundConfig,
   type DjuiSoundItem,
+  type SoundSetupStatus,
   type PatchRunResult as ApplyPatchesResult,
   type PatchReport,
   sanitizeSoundConfig,
@@ -131,7 +132,7 @@ export interface BrowseResult {
 }
 
 // 类型重导出（保持组件导入不变）
-export type { DjuiSoundConfig, DjuiSoundItem, ApplyPatchesResult, PatchReport }
+export type { DjuiSoundConfig, DjuiSoundItem, SoundSetupStatus, ApplyPatchesResult, PatchReport }
 
 export interface SliceEdges { left: number; top: number; right: number; bottom: number }
 export type SliceMeta = Record<string, SliceEdges>
@@ -334,7 +335,21 @@ export async function saveSoundConfig(_projectPath: string = '', config: unknown
 
 export async function applyPatches(_projectPath: string): Promise<ApplyPatchesResult> {
   const star = projectContext.star
-  if (!star) return { ok: false, changed: false, warnings: ['未选择星火工程目录'], blockers: [], patches: [] }
+  if (!star) {
+    return {
+      ok: false,
+      changed: false,
+      warnings: ['未选择星火工程目录'],
+      blockers: [],
+      patches: [],
+      soundSetup: {
+        status: 'missing-config',
+        soundCount: 0,
+        defaultButtonSoundId: null,
+        missingButtonSounds: 0,
+      },
+    }
+  }
 
   const result = await applyProjectPatches(star)
   return {
@@ -343,6 +358,7 @@ export async function applyPatches(_projectPath: string): Promise<ApplyPatchesRe
     warnings: result.warnings,
     blockers: result.blockers,
     patches: result.patches,
+    soundSetup: result.soundSetup,
   }
 }
 

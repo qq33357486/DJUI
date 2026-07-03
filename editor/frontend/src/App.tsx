@@ -16,6 +16,32 @@ import { UiPage } from './types/layout'
 const { Header, Sider, Content } = Layout
 const DEFAULT_TEMPLATE_WIDTH = 200
 const DEFAULT_TEMPLATE_HEIGHT = 100
+const SOUND_SETUP_NOTICE_KEY_PREFIX = 'djui.soundSetupNotice.v1.'
+
+function soundSetupNeedsAttention(soundSetup: api.SoundSetupStatus | null) {
+  return !!soundSetup && soundSetup.status !== 'ok'
+}
+
+function getSoundSetupNoticeKey() {
+  const projectName = projectContext.starName || 'unknown'
+  return `${SOUND_SETUP_NOTICE_KEY_PREFIX}${encodeURIComponent(projectName)}`
+}
+
+function hasSeenSoundSetupNotice() {
+  try {
+    return localStorage.getItem(getSoundSetupNoticeKey()) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markSoundSetupNoticeSeen() {
+  try {
+    localStorage.setItem(getSoundSetupNoticeKey(), '1')
+  } catch {
+    // localStorage 不可用时只影响是否重复提示，不影响编辑流程。
+  }
+}
 
 export default function App() {
   const { config, handlesReady, setLastPage, lastPageId } = useProjectStore()
@@ -24,6 +50,7 @@ export default function App() {
   const [configOpen, setConfigOpen] = useState(false)
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
   const initialized = useRef(false)
 
@@ -90,6 +117,7 @@ export default function App() {
   useEffect(() => {
     if (!handlesReady) {
       setDefaultButtonSoundId(null)
+      setSoundSetup(null)
       return
     }
 
@@ -119,6 +147,7 @@ export default function App() {
 
     const patchResult = await api.applyPatches('')
     const soundConfig = await api.getSoundConfig()
+    setSoundSetup(patchResult.soundSetup)
     setDefaultButtonSoundId(soundConfig.defaultButtonSoundId)
 
     if (patchResult.changed) {
@@ -129,7 +158,7 @@ export default function App() {
 
     if (patchResult.blockers.length > 0) {
       Modal.warning({
-        title: '需要配置按钮默认音效',
+        title: 'DJUI 数据需要处理',
         content: (
           <div>
             {patchResult.blockers.map((item: string, index: number) => (
@@ -137,12 +166,11 @@ export default function App() {
             ))}
           </div>
         ),
-        okText: '打开声音配置',
-        onOk: openSoundConfig,
+        okText: '知道了',
       })
     } else if (patchResult.warnings.length > 0) {
       Modal.info({
-        title: '声音配置提醒',
+        title: 'DJUI 数据提醒',
         content: (
           <div>
             {patchResult.warnings.map((item: string, index: number) => (
@@ -150,7 +178,21 @@ export default function App() {
             ))}
           </div>
         ),
-        okText: '打开声音配置',
+        okText: '知道了',
+      })
+    } else if (soundSetupNeedsAttention(patchResult.soundSetup) && !hasSeenSoundSetupNotice()) {
+      markSoundSetupNoticeSeen()
+      Modal.confirm({
+        title: '建议配置按钮默认音效',
+        content: (
+          <div style={{ fontSize: 13 }}>
+            <p>配置默认按钮音效后，后续新建 Button 会自动带上点击音效，已有缺失音效的 Button 也会在刷新时自动补齐。</p>
+            <p>需要先在星火的数编里新增一个 <code>GameDataSound</code> 音频数据；具体绑定哪个音效由项目自行决定。</p>
+            <p style={{ color: '#8d96aa' }}>也可以暂不配置。DJUI 之后只会在顶部栏保留提醒，不再弹窗打断刷新和编辑。</p>
+          </div>
+        ),
+        okText: '去配置',
+        cancelText: '暂不配置',
         onOk: openSoundConfig,
       })
     }
@@ -308,6 +350,7 @@ export default function App() {
     <Layout style={{ height: '100vh' }}>
       <Header style={{ padding: 0, height: 'auto', lineHeight: 'normal' }}>
         <TopBar
+          soundSetup={soundSetup}
           onOpenConfig={() => { setConfigMode('edit'); setConfigOpen(true) }}
           onNewProject={() => {
             useProjectStore.getState().clearConfig()

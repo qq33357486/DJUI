@@ -15,6 +15,7 @@ import { APP_VERSION } from '@/lib/changelog'
 import { useState, useCallback, useEffect, useMemo } from 'react'
 
 interface TopBarProps {
+  soundSetup: api.SoundSetupStatus | null
   onOpenConfig: () => void
   onNewProject: () => void   // 新建工程（清配置重开）
   onOpenProject: () => void  // 打开工程（选目录）
@@ -41,7 +42,7 @@ function menuLabel(text: string, shortcut?: string) {
 }
 
 export default function TopBar(props: TopBarProps) {
-  const { onOpenConfig, onNewProject, onOpenProject } = props
+  const { soundSetup, onOpenConfig, onNewProject, onOpenProject } = props
   const { page, undo, redo, undoStack, redoStack } = useEditorStore()
   const { config, agents, scripts, refreshAgents, refreshScripts } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
@@ -65,6 +66,10 @@ export default function TopBar(props: TopBarProps) {
   const scriptsAvailable = scripts.status !== 'unavailable' && scripts.status !== 'unknown'
   // 合并徽章：任一过期即显示
   const workspaceOutdated = agentsOutdated || scriptsOutdated
+  const soundSetupNeedsAttention = !!soundSetup && soundSetup.status !== 'ok'
+  const soundSetupTooltip = soundSetup?.status === 'missing-default'
+    ? '未选择按钮默认音效；配置后后续创建 Button 会自动带点击音效。'
+    : '未配置按钮默认音效；先在星火数编新增 GameDataSound，再到 DJUI 声音配置选择默认音效。配置后后续创建 Button 会自动带点击音效。'
 
   // 加载字体列表（路径参数已忽略）
   useEffect(() => {
@@ -543,6 +548,18 @@ export default function TopBar(props: TopBarProps) {
                     [agentsOutdated ? 'AGENTS.md' : null, scriptsOutdated ? '脚本区' : null].filter(Boolean) as string[]
                   )}
                   loading={updatingAgents || updatingScripts}
+                  type="text"
+                  size="small"
+                />
+              </Badge>
+            </Tooltip>
+          )}
+          {soundSetupNeedsAttention && (
+            <Tooltip title={soundSetupTooltip}>
+              <Badge dot offset={[-2, 2]}>
+                <Button
+                  icon={<SoundOutlined style={{ color: '#ff8c42' }} />}
+                  onClick={() => setSoundConfigOpen(true)}
                   type="text"
                   size="small"
                 />

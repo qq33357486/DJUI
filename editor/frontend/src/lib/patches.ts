@@ -29,12 +29,22 @@ export interface PatchReport {
   message: string
 }
 
+export type SoundSetupStatusKind = 'ok' | 'missing-config' | 'no-sounds' | 'missing-default'
+
+export interface SoundSetupStatus {
+  status: SoundSetupStatusKind
+  soundCount: number
+  defaultButtonSoundId: string | null
+  missingButtonSounds: number
+}
+
 export interface PatchRunResult {
   ok: boolean
   changed: boolean
   warnings: string[]
   blockers: string[]
   patches: PatchReport[]
+  soundSetup: SoundSetupStatus
 }
 
 export interface PagePatchResult {
@@ -54,6 +64,28 @@ function normalizeSlashes(value: string): string {
 
 function jsonEquals(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function buildSoundSetupStatus(
+  hasSoundConfig: boolean,
+  config: DjuiSoundConfig,
+  missingButtonSounds: number
+): SoundSetupStatus {
+  let status: SoundSetupStatusKind = 'ok'
+  if (!hasSoundConfig) {
+    status = 'missing-config'
+  } else if (config.sounds.length === 0) {
+    status = 'no-sounds'
+  } else if (!config.defaultButtonSoundId) {
+    status = 'missing-default'
+  }
+
+  return {
+    status,
+    soundCount: config.sounds.length,
+    defaultButtonSoundId: config.defaultButtonSoundId,
+    missingButtonSounds,
+  }
 }
 
 // 页面目录：ui/djui/pages
@@ -296,13 +328,14 @@ export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle
     warnings: [],
     blockers: [],
     patches: [],
+    soundSetup: buildSoundSetupStatus(false, getDefaultSoundConfig(), 0),
   }
 
   // 1. 声音配置
   let soundConfig: DjuiSoundConfig
   const rawSound = await fs.readFileJson<unknown>(projectRoot, SOUNDS_FILE)
+  const hasSoundConfig = rawSound !== null
   if (rawSound === null) {
-    result.warnings.push('当前工程没有声音配置，请在"声音配置"中添加音效并选择按钮默认音效。')
     soundConfig = getDefaultSoundConfig()
   } else {
     const config = sanitizeSoundConfig(rawSound)
@@ -315,13 +348,9 @@ export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle
         message: `声音配置已升级到 v${SOUND_CONFIG_VERSION}`,
       })
     }
-    if (config.sounds.length === 0) {
-      result.warnings.push('当前工程没有任何 DJUI 音效配置，Button 暂时不会自动补齐点击音效。')
-    } else if (!config.defaultButtonSoundId) {
-      result.blockers.push('已配置音效，但尚未选择按钮默认音效。请打开"声音配置"并选择一个适用于 Button 的默认音效。')
-    }
     soundConfig = config
   }
+  result.soundSetup = buildSoundSetupStatus(hasSoundConfig, soundConfig, 0)
 
   // 2. 页面补丁
   const pagesDir = await fs.getDirHandle(projectRoot, PAGES_DIR, false)
@@ -379,16 +408,7 @@ export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle
     })
   }
 
-  if (totalMissingButtonSounds > 0 && !soundConfig.defaultButtonSoundId) {
-    const message = soundConfig.sounds.length > 0
-      ? `还有 ${totalMissingButtonSounds} 个 Button 缺少点击音效；选择按钮默认音效后会自动补齐。`
-      : `还有 ${totalMissingButtonSounds} 个 Button 缺少点击音效；请先添加声音配置。`
-    if (soundConfig.sounds.length > 0) {
-      result.blockers.push(message)
-    } else {
-      result.warnings.push(message)
-    }
-  }
+  result.soundSetup = buildSoundSetupStatus(hasSoundConfig, soundConfig, totalMissingButtonSounds)
 
   return result
 }

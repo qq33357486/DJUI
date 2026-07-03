@@ -359,7 +359,6 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                   </div>
                 )}
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
-                <ScrubField label="整体透明度" value={Math.round((t.opacity ?? 1) * 100)} onChange={v => updateNodeField(node.id, 'transform.opacity', v / 100)} step={1} min={0} max={100} suffix="%" />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
                 <PivotEditor node={node} updateNodeField={updateNodeField} />
               </Space>
@@ -425,15 +424,9 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                     onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
                   />
                 </FieldRow>
-                {app.image ? (
-                  <ScrubField label="图片透明度" value={Math.round((t.opacity ?? 1) * 100)} onChange={v => updateNodeField(node.id, 'transform.opacity', v / 100)} step={1} min={0} max={100} suffix="%" />
-                ) : (
-                  <AlphaField
-                    label="背景透明度"
-                    value={app.background || '#00000000'}
-                    onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
-                  />
-                )}
+                <FieldRow label="透明度">
+                  <OpacitySlider value={(t.opacity ?? 1)} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} />
+                </FieldRow>
                 <ScrubField label="圆角" value={app.cornerRadius ?? 0} onChange={v => updateNodeField(node.id, 'appearance.cornerRadius', v)} min={0} />
                 <FieldRow label="裁剪">
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
@@ -479,11 +472,9 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                     onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
                   />
                 </FieldRow>
-                <AlphaField
-                  label="文字透明度"
-                  value={txt.textColor || '#FFFFFF'}
-                  onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
-                />
+                <FieldRow label="透明度">
+                  <AlphaSlider value={txt.textColor || '#FFFFFF'} onChange={hex => updateNodeField(node.id, 'text.textColor', hex)} />
+                </FieldRow>
                 <FieldRow label="粗体">
                   <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
                 </FieldRow>
@@ -1389,43 +1380,49 @@ function PaletteColorPicker({ value, onChange }: {
   )
 }
 
-// === 独立透明度滑块（PS 风格 0-100%）===
-function AlphaField({ label, value, onChange }: {
-  label?: string
+// === 控件整体透明度滑块（0-1 float，绑定 transform.opacity）===
+function OpacitySlider({ value, onChange }: {
+  value: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <Slider
+        min={0} max={1} step={0.01}
+        value={value}
+        onChange={onChange}
+        style={{ flex: 1, margin: 0 }}
+        tooltip={{ formatter: v => `${Math.round((v ?? 0) * 100)}%` }}
+      />
+      <span style={{ fontSize: 11, color: '#9aa3b4', width: 36, textAlign: 'right', flexShrink: 0 }}>
+        {Math.round(value * 100)}%
+      </span>
+    </div>
+  )
+}
+
+// === 颜色 alpha 透明度滑块（绑定 hex 的 alpha 通道）===
+function AlphaSlider({ value, onChange }: {
   value: string
   onChange: (hex: string) => void
 }) {
-  const parsed = parseColorValue(value)
-  const alpha = parsed.a
-
-  const handleAlphaChange = (a: number) => {
+  const alpha = parseColorValue(value).a
+  const handleChange = (a: number) => {
     onChange(formatRgbaHex({ ...parseColorValue(value), a: clampAlpha(a) }))
   }
-
   return (
-    <FieldRow label={label ?? '透明度'}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Slider
-          min={0}
-          max={1}
-          step={0.01}
-          value={alpha}
-          onChange={handleAlphaChange}
-          style={{ flex: 1, margin: 0 }}
-          tooltip={{ formatter: v => `${Math.round((v ?? 0) * 100)}%` }}
-        />
-        <InputNumber
-          size="small"
-          min={0}
-          max={100}
-          value={Math.round(alpha * 100)}
-          onChange={v => handleAlphaChange((v ?? 0) / 100)}
-          formatter={v => `${v}%`}
-          parser={v => v?.replace('%', '') as unknown as number}
-          style={{ width: 64 }}
-        />
-      </div>
-    </FieldRow>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <Slider
+        min={0} max={1} step={0.01}
+        value={alpha}
+        onChange={handleChange}
+        style={{ flex: 1, margin: 0 }}
+        tooltip={{ formatter: v => `${Math.round((v ?? 0) * 100)}%` }}
+      />
+      <span style={{ fontSize: 11, color: '#9aa3b4', width: 36, textAlign: 'right', flexShrink: 0 }}>
+        {Math.round(alpha * 100)}%
+      </span>
+    </div>
   )
 }
 

@@ -21,7 +21,7 @@ import trimCompress from '../../../../scripts/trim_compress.py?raw'
 import scriptsReadme from '../../../../scripts/README.md?raw'
 import scriptsVersion from '../../../../scripts/version.txt?raw'
 
-export const RUNTIME_VERSION = '0.3.0'
+export const RUNTIME_VERSION = '0.3.1'
 
 export interface BundledRuntimeFile {
   name: string

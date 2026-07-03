@@ -293,6 +293,12 @@ public class DjuiAppearanceJson
     [JsonPropertyName("background")]
     public string? Background { get; set; }
 
+    [JsonPropertyName("borderThickness")]
+    public float? BorderThickness { get; set; }
+
+    [JsonPropertyName("borderColor")]
+    public string? BorderColor { get; set; }
+
     [JsonPropertyName("cornerRadius")]
     public float? CornerRadius { get; set; }
 
@@ -388,6 +394,12 @@ public class DjuiTextJson
 
     [JsonPropertyName("textColor")]
     public string? TextColor { get; set; }
+
+    [JsonPropertyName("strokeSize")]
+    public float? StrokeSize { get; set; }
+
+    [JsonPropertyName("strokeColor")]
+    public string? StrokeColor { get; set; }
 
     [JsonPropertyName("bold")]
     public bool? Bold { get; set; }

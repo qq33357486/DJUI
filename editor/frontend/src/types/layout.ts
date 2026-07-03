@@ -30,6 +30,8 @@ export interface DjuiTransform {
 export interface DjuiAppearance {
   image?: string | null
   background?: string | null
+  borderThickness?: number | null
+  borderColor?: string | null
   imageMask?: string | null
   imageFlipX?: boolean
   imageFlipY?: boolean
@@ -78,6 +80,8 @@ export interface DjuiText {
   text?: string | null
   fontSize?: number | null
   textColor?: string | null
+  strokeSize?: number | null
+  strokeColor?: string | null
   bold?: boolean | null
   font?: string | null
   textWrap?: boolean | null

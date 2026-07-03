@@ -338,7 +338,19 @@ public class DjuiUiLoader
             child.Parent = ctrl;
         }
 
-        return ctrl;
+        return ApplyBorderWrapper(ctrl, def.Appearance);
+    }
+
+    private static Control ApplyBorderWrapper(Control ctrl, DjuiAppearanceJson? app)
+    {
+        if (app?.BorderThickness == null || app.BorderThickness.Value <= 0f)
+            return ctrl;
+
+        var thickness = Math.Max(0f, app.BorderThickness.Value);
+        if (TryParseColor(app.BorderColor, out var borderColor))
+            return ctrl.Border(thickness, borderColor);
+
+        return ctrl.Border(thickness);
     }
 
     private static void ApplyEffects(Control ctrl, DjuiNodeJson def)
@@ -485,6 +497,14 @@ public class DjuiUiLoader
                 node.Appearance ??= new DjuiAppearanceJson();
                 node.Appearance.Background = ReadString(value);
                 break;
+            case "appearance.borderThickness":
+                node.Appearance ??= new DjuiAppearanceJson();
+                node.Appearance.BorderThickness = ReadFloat(value);
+                break;
+            case "appearance.borderColor":
+                node.Appearance ??= new DjuiAppearanceJson();
+                node.Appearance.BorderColor = ReadString(value);
+                break;
             case "text.text":
                 node.Text ??= new DjuiTextJson();
                 node.Text.Text = ReadString(value);
@@ -496,6 +516,14 @@ public class DjuiUiLoader
             case "text.textColor":
                 node.Text ??= new DjuiTextJson();
                 node.Text.TextColor = ReadString(value);
+                break;
+            case "text.strokeSize":
+                node.Text ??= new DjuiTextJson();
+                node.Text.StrokeSize = ReadFloat(value);
+                break;
+            case "text.strokeColor":
+                node.Text ??= new DjuiTextJson();
+                node.Text.StrokeColor = ReadString(value);
                 break;
             case "text.bold":
                 node.Text ??= new DjuiTextJson();
@@ -709,6 +737,8 @@ public class DjuiUiLoader
         if (!string.IsNullOrEmpty(font)) label.Font = font;
         if (text.FontSize.HasValue) label.FontSize = text.FontSize.Value;
         if (TryParseColor(text.TextColor, out var color)) label.TextColor = color;
+        if (text.StrokeSize.HasValue) label.StrokeSize = Math.Max(0f, text.StrokeSize.Value);
+        if (TryParseColor(text.StrokeColor, out var strokeColor)) label.StrokeColor = strokeColor;
         if (text.Bold.HasValue) label.Bold = text.Bold.Value;
         if (text.TextWrap.HasValue) label.TextWrap = text.TextWrap.Value;
         if (!string.IsNullOrEmpty(text.TextOverflow))

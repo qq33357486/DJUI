@@ -13,7 +13,7 @@ StarEngine 工程/src/DjuiRuntime/
 1. 如果未安装 Runtime，点击「初始化」。
 2. 如果版本过期，点击「升级」。
 
-Runtime 版本号由 `editor/backend/src/routes/project.ts` 中的 `RUNTIME_VERSION` 管理。改动 `runtime/*.cs` 的兼容行为时，应同步提升版本号。
+Runtime 版本号由 `editor/frontend/src/lib/bundledAssets.ts` 中的 `RUNTIME_VERSION` 管理。改动 `runtime/*.cs` 的兼容行为时，应同步提升版本号。
 
 ## 发布后的文件位置
 

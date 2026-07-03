@@ -1,4 +1,4 @@
-import { Collapse, Empty, Input, InputNumber, Select, Switch, Button, Space, ColorPicker, Tooltip, Slider } from 'antd'
+import { Collapse, Empty, Input, InputNumber, Select, Switch, Button, Space, ColorPicker, Tooltip, Slider, message } from 'antd'
 import { DeleteOutlined, ColumnHeightOutlined, PictureOutlined } from '@ant-design/icons'
 import { useEditorStore, findNode } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
@@ -255,6 +255,10 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
     }))
   const isButton = node.starType === 'Button'
   const clickSoundValue = node.djui?.clickSoundId ?? (isButton ? soundConfig.defaultButtonSoundId ?? undefined : undefined)
+  const canUseBorder = node.starType !== 'TemplateInstance'
+  const canUseTextStroke = node.starType === 'Label' || node.starType === 'Button'
+  const borderThickness = typeof app.borderThickness === 'number' ? Math.max(0, app.borderThickness) : 0
+  const textStrokeSize = typeof txt.strokeSize === 'number' ? Math.max(0, txt.strokeSize) : 0
 
   return (
     <div style={{ padding: '4px 8px 16px' }}>
@@ -427,6 +431,24 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                 <FieldRow label="透明度">
                   <OpacitySlider value={(t.opacity ?? 1)} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} />
                 </FieldRow>
+                {canUseBorder && (
+                  <>
+                    <ScrubField label="边框" value={borderThickness} onChange={v => updateNodeField(node.id, 'appearance.borderThickness', v)} min={0} />
+                    {borderThickness > 0 && (
+                      <>
+                        <FieldRow label="边框色">
+                          <PaletteColorPicker
+                            value={app.borderColor || '#FFFFFFFF'}
+                            onChange={hex => updateNodeField(node.id, 'appearance.borderColor', hex)}
+                          />
+                        </FieldRow>
+                        <FieldRow label="边框透明">
+                          <AlphaSlider value={app.borderColor || '#FFFFFFFF'} onChange={hex => updateNodeField(node.id, 'appearance.borderColor', hex)} />
+                        </FieldRow>
+                      </>
+                    )}
+                  </>
+                )}
                 <ScrubField label="圆角" value={app.cornerRadius ?? 0} onChange={v => updateNodeField(node.id, 'appearance.cornerRadius', v)} min={0} />
                 <FieldRow label="裁剪">
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
@@ -475,6 +497,24 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                 <FieldRow label="透明度">
                   <AlphaSlider value={txt.textColor || '#FFFFFF'} onChange={hex => updateNodeField(node.id, 'text.textColor', hex)} />
                 </FieldRow>
+                {canUseTextStroke && (
+                  <>
+                    <ScrubField label="描边" value={textStrokeSize} onChange={v => updateNodeField(node.id, 'text.strokeSize', v)} min={0} />
+                    {textStrokeSize > 0 && (
+                      <>
+                        <FieldRow label="描边色">
+                          <PaletteColorPicker
+                            value={txt.strokeColor || '#000000FF'}
+                            onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)}
+                          />
+                        </FieldRow>
+                        <FieldRow label="描边透明">
+                          <AlphaSlider value={txt.strokeColor || '#000000FF'} onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)} />
+                        </FieldRow>
+                      </>
+                    )}
+                  </>
+                )}
                 <FieldRow label="粗体">
                   <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
                 </FieldRow>
@@ -1365,6 +1405,21 @@ function PaletteColorPicker({ value, onChange }: {
 
   const currentAlpha = parsedValue.a
 
+  // 屏幕取色管（EyeDropper API）：从屏幕任意位置拾取颜色
+  const handlePickFromScreen = async () => {
+    const EyeDropperCtor = window.EyeDropper
+    if (!EyeDropperCtor) {
+      message.warning('当前浏览器不支持屏幕取色，请使用 Chrome / Edge')
+      return
+    }
+    try {
+      const result = await new EyeDropperCtor().open()
+      handleChange(result.sRGBHex)
+    } catch {
+      // 用户取消取色（按 Esc 等），静默忽略
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1375,6 +1430,20 @@ function PaletteColorPicker({ value, onChange }: {
           showText
           disabledAlpha
         />
+        <Tooltip title="屏幕取色">
+          <Button
+            size="small"
+            type="text"
+            onClick={handlePickFromScreen}
+            style={{ padding: '0 4px', display: 'inline-flex', alignItems: 'center', color: '#9aa3b4' }}
+            aria-label="屏幕取色"
+          >
+            {/* 滴管图标（Antd Icons 无现成 eyedropper，使用内联 SVG） */}
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M11.13 1.587a.5.5 0 0 1 .708 0l2.575 2.575a.5.5 0 0 1 0 .708l-1.06 1.06.707.708a.5.5 0 0 1 0 .707l-1.061 1.06a.5.5 0 0 1-.707 0l-.707-.707-5.969 5.969a1.5 1.5 0 0 1-.722.394l-2.18.484a.5.5 0 0 1-.592-.592l.484-2.18a1.5 1.5 0 0 1 .394-.722l5.969-5.969-.707-.707a.5.5 0 0 1 0-.707l1.06-1.061a.5.5 0 0 1 .708 0l.707.707 1.06-1.06zM10.425 4l-5.96 5.96a.5.5 0 0 0-.13.24l-.305 1.375 1.375-.305a.5.5 0 0 0 .24-.13L11.6 5.175 10.425 4z"/>
+            </svg>
+          </Button>
+        </Tooltip>
       </div>
     </div>
   )

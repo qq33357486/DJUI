@@ -72,6 +72,10 @@ function verticalTextAlign(value?: string | null): 'top' | 'middle' | 'bottom' {
   return 'middle'
 }
 
+function positiveNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
 function getTextPreview(node: UiNode, width: number, height: number, defaultFont?: string | null) {
   const text = node.text?.text ?? ''
   const baseFontSize = node.text?.fontSize ?? 16
@@ -395,6 +399,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
     : (!isTransparent ? (bgColor ?? undefined) : (showEditorOverlay ? '#1e2a3a' : undefined))
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
+  const borderThickness = positiveNumber(app.borderThickness)
 
   return (
     <>
@@ -432,8 +437,23 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
           listening={false}
         />
       )}
+      {borderThickness > 0 && (
+        <Rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          rotation={rotation}
+          opacity={opacity}
+          stroke={app.borderColor ?? '#FFFFFFFF'}
+          strokeWidth={borderThickness}
+          cornerRadius={app.cornerRadius ?? 0}
+          listening={false}
+        />
+      )}
       {(node.text?.text || node.starType === 'Label') && (() => {
         const preview = getTextPreview(node, width, height, defaultFont)
+        const strokeWidth = positiveNumber(node.text?.strokeSize)
         return (
           <Text
             x={x + preview.xOffset}
@@ -444,6 +464,8 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
             fontSize={preview.fontSize}
             fontFamily={preview.fontFamily}
             fill={node.text?.textColor ?? '#FFFFFF'}
+            stroke={strokeWidth > 0 ? (node.text?.strokeColor ?? '#000000FF') : undefined}
+            strokeWidth={strokeWidth}
             fontStyle={preview.bold ? 'bold' : 'normal'}
             align={preview.align}
             verticalAlign={preview.verticalAlign}
@@ -632,6 +654,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
     : (!isTransparent ? (bgColor ?? undefined) : (showEditorOverlay ? '#1e2a3a' : undefined))
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
+  const borderThickness = positiveNumber(app.borderThickness)
 
   return (
     <>
@@ -708,6 +731,20 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           listening={false}
         />
       )}
+      {borderThickness > 0 && (
+        <Rect
+          x={displayX}
+          y={displayY}
+          width={width}
+          height={height}
+          rotation={rotation}
+          opacity={opacity}
+          stroke={app.borderColor ?? '#FFFFFFFF'}
+          strokeWidth={borderThickness}
+          cornerRadius={app.cornerRadius ?? 0}
+          listening={false}
+        />
+      )}
       {/* 九宫格切片预览（选中 + 图片有切片元数据时显示分割线） */}
       {isSelected && app.image && sliceMeta[app.image] && (() => {
         const se = sliceMeta[app.image]
@@ -727,6 +764,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
       {/* 文本渲染 */}
       {(node.text?.text || node.starType === 'Label') && (() => {
         const preview = getTextPreview(node, width, height, defaultFont)
+        const strokeWidth = positiveNumber(node.text?.strokeSize)
         return (
           <Text
             x={displayX + preview.xOffset}
@@ -737,6 +775,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             fontSize={preview.fontSize}
             fontFamily={preview.fontFamily}
             fill={node.text?.textColor ?? '#FFFFFF'}
+            stroke={strokeWidth > 0 ? (node.text?.strokeColor ?? '#000000FF') : undefined}
+            strokeWidth={strokeWidth}
             fontStyle={preview.bold ? 'bold' : 'normal'}
             align={preview.align}
             verticalAlign={preview.verticalAlign}

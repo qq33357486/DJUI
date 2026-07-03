@@ -3,7 +3,7 @@
 import * as fs from '../fs/fsAccess'
 
 export const SOUND_CONFIG_VERSION = 2
-export const PAGE_SCHEMA_VERSION = 4
+export const PAGE_SCHEMA_VERSION = 5
 
 type JsonRecord = Record<string, unknown>
 

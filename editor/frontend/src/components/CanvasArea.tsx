@@ -33,6 +33,8 @@ function useImage(url: string | null): HTMLImageElement | null {
 }
 
 interface SliceEdges { left: number; top: number; right: number; bottom: number }
+interface DragPreview { id: string; dx: number; dy: number }
+interface Vec2 { x: number; y: number }
 
 function clampSlice(value: number, max: number) {
   return Math.max(0, Math.min(value, max))
@@ -219,6 +221,92 @@ function findNodeById(root: UiNode, id: string): UiNode | null {
   return null
 }
 
+function findNodePath(root: UiNode, id: string): UiNode[] | null {
+  if (root.id === id) return [root]
+  for (const child of root.children) {
+    const found = findNodePath(child, id)
+    if (found) return [root, ...found]
+  }
+  return null
+}
+
+function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number): LayoutRect {
+  const path = findNodePath(root, id)
+  let rect: LayoutRect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  if (!path) return rect
+  for (let i = 1; i < path.length - 1; i++) {
+    rect = solveLayout(path[i], rect, canvasWidth, canvasHeight).rect
+  }
+  return rect
+}
+
+function getLayoutRef(node: UiNode, parentRect: LayoutRect, canvasWidth: number, canvasHeight: number): LayoutRect {
+  const target = node.anchor?.target ?? 'parent'
+  return target === 'screen'
+    ? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+    : parentRect
+}
+
+function getStretchAxes(node: UiNode) {
+  const style = node.stretch?.style ?? 'None'
+  return {
+    horizontal: style === 'Horizontal' || style === 'Both',
+    vertical: style === 'Vertical' || style === 'Both',
+  }
+}
+
+function computeLayoutPatchFromRect(
+  node: UiNode,
+  parentRect: LayoutRect,
+  canvasWidth: number,
+  canvasHeight: number,
+  desiredRect: LayoutRect,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  const anchor = node.anchor ?? {}
+  const target = anchor.target ?? 'parent'
+  const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
+  const side = getAnchorSide(sideId)
+  const ref = getLayoutRef(node, parentRect, canvasWidth, canvasHeight)
+  const stretchAxes = getStretchAxes(node)
+
+  if (stretchAxes.horizontal || stretchAxes.vertical) {
+    const current = node.stretch?.margins ?? { left: 0, right: 0, top: 0, bottom: 0 }
+    const margins = { ...current }
+    if (stretchAxes.horizontal) {
+      margins.left = Math.round(desiredRect.x - ref.x)
+      margins.right = Math.round(ref.x + ref.width - desiredRect.x - desiredRect.width)
+    }
+    if (stretchAxes.vertical) {
+      margins.top = Math.round(desiredRect.y - ref.y)
+      margins.bottom = Math.round(ref.y + ref.height - desiredRect.y - desiredRect.height)
+    }
+    patch['stretch.margins'] = margins
+  }
+
+  if (!stretchAxes.horizontal) {
+    if (sideId === 'None' || target === 'none' || !side) {
+      patch['transform.x'] = Math.round(desiredRect.x)
+    } else {
+      const anchorX = ref.x + side.nx * ref.width
+      patch['transform.x'] = Math.round(desiredRect.x - anchorX + side.nx * desiredRect.width)
+    }
+    patch['transform.width'] = Math.max(1, Math.round(desiredRect.width))
+  }
+
+  if (!stretchAxes.vertical) {
+    if (sideId === 'None' || target === 'none' || !side) {
+      patch['transform.y'] = Math.round(desiredRect.y)
+    } else {
+      const anchorY = ref.y + (1 - side.ny) * ref.height
+      patch['transform.y'] = Math.round(desiredRect.y - anchorY + (1 - side.ny) * desiredRect.height)
+    }
+    patch['transform.height'] = Math.max(1, Math.round(desiredRect.height))
+  }
+
+  return patch
+}
+
 // === 参考效果图叠加层（穿透 + 半透明，渲染在最上层）===
 function RefImageLayer({ refPath, visible, opacity, width, height }: {
   refPath: string | null
@@ -391,7 +479,8 @@ interface NodeShapeProps {
   isSelected: boolean
   selectedIds: string[]    // 全局选中列表，子节点用于独立选中
   onSelect: (id: string, additive: boolean) => void
-  onDragEnd: (id: string, x: number, y: number) => void
+  onDragEnd: (id: string, rect: LayoutRect) => void
+  onDragPreviewChange: (preview: DragPreview | null) => void
   onTransformEnd: (node: UiNode) => void
   registerRef: (id: string, ref: Konva.Node | null) => void
   workspacePath: string
@@ -401,9 +490,11 @@ interface NodeShapeProps {
   canvasHeight: number
   showEditorOverlay: boolean   // 编辑器辅助渲染开关
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
+  dragPreview: DragPreview | null
+  inheritedDragDelta: Vec2
 }
 
-function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, showEditorOverlay, sliceMeta }: NodeShapeProps) {
+function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
   const { config } = useProjectStore()
   const allPages = useEditorStore(s => s.allPages)
   const defaultFont = config?.defaultFont ?? null
@@ -429,22 +520,17 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
   const y = solved.y
   const width = solved.width
   const height = solved.height
-
-  // === 计算锚点位置（用于拖拽坐标转换）===
-  const anchor = node.anchor ?? {}
-  const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
-  const sideInfo = getAnchorSide(sideId)
-  const pivot = t.pivot ?? DEFAULT_PIVOT
-  const anchorTarget = anchor.target ?? 'parent'
-  const anchorRef = anchorTarget === 'screen'
-    ? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
-    : parentRect
-  const anchorX = sideInfo ? anchorRef.x + sideInfo.nx * anchorRef.width : 0
-  const anchorY = sideInfo ? anchorRef.y + (1 - sideInfo.ny) * anchorRef.height : 0
+  const ownDragDelta = dragPreview?.id === node.id ? { x: dragPreview.dx, y: dragPreview.dy } : { x: 0, y: 0 }
+  const renderDelta = { x: inheritedDragDelta.x + ownDragDelta.x, y: inheritedDragDelta.y + ownDragDelta.y }
+  const displayX = x + renderDelta.x
+  const displayY = y + renderDelta.y
+  const displaySolved = { ...solved, x: displayX, y: displayY }
+  const baseDragX = x + inheritedDragDelta.x
+  const baseDragY = y + inheritedDragDelta.y
 
   if (node.starType === 'TemplateInstance') {
     const templatePage = node.templateRef ? allPages[node.templateRef] : null
-    const screenOrigin = { x, y }
+    const screenOrigin = { x: displayX, y: displayY }
     const previewChildren = templatePage?.root.children.map(child => cloneNodeWithOverrides(child, node.templateOverrides)) ?? []
     const templateLabel = node.templateRef ? `模板: ${node.templateRef}` : '未选择模板'
 
@@ -454,7 +540,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
           <TemplatePreviewShape
             key={child.id}
             node={child}
-            parentRect={solved}
+            parentRect={displaySolved}
             canvasWidth={width}
             canvasHeight={height}
             screenOrigin={screenOrigin}
@@ -467,8 +553,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
         ))}
         {!templatePage && (
           <Text
-            x={x + 8}
-            y={y + 8}
+            x={displayX + 8}
+            y={displayY + 8}
             width={Math.max(1, width - 16)}
             height={height}
             text={templateLabel}
@@ -480,8 +566,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
         <Rect
           id={node.id}
           ref={(el) => registerRef(node.id, el as unknown as Konva.Rect)}
-          x={x}
-          y={y}
+          x={displayX}
+          y={displayY}
           width={width}
           height={height}
           rotation={rotation}
@@ -503,26 +589,29 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
             e.cancelBubble = true
             onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
           }}
+          onDragStart={() => onDragPreviewChange({ id: node.id, dx: 0, dy: 0 })}
+          onDragMove={(e) => {
+            onDragPreviewChange({
+              id: node.id,
+              dx: e.target.x() - baseDragX,
+              dy: e.target.y() - baseDragY,
+            })
+          }}
           onDragEnd={(e) => {
-            const konvaX = e.target.x()
-            const konvaY = e.target.y()
-            if (sideId === 'None' || anchorTarget === 'none') {
-              onDragEnd(node.id, Math.round(konvaX), Math.round(konvaY))
-            } else {
-              const sInfo = getAnchorSide(sideId)
-              const snx = sInfo?.nx ?? 0
-              const sny = sInfo?.ny ?? 1
-              const offsetX = konvaX - anchorX + snx * width
-              const offsetY = konvaY - anchorY + (1 - sny) * height
-              onDragEnd(node.id, Math.round(offsetX), Math.round(offsetY))
-            }
+            onDragEnd(node.id, {
+              x: Math.round(e.target.x() - inheritedDragDelta.x),
+              y: Math.round(e.target.y() - inheritedDragDelta.y),
+              width,
+              height,
+            })
+            onDragPreviewChange(null)
           }}
           onTransformEnd={() => onTransformEnd(node)}
         />
         {showEditorOverlay && (
           <Text
-            x={x}
-            y={y - 18}
+            x={displayX}
+            y={displayY - 18}
             text={templateLabel}
             fontSize={11}
             fill="#b37feb"
@@ -549,8 +638,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
       <Rect
         id={node.id}
         ref={(el) => registerRef(node.id, el as unknown as Konva.Rect)}
-        x={x}
-        y={y}
+        x={displayX}
+        y={displayY}
         width={width}
         height={height}
         rotation={rotation}
@@ -574,21 +663,22 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
           e.cancelBubble = true
           onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
         }}
+        onDragStart={() => onDragPreviewChange({ id: node.id, dx: 0, dy: 0 })}
+        onDragMove={(e) => {
+          onDragPreviewChange({
+            id: node.id,
+            dx: e.target.x() - baseDragX,
+            dy: e.target.y() - baseDragY,
+          })
+        }}
         onDragEnd={(e) => {
-          const konvaX = e.target.x()
-          const konvaY = e.target.y()
-          if (sideId === 'None' || anchorTarget === 'none') {
-            // 无锚点：transform.x/y = 绝对坐标
-            onDragEnd(node.id, Math.round(konvaX), Math.round(konvaY))
-          } else {
-            // 有锚点：偏移 = 绝对位置 - 锚点 + side对应点
-            const sInfo = getAnchorSide(sideId)
-            const snx = sInfo?.nx ?? 0
-            const sny = sInfo?.ny ?? 1
-            const offsetX = konvaX - anchorX + snx * width
-            const offsetY = konvaY - anchorY + (1 - sny) * height
-            onDragEnd(node.id, Math.round(offsetX), Math.round(offsetY))
-          }
+          onDragEnd(node.id, {
+            x: Math.round(e.target.x() - inheritedDragDelta.x),
+            y: Math.round(e.target.y() - inheritedDragDelta.y),
+            width,
+            height,
+          })
+          onDragPreviewChange(null)
         }}
         onTransformEnd={(e) => {
           onTransformEnd(node)
@@ -598,8 +688,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
       {hasImage && image && useNineSlice && sliceEdges ? (
         <NineSliceImage
           image={image}
-          x={x}
-          y={y}
+          x={displayX}
+          y={displayY}
           width={width}
           height={height}
           rotation={rotation}
@@ -609,8 +699,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
       ) : hasImage && (
         <KImage
           image={image}
-          x={x}
-          y={y}
+          x={displayX}
+          y={displayY}
           width={width}
           height={height}
           rotation={rotation}
@@ -621,16 +711,16 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
       {/* 九宫格切片预览（选中 + 图片有切片元数据时显示分割线） */}
       {isSelected && app.image && sliceMeta[app.image] && (() => {
         const se = sliceMeta[app.image]
-        const lx = x + se.left
-        const rx = x + width - se.right
-        const ty = y + se.top
-        const by = y + height - se.bottom
+        const lx = displayX + se.left
+        const rx = displayX + width - se.right
+        const ty = displayY + se.top
+        const by = displayY + height - se.bottom
         return (
           <>
-            <Line points={[lx, y, lx, y + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[rx, y, rx, y + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[x, ty, x + width, ty]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[x, by, x + width, by]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
+            <Line points={[lx, displayY, lx, displayY + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
+            <Line points={[rx, displayY, rx, displayY + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
+            <Line points={[displayX, ty, displayX + width, ty]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
+            <Line points={[displayX, by, displayX + width, by]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
           </>
         )
       })()}
@@ -639,8 +729,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
         const preview = getTextPreview(node, width, height, defaultFont)
         return (
           <Text
-            x={x + preview.xOffset}
-            y={y}
+            x={displayX + preview.xOffset}
+            y={displayY}
             width={preview.width}
             height={preview.height}
             text={node.text?.text ?? ''}
@@ -663,11 +753,11 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
         const value = prog.value ?? 0.5
         const mode = prog.progressionMode ?? 'LeftToRight'
         // 计算进度遮罩区域
-        let clipX = x, clipY = y, clipW = width, clipH = height
+        let clipX = displayX, clipY = displayY, clipW = width, clipH = height
         if (mode === 'LeftToRight') { clipW = width * value }
-        else if (mode === 'RightToLeft') { clipX = x + width * (1 - value); clipW = width * value }
+        else if (mode === 'RightToLeft') { clipX = displayX + width * (1 - value); clipW = width * value }
         else if (mode === 'TopToBottom') { clipH = height * value }
-        else if (mode === 'BottomToTop') { clipY = y + height * (1 - value); clipH = height * value }
+        else if (mode === 'BottomToTop') { clipY = displayY + height * (1 - value); clipH = height * value }
         // Clockwise/CounterClockwise 暂用线性近似（后续可用 Arc 实现）
         else if (mode === 'Clockwise' || mode === 'CounterClockwise') { clipW = width * value }
         // 用半透明绿色遮罩表示进度区域
@@ -682,8 +772,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
       {/* 类型标签 */}
       {isSelected && (
         <Text
-          x={x}
-          y={y - 18}
+          x={displayX}
+          y={displayY - 18}
           text={node.name || node.starType}
           fontSize={11}
           fill="#5ab9ff"
@@ -699,6 +789,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
             selectedIds={selectedIds}
             onSelect={onSelect}
             onDragEnd={onDragEnd}
+            onDragPreviewChange={onDragPreviewChange}
             onTransformEnd={onTransformEnd}
             registerRef={registerRef}
             workspacePath={workspacePath}
@@ -708,6 +799,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
             canvasHeight={canvasHeight}
             showEditorOverlay={showEditorOverlay}
             sliceMeta={sliceMeta}
+            dragPreview={dragPreview}
+            inheritedDragDelta={renderDelta}
           />
         ))}
     </>
@@ -716,7 +809,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onTrans
 
 // === 主画布组件 ===
 export default function CanvasArea() {
-  const { page, selectedIds, selectNode, clearSelection, addNode, updateNodeField } = useEditorStore()
+  const { page, selectedIds, selectNode, clearSelection, addNode } = useEditorStore()
   const { config } = useProjectStore()
   const workspacePath = config?.workspacePath ?? ''
   const projectPath = config?.starProjectPath ?? ''
@@ -730,6 +823,7 @@ export default function CanvasArea() {
   // 多分辨率预览：默认 = 设计分辨率
   const [previewW, setPreviewW] = useState<number | null>(null)
   const [previewH, setPreviewH] = useState<number | null>(null)
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
   const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
 
   // 注册节点引用
@@ -1123,10 +1217,16 @@ export default function CanvasArea() {
   const handleMouseUp = () => setIsPanning(false)
   const handleContextMenu = (e: any) => { e.evt.preventDefault(); e.evt.stopPropagation() }
 
-  // 拖拽结束：更新 x/y
-  const handleNodeDragEnd = (id: string, x: number, y: number) => {
-    updateNodeField(id, 'transform.x', x)
-    updateNodeField(id, 'transform.y', y)
+  // 拖拽结束：按 stretch 轴写 margins，非 stretch 轴写 transform。
+  const handleNodeDragEnd = (id: string, desiredRect: LayoutRect) => {
+    const store = useEditorStore.getState()
+    const currentPage = store.page
+    if (!currentPage) return
+    const node = findNode(currentPage.root, id)
+    if (!node) return
+    const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH)
+    const patch = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, desiredRect)
+    store.batchUpdateNode(id, patch)
   }
 
   // 缩放/旋转结束：写回 x/y/width/height/rotation（单次批量更新）
@@ -1146,40 +1246,17 @@ export default function CanvasArea() {
     const newWidth = Math.max(1, Math.round(renderedW * scaleX))
     const newHeight = Math.max(1, Math.round(renderedH * scaleY))
 
-    // === 坐标转换：绝对坐标 → 锚点偏移 ===
-    const anchor = node.anchor ?? {}
-    const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
-    const anchorTarget = anchor.target ?? 'parent'
-    const sInfo = getAnchorSide(sideId)
-
     const page = useEditorStore.getState().page
-    let outX: number, outY: number
-    if (sideId === 'None' || anchorTarget === 'none') {
-      outX = Math.round(konvaX)
-      outY = Math.round(konvaY)
-    } else if (sInfo && page) {
-      const parent = findParent(page.root, node.id)
-      let parentRect: LayoutRect
-      if (parent && parent.id !== page.root.id) {
-        const gp = findParent(page.root, parent.id)
-        const gpRect = gp
-          ? solveLayout(gp, { x: 0, y: 0, width: actualW, height: actualH }, actualW, actualH).rect
-          : { x: 0, y: 0, width: actualW, height: actualH }
-        parentRect = solveLayout(parent, gpRect, actualW, actualH).rect
-      } else {
-        parentRect = { x: 0, y: 0, width: actualW, height: actualH }
-      }
-      const ref = anchorTarget === 'screen'
-        ? { x: 0, y: 0, width: actualW, height: actualH }
-        : parentRect
-      const anchorX = ref.x + sInfo.nx * ref.width
-      const anchorY = ref.y + (1 - sInfo.ny) * ref.height
-      outX = Math.round(konvaX - anchorX + sInfo.nx * newWidth)
-      outY = Math.round(konvaY - anchorY + (1 - sInfo.ny) * newHeight)
-    } else {
-      outX = Math.round(konvaX)
-      outY = Math.round(konvaY)
-    }
+    const currentNode = page ? (findNode(page.root, node.id) ?? node) : node
+    const parentRect = page
+      ? solveParentRectForNode(page.root, node.id, actualW, actualH)
+      : { x: 0, y: 0, width: actualW, height: actualH }
+    const layoutPatch = computeLayoutPatchFromRect(currentNode, parentRect, actualW, actualH, {
+      x: konvaX,
+      y: konvaY,
+      width: newWidth,
+      height: newHeight,
+    })
 
     // 先重置 Konva scale（已烘焙到 width/height）
     konvaNode.scaleX(1)
@@ -1187,10 +1264,7 @@ export default function CanvasArea() {
 
     // 单次批量写回 store（一次 pushHistory，一次 set）
     useEditorStore.getState().batchUpdateNode(node.id, {
-      'transform.x': outX,
-      'transform.y': outY,
-      'transform.width': newWidth,
-      'transform.height': newHeight,
+      ...layoutPatch,
       'transform.rotation': rotation,
     })
   }
@@ -1262,6 +1336,7 @@ export default function CanvasArea() {
                 selectedIds={selectedIds}
                 onSelect={handleSelect}
                 onDragEnd={handleNodeDragEnd}
+                onDragPreviewChange={setDragPreview}
                 onTransformEnd={handleNodeTransformEnd}
                 registerRef={registerRef}
                 workspacePath={workspacePath}
@@ -1271,6 +1346,8 @@ export default function CanvasArea() {
                 canvasHeight={actualH}
                 showEditorOverlay={showEditorOverlay}
                 sliceMeta={sliceMeta}
+                dragPreview={dragPreview}
+                inheritedDragDelta={{ x: 0, y: 0 }}
               />
             ))}
 

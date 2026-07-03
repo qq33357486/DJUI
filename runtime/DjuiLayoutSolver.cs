@@ -58,8 +58,11 @@ public static class DjuiLayoutSolver
         DjuiNodeJson node,
         float parentX, float parentY,
         float parentWidth, float parentHeight,
-        float screenWidth, float screenHeight)
+        float screenWidth, float screenHeight,
+        HashSet<string>? measuring = null)
     {
+        measuring ??= new HashSet<string>();
+
         var t = node.Transform;
         var anchor = node.Anchor;
         var stretch = node.Stretch;
@@ -206,6 +209,264 @@ public static class DjuiLayoutSolver
             }
         }
 
-        return new SolvedRect(x, y, w, h);
+        return ApplyAutoSize(
+            node,
+            new SolvedRect(x, y, w, h),
+            screenWidth,
+            screenHeight,
+            sideId ?? DefaultSide,
+            target,
+            nx,
+            ny,
+            hStretch,
+            vStretch,
+            measuring);
+    }
+
+    private static SolvedRect ApplyAutoSize(
+        DjuiNodeJson node,
+        SolvedRect baseRect,
+        float screenWidth,
+        float screenHeight,
+        string sideId,
+        string target,
+        float sideNx,
+        float sideNy,
+        bool hStretch,
+        bool vStretch,
+        HashSet<string> measuring)
+    {
+        bool autoWidth = UsesAutoWidth(node);
+        bool autoHeight = UsesAutoHeight(node);
+        if (!autoWidth && !autoHeight) return baseRect;
+
+        if (measuring.Contains(node.Id)) return baseRect;
+
+        bool blockedWidth = false;
+        bool blockedHeight = false;
+        string widthReason = "";
+        string heightReason = "";
+
+        if (autoWidth && hStretch)
+        {
+            blockedWidth = true;
+            widthReason = "自身水平拉伸会覆盖自动宽";
+        }
+        if (autoHeight && vStretch)
+        {
+            blockedHeight = true;
+            heightReason = "自身垂直拉伸会覆盖自动高";
+        }
+
+        foreach (var child in node.Children)
+        {
+            if (child.Basic?.Visible == false) continue;
+
+            if (autoWidth && !blockedWidth && GetChildAutoSizeConflict(child, true, out var reason))
+            {
+                blockedWidth = true;
+                widthReason = $"{child.Id}: {reason}";
+            }
+            if (autoHeight && !blockedHeight && GetChildAutoSizeConflict(child, false, out reason))
+            {
+                blockedHeight = true;
+                heightReason = $"{child.Id}: {reason}";
+            }
+        }
+
+        if (autoWidth && blockedWidth)
+            Game.Logger.LogWarning("DJUI: 节点 {Id} 自动宽回退到基准宽：{Reason}", node.Id, widthReason);
+        if (autoHeight && blockedHeight)
+            Game.Logger.LogWarning("DJUI: 节点 {Id} 自动高回退到基准高：{Reason}", node.Id, heightReason);
+
+        if ((autoWidth && !blockedWidth) || (autoHeight && !blockedHeight))
+        {
+            measuring.Add(node.Id);
+        }
+        else
+        {
+            return baseRect;
+        }
+
+        try
+        {
+            if (!MeasureChildrenBounds(node, baseRect, screenWidth, screenHeight, measuring, out var measuredWidth, out var measuredHeight))
+                return baseRect;
+
+            var nextWidth = baseRect.Width;
+            var nextHeight = baseRect.Height;
+
+            if (autoWidth && !blockedWidth)
+                nextWidth = Math.Max(1, measuredWidth);
+            if (autoHeight && !blockedHeight)
+                nextHeight = Math.Max(1, measuredHeight);
+
+            var nextX = baseRect.X;
+            var nextY = baseRect.Y;
+            if (sideId != "None" && target != "none")
+            {
+                nextX -= sideNx * (nextWidth - baseRect.Width);
+                nextY -= (1 - sideNy) * (nextHeight - baseRect.Height);
+            }
+
+            return new SolvedRect(nextX, nextY, nextWidth, nextHeight);
+        }
+        finally
+        {
+            measuring.Remove(node.Id);
+        }
+    }
+
+    private static bool MeasureChildrenBounds(
+        DjuiNodeJson node,
+        SolvedRect containerRect,
+        float screenWidth,
+        float screenHeight,
+        HashSet<string> measuring,
+        out float measuredWidth,
+        out float measuredHeight)
+    {
+        measuredWidth = containerRect.Width;
+        measuredHeight = containerRect.Height;
+
+        bool hasBounds = false;
+        float maxRight = 0;
+        float maxBottom = 0;
+
+        foreach (var child in node.Children)
+        {
+            if (child.Basic?.Visible == false) continue;
+
+            var childSolved = Solve(
+                child,
+                containerRect.X,
+                containerRect.Y,
+                containerRect.Width,
+                containerRect.Height,
+                screenWidth,
+                screenHeight,
+                measuring);
+
+            var localRight = childSolved.X - containerRect.X + childSolved.Width;
+            var localBottom = childSolved.Y - containerRect.Y + childSolved.Height;
+            if (!IsFinite(localRight) || !IsFinite(localBottom)) continue;
+
+            maxRight = Math.Max(maxRight, localRight);
+            maxBottom = Math.Max(maxBottom, localBottom);
+            hasBounds = true;
+        }
+
+        if (!hasBounds) return false;
+
+        var padding = node.Layout?.Padding;
+        var paddingRight = padding != null && padding.Length >= 3 ? padding[2] : 0;
+        var paddingBottom = padding != null && padding.Length >= 4 ? padding[3] : 0;
+
+        measuredWidth = MathF.Ceiling(Math.Max(0, maxRight + paddingRight));
+        measuredHeight = MathF.Ceiling(Math.Max(0, maxBottom + paddingBottom));
+        return true;
+    }
+
+    public static bool ShouldUseNativeAutoWidth(DjuiNodeJson node)
+    {
+        return UsesAutoWidth(node) && HasVisibleChildren(node) && !HasAutoSizeConflict(node, true);
+    }
+
+    public static bool ShouldUseNativeAutoHeight(DjuiNodeJson node)
+    {
+        return UsesAutoHeight(node) && HasVisibleChildren(node) && !HasAutoSizeConflict(node, false);
+    }
+
+    private static bool UsesAutoWidth(DjuiNodeJson node)
+    {
+        var mode = node.Layout?.AutoSize;
+        return mode == "Width" || mode == "Both";
+    }
+
+    private static bool UsesAutoHeight(DjuiNodeJson node)
+    {
+        var mode = node.Layout?.AutoSize;
+        return mode == "Height" || mode == "Both";
+    }
+
+    private static bool GetChildAutoSizeConflict(DjuiNodeJson child, bool widthAxis, out string reason)
+    {
+        var anchor = child.Anchor;
+        var target = anchor?.Target ?? "parent";
+        var sideId = anchor?.Side ?? DefaultSide;
+        var stretchStyle = child.Stretch?.Style ?? "None";
+
+        if (target == "screen")
+        {
+            reason = "锚定到屏幕，尺寸不属于父容器内容流";
+            return true;
+        }
+
+        if (StretchUsesAxis(stretchStyle, widthAxis))
+        {
+            reason = widthAxis ? "水平拉伸依赖父宽" : "垂直拉伸依赖父高";
+            return true;
+        }
+
+        if (sideId == "None" || target == "none")
+        {
+            reason = "";
+            return false;
+        }
+
+        if (!AnchorSides.TryGetValue(sideId, out var side))
+        {
+            reason = "";
+            return false;
+        }
+
+        if (widthAxis && Math.Abs(side.nx) > 0.001f)
+        {
+            reason = "水平中/右锚点依赖父宽";
+            return true;
+        }
+
+        if (!widthAxis && Math.Abs(side.ny - 1f) > 0.001f)
+        {
+            reason = "垂直中/底锚点依赖父高";
+            return true;
+        }
+
+        reason = "";
+        return false;
+    }
+
+    private static bool StretchUsesAxis(string? style, bool widthAxis)
+    {
+        if (widthAxis) return style == "Horizontal" || style == "Both";
+        return style == "Vertical" || style == "Both";
+    }
+
+    private static bool HasVisibleChildren(DjuiNodeJson node)
+    {
+        foreach (var child in node.Children)
+        {
+            if (child.Basic?.Visible != false) return true;
+        }
+        return false;
+    }
+
+    private static bool HasAutoSizeConflict(DjuiNodeJson node, bool widthAxis)
+    {
+        var stretchStyle = node.Stretch?.Style ?? "None";
+        if (StretchUsesAxis(stretchStyle, widthAxis)) return true;
+
+        foreach (var child in node.Children)
+        {
+            if (child.Basic?.Visible == false) continue;
+            if (GetChildAutoSizeConflict(child, widthAxis, out _)) return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }

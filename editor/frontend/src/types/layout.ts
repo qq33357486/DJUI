@@ -42,6 +42,8 @@ export interface DjuiAppearance {
 export interface DjuiLayout {
   margin?: [number, number, number, number]
   padding?: [number, number, number, number]
+  /** 父控件按子控件边界自适应尺寸 */
+  autoSize?: 'None' | 'Width' | 'Height' | 'Both' | null
   flowOrientation?: 'None' | 'Horizontal' | 'Vertical' | null
   /** 子控件间距（SpacingPanel.Spacing） */
   spacing?: number | null

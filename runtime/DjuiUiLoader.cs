@@ -311,7 +311,7 @@ public class DjuiUiLoader
 
         // 应用各属性组
         ApplyBasic(ctrl, def.Basic);
-        ApplySolvedLayout(ctrl, relativeSolved, def.Transform);
+        ApplySolvedLayout(ctrl, relativeSolved, def.Transform, def);
         ApplyAppearance(ctrl, def.Appearance);
         ApplyInteraction(ctrl, def.Interaction);
         ApplyLayout(ctrl, def.Layout, def);
@@ -368,7 +368,7 @@ public class DjuiUiLoader
 
         var host = new Panel();
         ApplyBasic(host, def.Basic);
-        ApplySolvedLayout(host, relativeSolved, def.Transform);
+        ApplySolvedLayout(host, relativeSolved, def.Transform, def);
         ApplyInteraction(host, def.Interaction);
         ApplyLayout(host, def.Layout, def);
 
@@ -563,13 +563,21 @@ public class DjuiUiLoader
     /// 应用 layout solver 算出的最终矩形到控件。
     /// 锚点/拉伸/宽高比已经由 solver 处理，这里只做绝对定位 + 尺寸 + 旋转/透明度。
     /// </summary>
-    private static void ApplySolvedLayout(Control ctrl, SolvedRect solved, DjuiTransformJson? t)
+    private static void ApplySolvedLayout(Control ctrl, SolvedRect solved, DjuiTransformJson? t, DjuiNodeJson? node)
     {
         // 绝对定位（solver 算出的 x/y 已经是相对父矩形左上的最终坐标）
         ctrl.HorizontalAlignment = HorizontalAlignment.Left;
         ctrl.VerticalAlignment = VerticalAlignment.Top;
-        ctrl.Width = solved.Width;
-        ctrl.Height = solved.Height;
+        if (node != null && DjuiLayoutSolver.ShouldUseNativeAutoWidth(node))
+            ctrl.AutoWidth();
+        else
+            ctrl.Width = solved.Width;
+
+        if (node != null && DjuiLayoutSolver.ShouldUseNativeAutoHeight(node))
+            ctrl.AutoHeight();
+        else
+            ctrl.Height = solved.Height;
+
         ctrl.Margin = new Thickness(solved.X, solved.Y, 0, 0);
 
         // 旋转/透明度/Z（这些不参与布局求解）

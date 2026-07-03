@@ -320,6 +320,9 @@ public class DjuiLayoutJson
     [JsonPropertyName("padding")]
     public float[]? Padding { get; set; }
 
+    [JsonPropertyName("autoSize")]
+    public string? AutoSize { get; set; }
+
     [JsonPropertyName("flowOrientation")]
     public string? FlowOrientation { get; set; }
 

@@ -22,12 +22,29 @@ export interface SolvedLayout {
   pivotY: number
 }
 
+export interface AutoSizeAxes {
+  width: boolean
+  height: boolean
+}
+
+export interface AutoSizeConflict {
+  nodeId: string
+  nodeName?: string
+  axis: 'width' | 'height'
+  reason: string
+}
+
+interface SolveContext {
+  measuring?: Set<string>
+}
+
 // 主入口：解析单个节点的最终布局
 export function solveLayout(
   node: UiNode,
   parent: Rect,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  context: SolveContext = {}
 ): SolvedLayout {
   const t = node.transform ?? {}
   const anchor = node.anchor ?? {}
@@ -68,6 +85,14 @@ export function solveLayout(
     // AspectRatio
     const ar2 = node.aspectRatio
     rect = applyAspectRatio(rect, ar2?.mode, ar2?.ratio, ref, pivot)
+    rect = applyAutoSize(node, rect, parent, canvasWidth, canvasHeight, {
+      sideId,
+      target,
+      sideNx: side.nx,
+      sideNy: side.ny,
+      hStretch,
+      vStretch,
+    }, context)
     const pivotX = rect.x + pivot.x * rect.width
     const pivotY = rect.y + pivot.y * rect.height
     return { rect, pivotX, pivotY }
@@ -108,6 +133,14 @@ export function solveLayout(
   // 4. 应用 AspectRatio（保留原有逻辑）
   const ar2 = node.aspectRatio
   rect = applyAspectRatio(rect, ar2?.mode, ar2?.ratio, ref, pivot)
+  rect = applyAutoSize(node, rect, parent, canvasWidth, canvasHeight, {
+    sideId,
+    target,
+    sideNx: side.nx,
+    sideNy: side.ny,
+    hStretch,
+    vStretch,
+  }, context)
 
   // 5. Pivot 屏幕坐标
   const pivotX = rect.x + pivot.x * rect.width
@@ -163,6 +196,169 @@ function applyAspectRatio(
   }
 
   return rect
+}
+
+export function getAutoSizeAxes(node: UiNode): AutoSizeAxes {
+  const mode = node.layout?.autoSize ?? 'None'
+  return {
+    width: mode === 'Width' || mode === 'Both',
+    height: mode === 'Height' || mode === 'Both',
+  }
+}
+
+export function collectAutoSizeConflicts(node: UiNode): AutoSizeConflict[] {
+  const result: AutoSizeConflict[] = []
+  collectAutoSizeConflictsInner(node, result)
+  return result
+}
+
+function collectAutoSizeConflictsInner(node: UiNode, result: AutoSizeConflict[]) {
+  const axes = getAutoSizeAxes(node)
+  if (axes.width || axes.height) {
+    const selfStretch = node.stretch?.style ?? 'None'
+    if (axes.width && stretchUsesAxis(selfStretch, 'width')) {
+      result.push({ nodeId: node.id, nodeName: node.name, axis: 'width', reason: '自身水平拉伸会覆盖自动宽' })
+    }
+    if (axes.height && stretchUsesAxis(selfStretch, 'height')) {
+      result.push({ nodeId: node.id, nodeName: node.name, axis: 'height', reason: '自身垂直拉伸会覆盖自动高' })
+    }
+
+    for (const child of node.children) {
+      if (!isNodeVisibleForLayout(child)) continue
+      if (axes.width) {
+        const reason = getChildAutoSizeConflict(child, 'width')
+        if (reason) result.push({ nodeId: child.id, nodeName: child.name, axis: 'width', reason })
+      }
+      if (axes.height) {
+        const reason = getChildAutoSizeConflict(child, 'height')
+        if (reason) result.push({ nodeId: child.id, nodeName: child.name, axis: 'height', reason })
+      }
+    }
+  }
+
+  for (const child of node.children) collectAutoSizeConflictsInner(child, result)
+}
+
+function applyAutoSize(
+  node: UiNode,
+  baseRect: Rect,
+  _parent: Rect,
+  canvasWidth: number,
+  canvasHeight: number,
+  anchorInfo: { sideId: string; target: string; sideNx: number; sideNy: number; hStretch: boolean; vStretch: boolean },
+  context: SolveContext,
+): Rect {
+  const axes = getAutoSizeAxes(node)
+  if (!axes.width && !axes.height) return baseRect
+
+  const measuring = context.measuring ?? new Set<string>()
+  if (measuring.has(node.id)) return baseRect
+
+  const blockedWidth = axes.width && (
+    anchorInfo.hStretch ||
+    node.children.some(child => isNodeVisibleForLayout(child) && !!getChildAutoSizeConflict(child, 'width'))
+  )
+  const blockedHeight = axes.height && (
+    anchorInfo.vStretch ||
+    node.children.some(child => isNodeVisibleForLayout(child) && !!getChildAutoSizeConflict(child, 'height'))
+  )
+
+  if ((axes.width && !blockedWidth) || (axes.height && !blockedHeight)) {
+    measuring.add(node.id)
+  } else {
+    return baseRect
+  }
+
+  try {
+    const measured = measureChildrenBounds(node, baseRect, canvasWidth, canvasHeight, { measuring })
+    if (!measured) return baseRect
+
+    let nextWidth = baseRect.width
+    let nextHeight = baseRect.height
+
+    if (axes.width && !blockedWidth) {
+      nextWidth = Math.max(1, measured.width)
+    }
+    if (axes.height && !blockedHeight) {
+      nextHeight = Math.max(1, measured.height)
+    }
+
+    if (nextWidth === baseRect.width && nextHeight === baseRect.height) return baseRect
+
+    let nextX = baseRect.x
+    let nextY = baseRect.y
+    if (anchorInfo.sideId !== 'None' && anchorInfo.target !== 'none') {
+      nextX -= anchorInfo.sideNx * (nextWidth - baseRect.width)
+      nextY -= (1 - anchorInfo.sideNy) * (nextHeight - baseRect.height)
+    }
+
+    return { x: nextX, y: nextY, width: nextWidth, height: nextHeight }
+  } finally {
+    measuring.delete(node.id)
+  }
+}
+
+function measureChildrenBounds(
+  node: UiNode,
+  containerRect: Rect,
+  canvasWidth: number,
+  canvasHeight: number,
+  context: SolveContext,
+): { width: number; height: number } | null {
+  const visibleChildren = node.children.filter(isNodeVisibleForLayout)
+  if (visibleChildren.length === 0) return null
+
+  let hasBounds = false
+  let maxRight = 0
+  let maxBottom = 0
+
+  for (const child of visibleChildren) {
+    const childRect = solveLayout(child, containerRect, canvasWidth, canvasHeight, context).rect
+    const localRight = childRect.x - containerRect.x + childRect.width
+    const localBottom = childRect.y - containerRect.y + childRect.height
+    if (Number.isFinite(localRight) && Number.isFinite(localBottom)) {
+      maxRight = Math.max(maxRight, localRight)
+      maxBottom = Math.max(maxBottom, localBottom)
+      hasBounds = true
+    }
+  }
+
+  if (!hasBounds) return null
+
+  const padding = node.layout?.padding ?? [0, 0, 0, 0]
+  const paddingRight = padding[2] ?? 0
+  const paddingBottom = padding[3] ?? 0
+
+  return {
+    width: Math.ceil(Math.max(0, maxRight + paddingRight)),
+    height: Math.ceil(Math.max(0, maxBottom + paddingBottom)),
+  }
+}
+
+function getChildAutoSizeConflict(child: UiNode, axis: 'width' | 'height'): string | null {
+  const anchor = child.anchor ?? {}
+  const target = anchor.target ?? 'parent'
+  const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
+  const stretchStyle = child.stretch?.style ?? 'None'
+
+  if (target === 'screen') return '锚定到屏幕，尺寸不属于父容器内容流'
+  if (stretchUsesAxis(stretchStyle, axis)) return axis === 'width' ? '水平拉伸依赖父宽' : '垂直拉伸依赖父高'
+  if (sideId === 'None' || target === 'none') return null
+
+  const side = getAnchorSide(sideId)
+  if (!side) return null
+  if (axis === 'width' && side.nx !== 0) return '水平中/右锚点依赖父宽'
+  if (axis === 'height' && side.ny !== 1) return '垂直中/底锚点依赖父高'
+  return null
+}
+
+function stretchUsesAxis(style: string | undefined, axis: 'width' | 'height') {
+  if (axis === 'width') return style === 'Horizontal' || style === 'Both'
+  return style === 'Vertical' || style === 'Both'
+}
+
+function isNodeVisibleForLayout(node: UiNode) {
+  return !node.editorHidden && node.basic?.visible !== false
 }
 
 /**

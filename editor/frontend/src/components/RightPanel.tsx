@@ -8,6 +8,7 @@ import AssetPickerModal from './AssetPickerModal'
 import SliceEditorModal from './SliceEditorModal'
 import * as api from '@/api/client'
 import { ANCHOR_SIDES, getAnchorSide, DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, STRETCH_STYLES } from '@/utils/anchorPresets'
+import { collectAutoSizeConflicts } from '@/utils/layoutSolver'
 
 const TEXT_OVERFLOW_OPTIONS = [
   { value: 'None', label: '无（溢出显示）' },
@@ -232,7 +233,16 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
   const basic = node.basic ?? {}
   const txt = node.text ?? {}
   const anchor = node.anchor ?? {}
+  const layout = node.layout ?? {}
   const aspectRatio = node.aspectRatio ?? {}
+  const autoSizeMode = layout.autoSize ?? 'None'
+  const autoWidth = autoSizeMode === 'Width' || autoSizeMode === 'Both'
+  const autoHeight = autoSizeMode === 'Height' || autoSizeMode === 'Both'
+  const stretchStyle = node.stretch?.style ?? 'None'
+  const stretchWidth = stretchStyle === 'Horizontal' || stretchStyle === 'Both'
+  const stretchHeight = stretchStyle === 'Vertical' || stretchStyle === 'Both'
+  const xLabel = anchor.target === 'none' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
+  const yLabel = anchor.target === 'none' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
   const templateOptions = Object.values(allPages)
     .filter(p => p.nodeKind === 'template')
     .map(p => ({ value: p.pageId, label: `${p.pageId} (${p.designWidth}×${p.designHeight})` }))
@@ -334,10 +344,20 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
             key: 'geometry', label: '位置尺寸',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <ScrubField label={node.anchor?.target === 'none' ? 'X' : '偏移X'} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
-                <ScrubField label={node.anchor?.target === 'none' ? 'Y' : '偏移Y'} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
-                <ScrubField label="宽" value={t.width ?? 100} onChange={v => updateNodeField(node.id, 'transform.width', v)} min={1} />
-                <ScrubField label="高" value={t.height ?? 100} onChange={v => updateNodeField(node.id, 'transform.height', v)} min={1} />
+                <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
+                <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
+                <ScrubField label={(autoWidth || stretchWidth) ? '基准宽' : '宽'} value={t.width ?? 100} onChange={v => updateNodeField(node.id, 'transform.width', v)} min={1} />
+                <ScrubField label={(autoHeight || stretchHeight) ? '基准高' : '高'} value={t.height ?? 100} onChange={v => updateNodeField(node.id, 'transform.height', v)} min={1} />
+                {(stretchWidth || stretchHeight) && (
+                  <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
+                    拉伸轴由边距控制；画布拖拽和缩放会更新「高级布局 / 拉伸」里的边距。
+                  </div>
+                )}
+                {(autoWidth || autoHeight) && (
+                  <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
+                    自适应轴会按子控件边界计算；这里的数值作为空容器或冲突回退尺寸。
+                  </div>
+                )}
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
                 <ScrubField label="透明度" value={t.opacity ?? 1} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} step={0.05} min={0} max={1} />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
@@ -1470,6 +1490,12 @@ function AutoLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
 }) {
   const layout = node.layout ?? {}
   const isContainer = ['Panel', 'SpacingPanel', 'PanelScrollable'].includes(node.starType)
+  const autoSize = layout.autoSize ?? 'None'
+  const autoSizeConflicts = autoSize === 'None' ? [] : collectAutoSizeConflicts(node)
+
+  const handleAutoSizeChange = (v: string) => {
+    updateNodeField(node.id, 'layout.autoSize', v === 'None' ? null : v)
+  }
 
   const handleFlowChange = (v: string) => {
     updateNodeField(node.id, 'layout.flowOrientation', v)
@@ -1492,6 +1518,26 @@ function AutoLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
     <Space direction="vertical" style={{ width: '100%' }} size="small">
       {isContainer ? (
         <>
+          <FieldRow label="自适应">
+            <Select
+              size="small" style={{ width: '100%' }}
+              value={autoSize}
+              onChange={handleAutoSizeChange}
+              options={[
+                { value: 'None', label: '固定宽高' },
+                { value: 'Width', label: '自动宽' },
+                { value: 'Height', label: '自动高' },
+                { value: 'Both', label: '自动宽高' },
+              ]}
+            />
+          </FieldRow>
+          {autoSize !== 'None' && (
+            <div style={{ fontSize: 10, color: autoSizeConflicts.length ? '#d89614' : '#5b6378' }}>
+              {autoSizeConflicts.length
+                ? `检测到 ${autoSizeConflicts.length} 个依赖父尺寸的布局，冲突轴会回退到基准尺寸。`
+                : '自动尺寸按可见子控件边界计算，隐藏节点不参与。'}
+            </div>
+          )}
           <FieldRow label="布局模式">
             <Select
               size="small" style={{ width: '100%' }}

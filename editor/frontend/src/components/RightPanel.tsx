@@ -425,11 +425,15 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                     onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
                   />
                 </FieldRow>
-                <AlphaField
-                  label="背景透明度"
-                  value={app.background || '#00000000'}
-                  onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
-                />
+                {app.image ? (
+                  <ScrubField label="图片透明度" value={Math.round((t.opacity ?? 1) * 100)} onChange={v => updateNodeField(node.id, 'transform.opacity', v / 100)} step={1} min={0} max={100} suffix="%" />
+                ) : (
+                  <AlphaField
+                    label="背景透明度"
+                    value={app.background || '#00000000'}
+                    onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
+                  />
+                )}
                 <ScrubField label="圆角" value={app.cornerRadius ?? 0} onChange={v => updateNodeField(node.id, 'appearance.cornerRadius', v)} min={0} />
                 <FieldRow label="裁剪">
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />

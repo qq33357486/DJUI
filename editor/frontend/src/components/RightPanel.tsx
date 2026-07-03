@@ -270,7 +270,7 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
       </div>
 
       <Collapse
-        defaultActiveKey={['common', 'template', 'geometry', 'content', 'interaction', 'feedback']}
+        defaultActiveKey={['common', 'template', 'geometry', 'anchor', 'appearance', 'text', 'interaction']}
         ghost
         size="small"
         items={filterItems([
@@ -350,7 +350,7 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                 <ScrubField label={(autoHeight || stretchHeight) ? '基准高' : '高'} value={t.height ?? 100} onChange={v => updateNodeField(node.id, 'transform.height', v)} min={1} />
                 {(stretchWidth || stretchHeight) && (
                   <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
-                    拉伸轴由边距控制；画布拖拽和缩放会更新「高级布局 / 拉伸」里的边距。
+                    拉伸轴由边距控制；画布拖拽和缩放会更新「锚点与拉伸」里的边距。
                   </div>
                 )}
                 {(autoWidth || autoHeight) && (
@@ -359,53 +359,16 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                   </div>
                 )}
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
-                <ScrubField label="透明度" value={t.opacity ?? 1} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} step={0.05} min={0} max={1} />
+                <ScrubField label="整体透明度" value={Math.round((t.opacity ?? 1) * 100)} onChange={v => updateNodeField(node.id, 'transform.opacity', v / 100)} step={1} min={0} max={100} suffix="%" />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
                 <PivotEditor node={node} updateNodeField={updateNodeField} />
               </Space>
             ),
           },
           {
-            key: 'content', label: '外观内容',
+            key: 'appearance', label: '外观',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
-                {(node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') && (
-                  <>
-                    <FieldRow label="文本">
-                      <Input size="small" value={txt.text ?? ''} onChange={e => updateNodeField(node.id, 'text.text', e.target.value)} />
-                    </FieldRow>
-                    <FieldRow label="字体">
-                      <FontSelect node={node} updateNodeField={updateNodeField} />
-                    </FieldRow>
-                    <ScrubField label="字号" value={txt.fontSize ?? 16} onChange={v => updateNodeField(node.id, 'text.fontSize', v)} min={1} />
-                    <FieldRow label="颜色">
-                      <PaletteColorPicker
-                        value={txt.textColor || '#FFFFFF'}
-                        onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
-                      />
-                    </FieldRow>
-                    <FieldRow label="粗体">
-                      <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
-                    </FieldRow>
-                    {node.starType === 'Label' && (
-                      <>
-                        <FieldRow label="自动换行">
-                          <Switch size="small" checked={txt.textWrap ?? false} onChange={v => updateNodeField(node.id, 'text.textWrap', v)} />
-                        </FieldRow>
-                        <FieldRow label="超出处理">
-                          <Select
-                            size="small"
-                            style={{ width: '100%' }}
-                            value={txt.textOverflow ?? 'Shrink'}
-                            onChange={v => updateNodeField(node.id, 'text.textOverflow', v)}
-                            options={TEXT_OVERFLOW_OPTIONS}
-                          />
-                        </FieldRow>
-                      </>
-                    )}
-                    <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
-                  </>
-                )}
                 {node.starType === 'Progress' && (() => {
                   const prog = node.progress ?? {}
                   const PROG_MODES = [
@@ -462,6 +425,11 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
                     onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
                   />
                 </FieldRow>
+                <AlphaField
+                  label="背景透明度"
+                  value={app.background || '#00000000'}
+                  onChange={hex => updateNodeField(node.id, 'appearance.background', hex)}
+                />
                 <ScrubField label="圆角" value={app.cornerRadius ?? 0} onChange={v => updateNodeField(node.id, 'appearance.cornerRadius', v)} min={0} />
                 <FieldRow label="裁剪">
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
@@ -490,6 +458,50 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
               </Space>
             ),
           },
+          (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
+            key: 'text', label: '文本',
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <FieldRow label="文本">
+                  <Input size="small" value={txt.text ?? ''} onChange={e => updateNodeField(node.id, 'text.text', e.target.value)} />
+                </FieldRow>
+                <FieldRow label="字体">
+                  <FontSelect node={node} updateNodeField={updateNodeField} />
+                </FieldRow>
+                <ScrubField label="字号" value={txt.fontSize ?? 16} onChange={v => updateNodeField(node.id, 'text.fontSize', v)} min={1} />
+                <FieldRow label="颜色">
+                  <PaletteColorPicker
+                    value={txt.textColor || '#FFFFFF'}
+                    onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
+                  />
+                </FieldRow>
+                <AlphaField
+                  label="文字透明度"
+                  value={txt.textColor || '#FFFFFF'}
+                  onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
+                />
+                <FieldRow label="粗体">
+                  <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
+                </FieldRow>
+                {node.starType === 'Label' && (
+                  <>
+                    <FieldRow label="自动换行">
+                      <Switch size="small" checked={txt.textWrap ?? false} onChange={v => updateNodeField(node.id, 'text.textWrap', v)} />
+                    </FieldRow>
+                    <FieldRow label="超出处理">
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        value={txt.textOverflow ?? 'Shrink'}
+                        onChange={v => updateNodeField(node.id, 'text.textOverflow', v)}
+                        options={TEXT_OVERFLOW_OPTIONS}
+                      />
+                    </FieldRow>
+                  </>
+                )}
+              </Space>
+            ),
+          } : null,
           {
             key: 'interaction', label: '交互',
             children: (
@@ -550,20 +562,30 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
             ),
           },
           {
-            key: 'advancedLayout', label: '高级布局',
+            key: 'anchor', label: '锚点与拉伸',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <SectionTitle>锚点</SectionTitle>
                 <AnchorEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle>拉伸</SectionTitle>
+                <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
                 <StretchEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle>自动布局</SectionTitle>
+              </Space>
+            ),
+          },
+          {
+            key: 'autoLayout', label: '自动布局',
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size={10}>
                 <AutoLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
+                <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
                 <SectionTitle>对齐</SectionTitle>
                 <AlignmentEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle>宽高比</SectionTitle>
-                <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
               </Space>
+            ),
+          },
+          {
+            key: 'aspectRatio', label: '宽高比',
+            children: (
+              <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
             ),
           },
         ])}
@@ -1327,8 +1349,8 @@ function PaletteColorPicker({ value, onChange }: {
 
   const handleChange = (hex: string) => {
     const picked = parseColorValue(hex)
-    const preservedAlpha = parsedValue.a <= 0 ? 1 : parsedValue.a
-    const fixed = formatRgbaHex({ ...picked, a: preservedAlpha })
+    // 选颜色时保留当前 alpha（不强制改成不透明）
+    const fixed = formatRgbaHex({ ...picked, a: parsedValue.a })
     onChange(fixed)
     saveRecentColor(fixed)
     setRecent(loadRecentColors())
@@ -1348,10 +1370,6 @@ function PaletteColorPicker({ value, onChange }: {
 
   const currentAlpha = parsedValue.a
 
-  const handleAlphaChange = (alpha: number) => {
-    onChange(formatRgbaHex({ ...parseColorValue(value), a: clampAlpha(alpha) }))
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1363,13 +1381,31 @@ function PaletteColorPicker({ value, onChange }: {
           disabledAlpha
         />
       </div>
-      {/* 透明度进度条 + 数值输入 */}
+    </div>
+  )
+}
+
+// === 独立透明度滑块（PS 风格 0-100%）===
+function AlphaField({ label, value, onChange }: {
+  label?: string
+  value: string
+  onChange: (hex: string) => void
+}) {
+  const parsed = parseColorValue(value)
+  const alpha = parsed.a
+
+  const handleAlphaChange = (a: number) => {
+    onChange(formatRgbaHex({ ...parseColorValue(value), a: clampAlpha(a) }))
+  }
+
+  return (
+    <FieldRow label={label ?? '透明度'}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Slider
           min={0}
           max={1}
           step={0.01}
-          value={currentAlpha}
+          value={alpha}
           onChange={handleAlphaChange}
           style={{ flex: 1, margin: 0 }}
           tooltip={{ formatter: v => `${Math.round((v ?? 0) * 100)}%` }}
@@ -1378,14 +1414,14 @@ function PaletteColorPicker({ value, onChange }: {
           size="small"
           min={0}
           max={100}
-          value={Math.round(currentAlpha * 100)}
+          value={Math.round(alpha * 100)}
           onChange={v => handleAlphaChange((v ?? 0) / 100)}
           formatter={v => `${v}%`}
           parser={v => v?.replace('%', '') as unknown as number}
           style={{ width: 64 }}
         />
       </div>
-    </div>
+    </FieldRow>
   )
 }
 

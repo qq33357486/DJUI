@@ -57,7 +57,14 @@ export function normalizeNode(raw: unknown): UiNode {
   // 保留可选字段（只要原值是 object 就透传，渲染层各自兜底）
   if (typeof raw.name === 'string') node.name = raw.name
   if (isRecord(raw.basic)) node.basic = raw.basic as UiNode['basic']
-  if (isRecord(raw.transform)) node.transform = raw.transform as UiNode['transform']
+  if (isRecord(raw.transform)) {
+    // 深拷贝 transform，兜底 opacity 范围到 0-1
+    const t = { ...raw.transform } as Record<string, unknown>
+    if (typeof t.opacity === 'number') {
+      t.opacity = Math.max(0, Math.min(1, t.opacity))
+    }
+    node.transform = t as UiNode['transform']
+  }
   if (isRecord(raw.appearance)) node.appearance = raw.appearance as UiNode['appearance']
   if (isRecord(raw.layout)) node.layout = raw.layout as UiNode['layout']
   if (isRecord(raw.interaction)) node.interaction = raw.interaction as UiNode['interaction']

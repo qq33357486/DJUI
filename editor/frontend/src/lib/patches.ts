@@ -420,12 +420,15 @@ export async function patchAndSavePage(
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>,
   defaultButtonSoundId: string | null
 ): Promise<void> {
-  patchPageData(pageData, defaultButtonSoundId)
-  if (pageData.root) {
-    injectSliceEdges(pageData.root, sliceMeta)
-    stripEditorFields(pageData.root)
+  // ★ 深拷贝防止 immer 冻结对象在 patchPageData/injectSliceEdges/stripEditorFields
+  //   内 delete 属性时抛 "Cannot delete property" 错误
+  const data = JSON.parse(JSON.stringify(pageData))
+  patchPageData(data, defaultButtonSoundId)
+  if (data.root) {
+    injectSliceEdges(data.root, sliceMeta)
+    stripEditorFields(data.root)
   }
-  const pageId = pageData.pageId
+  const pageId = data.pageId
   if (!pageId) throw new Error('页面数据缺少 pageId')
-  await fs.writeFileJson(projectRoot, `${PAGES_DIR}/${pageId}.json`, pageData)
+  await fs.writeFileJson(projectRoot, `${PAGES_DIR}/${pageId}.json`, data)
 }

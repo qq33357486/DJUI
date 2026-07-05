@@ -1,5 +1,10 @@
 # 更新日志
 
+## [0.5.4] - 2026-07-05
+
+### 修复
+- 修复保存页面无任何提示/反馈的问题（点击保存按钮、Ctrl+S 均无效）。根因：zustand + immer middleware 会冻结 store 中的 `page` 对象，而 patches 保存流程中 `delete` 属性操作在冻结对象上抛 `Cannot delete property 'version'`，导致 `message.success` 永不执行。修复：在 `patchAndSavePage` 入口深拷贝页面数据，patches 系统在可变副本上工作，原 store 状态不受影响。
+
 ## [0.5.3] - 2026-07-03
 
 ### 新增

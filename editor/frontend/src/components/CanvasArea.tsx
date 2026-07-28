@@ -36,6 +36,23 @@ interface SliceEdges { left: number; top: number; right: number; bottom: number 
 interface DragPreview { id: string; dx: number; dy: number }
 interface Vec2 { x: number; y: number }
 
+// === 选中/拖动交互阈值 ===
+// 指针位移低于此值（屏幕像素）视为「点击」，在 mouseUp 时才改变选中；
+// 超过则视为「拖动」，拖动 dragTarget（不触发对命中顶层节点的选中）。
+const CLICK_THRESHOLD_PX = 4
+
+// 一次按下→弹起期间的指针会话
+interface PointerSession {
+  mode: 'node' | 'blank'
+  hitTopId: string | null      // 命中的最顶层节点 id（点击时选中它）
+  dragTargetId: string | null  // 待拖动目标：hitTop 祖先链（含自身）中第一个已选中节点
+  startScreen: Vec2            // 按下时的屏幕坐标
+  additive: boolean            // shift/ctrl/meta
+  moved: boolean               // 是否已超过阈值
+  activeDragId: string | null  // 一旦超过阈值，锁定的拖动节点 id
+  dragOrigin: Vec2             // activeDragId 拖动起点的画布坐标（solved.x/y）
+}
+
 function clampSlice(value: number, max: number) {
   return Math.max(0, Math.min(value, max))
 }
@@ -234,6 +251,16 @@ function findNodePath(root: UiNode, id: string): UiNode[] | null {
   return null
 }
 
+// 确定拖动目标：取命中点本身（hitNode），前提是它未锁未隐。
+// 说明：「拖已选父节点穿透更大子节点」的需求由 DragProxyLayer 捕获层解决（已选节点有
+// 透明捕获层覆盖其几何范围，命中它即拖它），因此这里不需要沿命中链向上穿透找已选祖先——
+// 命中普通节点 Rect（非捕获层）时，拖动目标就是该命中节点本身。
+function pickDragTarget(chain: UiNode[] | null, _selectedIds: string[]): string | null {
+  if (!chain || chain.length === 0) return null
+  const hit = chain[chain.length - 1]
+  return (!hit.editorLocked && !hit.editorHidden) ? hit.id : null
+}
+
 function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number): LayoutRect {
   const path = findNodePath(root, id)
   let rect: LayoutRect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
@@ -256,6 +283,44 @@ function getStretchAxes(node: UiNode) {
   return {
     horizontal: style === 'Horizontal' || style === 'Both',
     vertical: style === 'Vertical' || style === 'Both',
+  }
+}
+
+// 选中节点的拖动捕获层所需信息：当前屏幕矩形 + 拖动基准点
+interface ProxyEntry {
+  id: string
+  rect: LayoutRect        // 当前显示矩形（已含 dragPreview 偏移）
+  rotation: number
+  baseDragX: number       // 无偏移时的 x（dragPreview 起点基准）
+  baseDragY: number
+}
+
+// 递归遍历节点树，算出每个节点的显示矩形（复刻 NodeShape 的 solver + dragPreview 偏移逻辑），
+// 返回所有节点信息供捕获层定位。仅收集，不参与渲染命中。
+function collectProxyEntries(
+  node: UiNode,
+  parentRect: LayoutRect,
+  canvasWidth: number,
+  canvasHeight: number,
+  inheritedDelta: Vec2,
+  dragPreview: DragPreview | null,
+  out: ProxyEntry[],
+): void {
+  if (node.editorHidden) return
+  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight)
+  const ownDelta = dragPreview?.id === node.id ? { x: dragPreview.dx, y: dragPreview.dy } : { x: 0, y: 0 }
+  const renderDelta = { x: inheritedDelta.x + ownDelta.x, y: inheritedDelta.y + ownDelta.y }
+  const rotation = node.transform?.rotation ?? 0
+  out.push({
+    id: node.id,
+    rect: { x: solved.x + renderDelta.x, y: solved.y + renderDelta.y, width: solved.width, height: solved.height },
+    rotation,
+    baseDragX: solved.x + inheritedDelta.x,
+    baseDragY: solved.y + inheritedDelta.y,
+  })
+  const nextInherited = renderDelta
+  for (const child of (node.children ?? [])) {
+    collectProxyEntries(child, solved, canvasWidth, canvasHeight, nextInherited, dragPreview, out)
   }
 }
 
@@ -360,6 +425,48 @@ function RefImageLayer({ refPath, visible, opacity, width, height }: {
       opacity={opacity}
       listening={false}
     />
+  )
+}
+
+// === 选中节点拖动捕获层（Proxy）===
+// 为每个「已选中 + 未锁定 + 未隐藏」节点叠一个透明、可命中的 Rect，渲染在所有节点之上。
+// 作用：当某个更大的子节点盖住已选中的父节点时，按下父节点区域命中本捕获层（因为它在最上层），
+// 于是「按下」被识别为「命中已选中父节点」，拖动就拖父节点——即「按住已选父节点拖动」。
+// 本层只负责「命中拦截」并通知 Stage，**不负责**实际拖动与选中：
+//  - 拖动：由 Stage 的指针会话在超阈值后手动驱动 dragPreview（复用 NodeShape 的预览偏移）
+//  - 选中：由 Stage 在 mouseUp（未拖动）时决定；点击已选节点不改变选中
+function DragProxyLayer({ entries, onProxyDown }: {
+  entries: ProxyEntry[]
+  onProxyDown: (nodeId: string, additive: boolean, clientX: number, clientY: number) => void
+}) {
+  if (entries.length === 0) return null
+  return (
+    <>
+      {entries.map((e) => (
+        <Rect
+          key={`proxy-${e.id}`}
+          x={e.rect.x}
+          y={e.rect.y}
+          width={e.rect.width}
+          height={e.rect.height}
+          rotation={e.rotation}
+          // 几乎透明但非完全透明，保证命中（Konva 对 listening 形状均可命中，与 fill 无关）
+          fill="rgba(0,0,0,0.001)"
+          draggable={false}
+          listening
+          onMouseDown={(ke) => {
+            const evt = ke.evt as MouseEvent
+            // 仅左键参与选中/拖动会话；右键/中键交给 Stage 平移（不 cancelBubble，让其冒泡）
+            if (evt.button !== 0) return
+            // 阻止冒泡：独占本次按下，不被下层节点抢走，也不被 Stage 当作空白
+            ke.cancelBubble = true
+            onProxyDown(e.id, evt.shiftKey || evt.ctrlKey || evt.metaKey, evt.clientX, evt.clientY)
+          }}
+          // 触摸兜底：tap 命中已选中节点，保持选中不变（cancelBubble 防止下层重复处理）
+          onTap={(ke) => { ke.cancelBubble = true }}
+        />
+      ))}
+    </>
   )
 }
 
@@ -600,12 +707,19 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           dash={[6, 4]}
           draggable={isSelected && !node.editorLocked}
           listening={!node.editorLocked}
+          // 选中/拖动统一交给上层：选中已选节点的「捕获层(Proxy)」在最上层优先命中；
+          // 未被 proxy 覆盖时（节点本身未选中），命中落到这里。
+          // 这里不再立即改选中状态——选中延迟到 Stage 的 mouseUp（按下→未拖→弹起才算选中），
+          // 从而实现「按住已选父节点拖动」与「点击选中」互不干扰。
           onMouseDown={(e) => {
             const evt = e.evt as MouseEvent
+            // 仅左键参与选中/拖动会话；右键/中键交给 Stage 平移
             if (evt.button !== 0) return
-            e.cancelBubble = true
-            onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
+            // 不阻止冒泡：让 Stage 建立统一指针会话（按下→未拖→弹起 才选中）。
+            // 命中判定靠 e.target.id()，Stage 不会把带 id 的节点误判为空白。
           }}
+          // 触摸设备：Konva 的 tap 是等价 click，没有「拖动后再 click」语义，
+          // 故触摸沿用「tap 即选中」的简单模型，保证可用性。
           onTap={(e) => {
             const evt = e.evt as MouseEvent
             e.cancelBubble = true
@@ -676,13 +790,14 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         listening={!node.editorLocked}
         onMouseDown={(e) => {
           const evt = e.evt as MouseEvent
-          // 仅左键触发选中，右键和中键用于平移，不选中
+          // 仅左键参与选中/拖动会话；右键和中键用于平移
           if (evt.button !== 0) return
-          e.cancelBubble = true
-          onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
+          // 不阻止冒泡：让 Stage 建立统一指针会话（按下→未拖→弹起 才选中）。
+          // 命中判定靠 e.target.id()，Stage 不会把带 id 的节点误判为空白。
         }}
         onTap={(e) => {
           const evt = e.evt as MouseEvent
+          // 触摸设备兜底：tap 即选中（触摸无独立「拖动后再 click」语义）
           e.cancelBubble = true
           onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
         }}
@@ -865,6 +980,10 @@ export default function CanvasArea() {
   const [previewH, setPreviewH] = useState<number | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
   const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
+  // 当前按下→弹起的指针会话（统一管理「点击选中」与「拖动」）
+  const pointerSession = useRef<PointerSession | null>(null)
+  // 选中节点的拖动捕获层信息（每次渲染重新收集，供拖动定位用）
+  const proxyEntriesRef = useRef<ProxyEntry[]>([])
 
   // 注册节点引用
   const registerRef = useCallback((id: string, ref: Konva.Node | null) => {
@@ -1220,7 +1339,7 @@ export default function CanvasArea() {
     })
   }
 
-  // 鼠标按下
+  // 鼠标按下：建立统一指针会话
   const handleMouseDown = (e: any) => {
     if (e.evt.button === 1 || e.evt.button === 2) {
       e.evt.preventDefault()
@@ -1228,33 +1347,157 @@ export default function CanvasArea() {
       panStart.current = { x: e.evt.clientX, y: e.evt.clientY, vx: viewport.x, vy: viewport.y }
       return
     }
-    // 左键点击空白区域取消选中
-    // 判定：target 是 Stage 本身，或 target 没有 id 属性（背景/设计区 Rect）
-    // 排除：Transformer 手柄/边框（向上查找父链是否包含 Transformer）
-    if (e.evt.button === 0) {
-      const target = e.target
-      // 沿父链查找 Transformer，命中则不取消选中
-      let p: any = target
-      while (p) {
-        if (p === transformerRef.current) return
-        p = p.parent
+    if (e.evt.button !== 0) return
+
+    // Transformer 手柄/边框：交给 Transformer 自身处理，不参与选中/拖动会话
+    const target = e.target
+    let p: any = target
+    while (p) {
+      if (p === transformerRef.current) return
+      p = p.parent
+    }
+
+    const additive = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey
+    const startScreen = { x: e.evt.clientX, y: e.evt.clientY }
+
+    // 命中判定：target 带 id → 命中节点；否则（Stage/背景 Rect）→ 空白
+    const hitTopId = (target.id && target.id()) || null
+
+    if (hitTopId) {
+      // 命中节点：确定拖动候选（已选祖先优先，否则命中点本身）
+      const chain = findNodePath(page.root, hitTopId)
+      const dragTargetId = pickDragTarget(chain, selectedIds)
+      pointerSession.current = {
+        mode: 'node',
+        hitTopId,
+        dragTargetId,
+        startScreen,
+        additive,
+        moved: false,
+        activeDragId: null,
+        dragOrigin: { x: 0, y: 0 },
       }
-      const isStage = target === target.getStage()
-      const hasNoId = !target.id || !target.id()
-      if (isStage || hasNoId) {
-        clearSelection()
+    } else {
+      // 空白：暂不立即清空，延迟到 mouseUp（若未拖动才算「点击空白取消选中」）
+      pointerSession.current = {
+        mode: 'blank',
+        hitTopId: null,
+        dragTargetId: null,
+        startScreen,
+        additive,
+        moved: false,
+        activeDragId: null,
+        dragOrigin: { x: 0, y: 0 },
       }
     }
   }
 
-  const handleMouseMove = (e: any) => {
-    if (!isPanning) return
-    const dx = e.evt.clientX - panStart.current.x
-    const dy = e.evt.clientY - panStart.current.y
-    setViewport(prev => ({ ...prev, x: panStart.current.vx + dx, y: panStart.current.vy + dy }))
+  // 捕获层命中：命中了一个已选中节点（可能是被更大子节点遮挡的父节点）
+  const handleProxyDown = (nodeId: string, additive: boolean, clientX: number, clientY: number) => {
+    pointerSession.current = {
+      mode: 'node',
+      hitTopId: nodeId,      // proxy 命中的就是已选中节点本身
+      dragTargetId: nodeId,  // 它已选中，直接作为拖动目标
+      startScreen: { x: clientX, y: clientY },
+      additive,
+      moved: false,
+      activeDragId: null,
+      dragOrigin: { x: 0, y: 0 },
+    }
   }
 
-  const handleMouseUp = () => setIsPanning(false)
+  const handleMouseMove = (e: any) => {
+    // 中键/右键平移
+    if (isPanning) {
+      const dx = e.evt.clientX - panStart.current.x
+      const dy = e.evt.clientY - panStart.current.y
+      setViewport(prev => ({ ...prev, x: panStart.current.vx + dx, y: panStart.current.vy + dy }))
+      return
+    }
+
+    const session = pointerSession.current
+    if (!session) return
+
+    // 计算屏幕位移
+    const dx = e.evt.clientX - session.startScreen.x
+    const dy = e.evt.clientY - session.startScreen.y
+    if (!session.moved) {
+      if (Math.abs(dx) < CLICK_THRESHOLD_PX && Math.abs(dy) < CLICK_THRESHOLD_PX) return
+      // 首次超过阈值 → 锁定为拖动
+      session.moved = true
+      if (session.mode === 'node' && session.dragTargetId) {
+        const targetId = session.dragTargetId
+        // 锁定拖动目标，记录其拖动基准点（无偏移时的位置）
+        const entry = proxyEntriesRef.current.find(en => en.id === targetId)
+        session.activeDragId = targetId
+        session.dragOrigin = entry
+          ? { x: entry.baseDragX, y: entry.baseDragY }
+          : { x: 0, y: 0 }
+        // 若拖动的是未选中节点（单选模式），立即选中它（符合「拖谁选谁」）
+        if (!useEditorStore.getState().selectedIds.includes(targetId) && !session.additive) {
+          selectNode(targetId, false)
+        }
+        // 开启 dragPreview（视觉偏移由 NodeShape 渲染树自动跟随）
+        setDragPreview({ id: targetId, dx: 0, dy: 0 })
+      }
+    }
+
+    // 已锁定拖动：更新 dragPreview（屏幕位移 → 画布位移）
+    if (session.moved && session.activeDragId) {
+      const inv = 1 / viewport.scale
+      setDragPreview({
+        id: session.activeDragId,
+        dx: dx * inv,
+        dy: dy * inv,
+      })
+    }
+  }
+
+  const handleMouseUp = (e: any) => {
+    const wasPanning = isPanning
+    setIsPanning(false)
+    if (wasPanning) { pointerSession.current = null; return }
+
+    const session = pointerSession.current
+    pointerSession.current = null
+    if (!session) return
+
+    if (!session.moved) {
+      // 未拖动 → 视为点击
+      if (session.mode === 'blank') {
+        clearSelection()
+      } else if (session.hitTopId) {
+        // 点击节点：选中命中顶层节点（additive 时 toggle）
+        // 注意：proxy 命中时 hitTopId 是已选中节点，点击它通常不改变选中（除非 additive toggle）
+        selectNode(session.hitTopId, session.additive)
+      }
+      return
+    }
+
+    // 已拖动
+    if (session.mode === 'blank') {
+      // 空白处拖动（暂无框选）：取消选中，与原「点空白即清空」行为一致
+      clearSelection()
+      return
+    }
+
+    // 已拖动 → 提交位移到 transform（手动驱动模式）
+    if (session.activeDragId) {
+      const dx = e.evt ? (e.evt.clientX - session.startScreen.x) : 0
+      const dy = e.evt ? (e.evt.clientY - session.startScreen.y) : 0
+      const inv = 1 / viewport.scale
+      const entry = proxyEntriesRef.current.find(en => en.id === session.activeDragId)
+      const width = entry?.rect.width ?? 0
+      const height = entry?.rect.height ?? 0
+      handleNodeDragEnd(session.activeDragId, {
+        x: Math.round(session.dragOrigin.x + dx * inv),
+        y: Math.round(session.dragOrigin.y + dy * inv),
+        width,
+        height,
+      })
+      setDragPreview(null)
+    }
+  }
   const handleContextMenu = (e: any) => { e.evt.preventDefault(); e.evt.stopPropagation() }
 
   // 拖拽结束：按 stretch 轴写 margins，非 stretch 轴写 transform。
@@ -1315,6 +1558,21 @@ export default function CanvasArea() {
   }
 
   const invScale = 1 / viewport.scale
+
+  // 收集所有节点的显示信息：已选节点用于渲染捕获层，全部节点用于拖动基准点查询
+  const allEntries: ProxyEntry[] = []
+  for (const child of page.root.children) {
+    collectProxyEntries(child, { x: 0, y: 0, width: actualW, height: actualH }, actualW, actualH, { x: 0, y: 0 }, dragPreview, allEntries)
+  }
+  // 已选中 + 未锁 + 未隐 的节点 → 渲染捕获层
+  const selectedSet = new Set(selectedIds)
+  const proxyEntries: ProxyEntry[] = allEntries.filter(en => {
+    if (!selectedSet.has(en.id)) return false
+    const node = findNode(page.root, en.id)
+    return !!node && !node.editorLocked && !node.editorHidden
+  })
+  // 同步到 ref 供事件处理时查询拖动基准点（含未选中节点，支持拖动未选中节点）
+  proxyEntriesRef.current = allEntries
 
   return (
     <div
@@ -1390,6 +1648,14 @@ export default function CanvasArea() {
                 inheritedDragDelta={{ x: 0, y: 0 }}
               />
             ))}
+
+            {/* ★ 选中节点拖动捕获层：渲染在所有节点之上。
+                作用：更大的子节点盖住已选父节点时，按下父节点区域命中本层 → 拖父节点。
+                未选中节点无此层，点击/拖动仍落到节点本身（由上面的指针会话处理）。 */}
+            <DragProxyLayer
+              entries={proxyEntries}
+              onProxyDown={handleProxyDown}
+            />
 
             {/* ★ 参考效果图（半透明、穿透、铺满设计区，渲染在最上层） */}
             <RefImageLayer

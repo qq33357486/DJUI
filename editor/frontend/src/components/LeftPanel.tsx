@@ -19,10 +19,18 @@ function findNodeInAll(allPages: Record<string, UiPage>, id: string): UiNode | n
   return null
 }
 
+// 查找控件所属的页面 id（用于跨页面点击控件时切换画布）
+function findPageIdOfNode(allPages: Record<string, UiPage>, nodeId: string): string | null {
+  for (const p of Object.values(allPages)) {
+    if (findNode(p.root, nodeId)) return p.pageId
+  }
+  return null
+}
+
 interface LeftPanelProps {
   pages: string[]
   onNewPage: (pageId: string, nodeKind: 'window' | 'template') => void
-  onSwitchPage: (pageId: string) => void
+  onSwitchPage: (pageId: string) => void | Promise<void>
   onDeletePage: (pageId: string) => void
 }
 
@@ -347,7 +355,7 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
   }, [selectedIds])
 
   // 选中
-  const handleSelect = (keys: React.Key[]) => {
+  const handleSelect = async (keys: React.Key[]) => {
     if (keys.length === 0) return
     const key = String(keys[0])
     // 页面节点：切换激活 + 清除控件选中（显示页面属性面板）
@@ -358,7 +366,12 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
       onSwitchPage(pageId)
       return
     }
-    // 控件节点
+    // 控件节点：若属于非当前页面，先切换画布到该页面再选中
+    // （否则画布仍渲染旧页面，看不到选中效果）
+    const belongPageId = findPageIdOfNode(allPages, key)
+    if (belongPageId && belongPageId !== activePageId) {
+      await onSwitchPage(belongPageId)
+    }
     selectNode(key)
   }
 

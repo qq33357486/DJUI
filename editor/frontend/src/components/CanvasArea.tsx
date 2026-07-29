@@ -702,8 +702,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           rotation={rotation}
           opacity={opacity}
           fill="rgba(0,0,0,0.01)"
-          stroke={isSelected ? '#b37feb' : (showEditorOverlay ? '#6f4aa8' : undefined)}
-          strokeWidth={isSelected ? 2 : 1}
+          stroke={isSelected ? '#b37feb' : (showEditorOverlay ? '#8a6fc0' : undefined)}
+          strokeWidth={isSelected ? 2.5 : 1.5}
           dash={[6, 4]}
           draggable={isSelected && !node.editorLocked}
           listening={!node.editorLocked}
@@ -782,8 +782,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         rotation={rotation}
         opacity={opacity}
         fill={fillColor}
-        stroke={showEditorOverlay ? (isSelected ? '#5ab9ff' : '#3a4258') : undefined}
-        strokeWidth={isSelected ? 2 : 1}
+        stroke={showEditorOverlay ? (isSelected ? '#5ab9ff' : '#7a8aa8') : undefined}
+        strokeWidth={isSelected ? 2.5 : 1.5}
         cornerRadius={app.cornerRadius ?? 0}
         dash={node.basic?.isStatic ? [5, 5] : undefined}
         draggable={isSelected && !node.editorLocked}

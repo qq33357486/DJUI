@@ -30,6 +30,8 @@ interface LeftPanelProps {
 function buildControlTree(
   node: UiNode,
   selectedIds: string[],
+  activePageId: string | null,
+  pageId: string,
   onToggleLock: (id: string) => void,
   onToggleHidden: (id: string) => void,
   renamingId: string | null,
@@ -40,7 +42,8 @@ function buildControlTree(
   onRenameCancel: () => void,
   onCtxRightClick: (e: React.MouseEvent, nodeKey: string) => void,
 ): DataNode {
-  const isSelected = selectedIds.includes(node.id)
+  // 选中态只作用于当前活动页面：非当前页面的节点即使 id 命中也不显示选中
+  const isSelected = pageId === activePageId && selectedIds.includes(node.id)
   const locked = node.editorLocked
   const hidden = node.editorHidden
   const isRenaming = renamingId === node.id
@@ -98,7 +101,7 @@ function buildControlTree(
     ),
     children: node.starType === 'TemplateInstance'
       ? []
-      : (node.children ?? []).map(c => buildControlTree(c, selectedIds, onToggleLock, onToggleHidden, renamingId, renamingValue, onRenameStart, onRenameChange, onRenameConfirm, onRenameCancel, onCtxRightClick)),
+      : (node.children ?? []).map(c => buildControlTree(c, selectedIds, activePageId, pageId, onToggleLock, onToggleHidden, renamingId, renamingValue, onRenameStart, onRenameChange, onRenameConfirm, onRenameCancel, onCtxRightClick)),
   }
 }
 
@@ -294,7 +297,7 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
             </Tooltip>
           </div>
         ),
-        children: page.root.children.map(c => buildControlTree(c, selectedIds, toggleLock, toggleHidden, renamingId, renamingValue, onRenameStart, setRenamingValue, onRenameConfirm, onRenameCancel, handleRightClick)),
+        children: page.root.children.map(c => buildControlTree(c, selectedIds, activePageId, p, toggleLock, toggleHidden, renamingId, renamingValue, onRenameStart, setRenamingValue, onRenameConfirm, onRenameCancel, handleRightClick)),
       }
     })
   }, [pages, allPages, activePageId, selectedIds, renamingId, renamingValue])

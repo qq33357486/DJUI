@@ -55,6 +55,29 @@ function cloneNode(node: UiNode): UiNode {
   return JSON.parse(JSON.stringify(node))
 }
 
+// 全局 id 去重：保证 allPages 内所有节点 id 跨页面唯一。
+// 背景：磁盘 JSON 可能因复制文件/外部脚本产生重复 id，
+// 而 selectedIds 是全局数组（按 id 匹配），重复 id 会导致
+// 点击某个节点时其它页面同 id 节点也被误判为选中。
+let dedupeCounter = 0
+function dedupeNodeIdsAcrossPages(allPages: Record<string, UiPage>): void {
+  const seen = new Set<string>()
+  for (const page of Object.values(allPages)) {
+    const reassign = (n: UiNode) => {
+      if (seen.has(n.id)) {
+        // 冲突：重新分配带 pageId 前缀的新 id，保证唯一
+        dedupeCounter++
+        n.id = `${page.pageId}_${n.id}_${dedupeCounter}`
+        seen.add(n.id)
+      } else {
+        seen.add(n.id)
+      }
+      n.children.forEach(reassign)
+    }
+    reassign(page.root)
+  }
+}
+
 // 递归算出某节点在画布上的绝对矩形（从 root 开始向下求解）
 function solveAbsoluteRect(root: UiNode, targetId: string, canvasW: number, canvasH: number): LayoutRect | null {
   const path = findPath(root, targetId)
@@ -152,6 +175,8 @@ export const useEditorStore = create<EditorState>()(
 
     setAllPages: (pages) => {
       set((s) => {
+        // 数据卫生：保证加载进内存的节点 id 跨页面唯一（修复跨页面同 id 误选中）
+        dedupeNodeIdsAcrossPages(pages)
         s.allPages = pages
         // 自动选第一个
         const ids = Object.keys(pages)
@@ -170,7 +195,10 @@ export const useEditorStore = create<EditorState>()(
 
     upsertPage: (page) => {
       set((s) => {
-        s.allPages[page.pageId] = page
+        // 与已有页面合并后去重，防止新加载页面与内存中其它页面 id 撞车
+        const merged = { ...s.allPages, [page.pageId]: page }
+        dedupeNodeIdsAcrossPages(merged)
+        s.allPages[page.pageId] = merged[page.pageId]
       })
     },
 

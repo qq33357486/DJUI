@@ -446,9 +446,6 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                       {isRotary && (
                         <ScrubField label="起始角" value={prog.rotation ?? 0} onChange={v => updateNodeField(node.id, 'progress.rotation', v)} suffix="°" />
                       )}
-                      <div style={{ fontSize: 10, color: '#5b6378' }}>
-                        进度条用 Image 做前景遮罩，背景需另加 Panel 放后面。
-                      </div>
                       <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
                     </>
                   )

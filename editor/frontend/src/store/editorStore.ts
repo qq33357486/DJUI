@@ -573,6 +573,15 @@ export function createNode(starType: string, label: string): UiNode {
     children: [],
     ...JSON.parse(JSON.stringify(def?.defaultProps ?? { starType: starType as UiNode['starType'] })),
   }
+  // 模板内子节点 id 为占位符时，递归重分配（保证多实例 id 唯一）
+  const reassignChildIds = (n: UiNode) => {
+    n.children.forEach(c => {
+      nodeCounter++
+      c.id = `${c.starType.toLowerCase()}_${Date.now()}_${nodeCounter}`
+      reassignChildIds(c)
+    })
+  }
+  reassignChildIds(node)
   if (node.starType === 'Button' && defaultButtonSoundId) {
     node.djui = { ...(node.djui ?? {}), clickSoundId: defaultButtonSoundId }
   }

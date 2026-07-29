@@ -503,7 +503,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
   const isTransparent = isTransparentColor(bgColor)
   const fillColor = hasImage
     ? undefined
-    : (!isTransparent ? (bgColor ?? undefined) : (showEditorOverlay ? '#1e2a3a' : undefined))
+    : (!isTransparent ? (bgColor ?? undefined) : undefined)
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
   const borderThickness = positiveNumber(app.borderThickness)
@@ -761,11 +761,11 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const hasImage = !!image
 
   // 背景色：如果有设背景就用；有图片时不画底色
-  // 编辑器辅助底色：空控件显示的半透明色（可被 overlay 开关关闭）
+  // 透明背景控件不画底色——仅用 stroke 边框标识（辅助线），避免实心填充盖住下层素材
   const isTransparent = isTransparentColor(bgColor)
   const fillColor = hasImage
     ? undefined
-    : (!isTransparent ? (bgColor ?? undefined) : (showEditorOverlay ? '#1e2a3a' : undefined))
+    : (!isTransparent ? (bgColor ?? undefined) : undefined)
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
   const borderThickness = positiveNumber(app.borderThickness)

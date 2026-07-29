@@ -176,6 +176,7 @@ export interface UiNode {
   // 编辑器专用（不序列化到运行时 JSON）
   editorLocked?: boolean    // 锁定：无法在画布选中
   editorHidden?: boolean    // 隐藏：画布不渲染
+  editorLockAspect?: boolean  // 锁定宽高比：拖拽缩放与 W/H 输入时保持当前比例
   children: UiNode[]
 }
 

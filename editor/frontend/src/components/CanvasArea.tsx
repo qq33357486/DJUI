@@ -1008,6 +1008,14 @@ export default function CanvasArea() {
       if (ref && ref.getLayer()) nodes.push(ref)
     }
     transformerRef.current.nodes(nodes)
+    // 初始 keepRatio：任一选中节点开启锁形 → 等比缩放
+    const state = useEditorStore.getState()
+    const curPage = state.page
+    const anyLocked = state.selectedIds.some(id => {
+      const n = curPage ? findNode(curPage.root, id) : null
+      return n?.editorLockAspect === true
+    })
+    transformerRef.current.keepRatio(anyLocked)
     transformerRef.current.getLayer()?.batchDraw()
   }, [selectedIds, page])
 
@@ -1720,9 +1728,15 @@ export default function CanvasArea() {
             onTransform={() => {
               const tr = transformerRef.current
               if (!tr) return
-              // Shift 按下时等比例，否则自由变换（PS 风格）
+              // 任一选中节点开启锁形 → 等比；否则沿用 Shift 临时等比（PS 风格）
+              const state = useEditorStore.getState()
+              const curPage = state.page
+              const anyLocked = state.selectedIds.some(id => {
+                const n = curPage ? findNode(curPage.root, id) : null
+                return n?.editorLockAspect === true
+              })
               const shift = (window.event as KeyboardEvent)?.shiftKey
-              tr.keepRatio(!!shift)
+              tr.keepRatio(anyLocked || !!shift)
             }}
             boundBoxFunc={(oldBox, newBox) => {
               if (Math.abs(newBox.width) < 10 || Math.abs(newBox.height) < 10) return oldBox

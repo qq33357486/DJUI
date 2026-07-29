@@ -307,6 +307,7 @@ function stripEditorFields(node: any) {
   if (!isRecord(node)) return
   delete node.editorLocked
   delete node.editorHidden
+  delete node.editorLockAspect
   const children = node.children
   if (Array.isArray(children)) {
     for (const child of children) stripEditorFields(child)

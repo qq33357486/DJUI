@@ -37,7 +37,7 @@ const WINDOW_CLOSE_TRANSITION_OPTIONS = [
 ]
 
 export default function RightPanel() {
-  const { page, allPages, selectedIds, updateNodeField, removeNode, updatePageMeta, applyFlexLayout, setActivePage } = useEditorStore()
+  const { page, allPages, selectedIds, updateNodeField, batchUpdateNode, removeNode, updatePageMeta, applyFlexLayout, setActivePage } = useEditorStore()
   const { config, setLastPage } = useProjectStore()
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [assetPickerField, setAssetPickerField] = useState('')
@@ -172,6 +172,7 @@ export default function RightPanel() {
           <InspectorContent
             node={node}
             updateNodeField={updateNodeField}
+            batchUpdateNode={batchUpdateNode}
             removeNode={removeNode}
             openAssetPicker={openAssetPicker}
             onFitToImageSize={fitToImageSize}
@@ -214,9 +215,10 @@ export default function RightPanel() {
 }
 
 // === 属性面板内容 ===
-function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig }: {
+function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
+  batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
   removeNode: (id: string) => void
   openAssetPicker: (field: string) => void
   onFitToImageSize: () => void
@@ -241,6 +243,10 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
   const stretchStyle = node.stretch?.style ?? 'None'
   const stretchWidth = stretchStyle === 'Horizontal' || stretchStyle === 'Both'
   const stretchHeight = stretchStyle === 'Vertical' || stretchStyle === 'Both'
+  // 锁定宽高比：拉伸轴下尺寸由父容器决定，锁形无意义，禁用
+  const aspectLockDisabled = stretchWidth || stretchHeight
+  const aspectLocked = node.editorLockAspect === true && !aspectLockDisabled
+  const aspectRatioWH = (t.width ?? 100) / (t.height ?? 100)  // 当前 W:H
   const xLabel = anchor.target === 'none' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
   const yLabel = anchor.target === 'none' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
   const templateOptions = Object.values(allPages)
@@ -350,8 +356,51 @@ function InspectorContent({ node, updateNodeField, removeNode, openAssetPicker, 
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
                 <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
-                <ScrubField label={(autoWidth || stretchWidth) ? '基准宽' : '宽'} value={t.width ?? 100} onChange={v => updateNodeField(node.id, 'transform.width', v)} min={1} />
-                <ScrubField label={(autoHeight || stretchHeight) ? '基准高' : '高'} value={t.height ?? 100} onChange={v => updateNodeField(node.id, 'transform.height', v)} min={1} />
+                <ScrubField
+                  label={(autoWidth || stretchWidth) ? '基准宽' : '宽'}
+                  value={t.width ?? 100}
+                  onChange={v => {
+                    // 锁形开启且比例有效：同时按当前 W:H 反算高
+                    if (aspectLocked && aspectRatioWH > 0) {
+                      batchUpdateNode(node.id, { 'transform.width': v, 'transform.height': Math.max(1, Math.round(v / aspectRatioWH)) })
+                    } else {
+                      updateNodeField(node.id, 'transform.width', v)
+                    }
+                  }}
+                  min={1}
+                />
+                {/* 锁链 toggle：保持当前宽高比 */}
+                <div style={{ display: 'flex', justifyContent: 'center', margin: '-2px 0' }}>
+                  <span
+                    onClick={() => { if (!aspectLockDisabled) updateNodeField(node.id, 'editorLockAspect', !aspectLocked) }}
+                    title={aspectLockDisabled ? '拉伸轴下尺寸由父容器决定，无法锁定比例' : (aspectLocked ? '已锁定宽高比，点击解锁' : '锁定宽高比')}
+                    style={{
+                      fontSize: 14,
+                      cursor: aspectLockDisabled ? 'not-allowed' : 'pointer',
+                      color: aspectLockDisabled ? '#3a4156'
+                        : aspectLocked ? '#5ab9ff'
+                        : '#5b6378',
+                      userSelect: 'none',
+                      opacity: aspectLockDisabled ? 0.5 : 1,
+                      transition: 'color 0.15s',
+                    }}
+                  >
+                    {aspectLocked ? '🔒' : '🔓'}
+                  </span>
+                </div>
+                <ScrubField
+                  label={(autoHeight || stretchHeight) ? '基准高' : '高'}
+                  value={t.height ?? 100}
+                  onChange={v => {
+                    // 锁形开启且比例有效：同时按当前 W:H 反算宽
+                    if (aspectLocked && aspectRatioWH > 0) {
+                      batchUpdateNode(node.id, { 'transform.height': v, 'transform.width': Math.max(1, Math.round(v * aspectRatioWH)) })
+                    } else {
+                      updateNodeField(node.id, 'transform.height', v)
+                    }
+                  }}
+                  min={1}
+                />
                 {(stretchWidth || stretchHeight) && (
                   <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
                     拉伸轴由边距控制；画布拖拽和缩放会更新「锚点与拉伸」里的边距。

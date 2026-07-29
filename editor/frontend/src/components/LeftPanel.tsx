@@ -252,6 +252,32 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
     })
   }
 
+  // Delete 键删除页面（仅当未选中控件时；控件删除由 CanvasArea 全局监听处理）
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete') return
+      // 避免在输入框中触发
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      // 控件选中时交由 CanvasArea 的删除逻辑，这里只处理页面
+      const state = useEditorStore.getState()
+      if (state.selectedIds.length > 0) return
+      const pageId = state.activePageId
+      if (!pageId) return
+      e.preventDefault()
+      Modal.confirm({
+        title: '删除',
+        content: `确定删除「${pageId}」吗？此操作不可恢复。`,
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => onDeletePage(pageId),
+      })
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onDeletePage])
+
   // === 构建树：所有页面作为顶层兄弟节点 ===
   const treeData: DataNode[] = useMemo(() => {
     return pages.map(p => {
@@ -289,20 +315,23 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             fontWeight: isActive ? 600 : 400,
             color: isActive ? '#5ab9ff' : '#cdd6e4',
+            minWidth: 0,
           }}>
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
               {icon}
               <span style={{ marginLeft: 6 }}>{p}</span>
               <Tag style={{ marginLeft: 6, fontSize: 10 }}>{kindTag}</Tag>
             </span>
-            <Tooltip title="删除">
-              <DeleteOutlined
-                onClick={(e) => handleDeletePage(p, e)}
-                style={{ color: '#5b6378', flexShrink: 0 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ff6b6b' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#5b6378' }}
-              />
-            </Tooltip>
+            <span style={{ display: 'flex', flexShrink: 0, marginLeft: 8 }} onClick={e => e.stopPropagation()}>
+              <Tooltip title="删除">
+                <DeleteOutlined
+                  onClick={(e) => handleDeletePage(p, e)}
+                  style={{ color: '#5b6378' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ff6b6b' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#5b6378' }}
+                />
+              </Tooltip>
+            </span>
           </div>
         ),
         children: page.root.children.map(c => buildControlTree(c, selectedIds, activePageId, p, toggleLock, toggleHidden, renamingId, renamingValue, onRenameStart, setRenamingValue, onRenameConfirm, onRenameCancel, handleRightClick)),

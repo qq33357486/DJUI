@@ -33,7 +33,9 @@ interface EditorState {
   setPage: (page: UiPage | null) => void
   updatePageMeta: (pageId: string, updates: Partial<UiPage>) => void
   selectNode: (id: string, additive?: boolean) => void
+  setSelection: (ids: string[]) => void
   clearSelection: () => void
+  moveSelection: (dx: number, dy: number) => void
 
   addNode: (parentId: string | null, node: UiNode) => void
   removeNode: (id: string) => void
@@ -91,7 +93,7 @@ function solveAbsoluteRect(root: UiNode, targetId: string, canvasW: number, canv
 }
 
 // 找到从 root 到 targetId 的路径（包含 root 和 target）
-function findPath(root: UiNode, targetId: string): UiNode[] | null {
+export function findPath(root: UiNode, targetId: string): UiNode[] | null {
   if (root.id === targetId) return [root]
   for (const child of root.children) {
     const sub = findPath(child, targetId)
@@ -253,9 +255,20 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         if (additive) {
           if (s.selectedIds.includes(id)) {
+            // 已选 → 移除
             s.selectedIds = s.selectedIds.filter(x => x !== id)
+          } else if (s.selectedIds.length === 0) {
+            // 无选中 → 单选
+            s.selectedIds = [id]
           } else {
-            s.selectedIds.push(id)
+            // 同父容器约束：新选节点必须与已选节点同父，否则重置为单选
+            if (!s.page) { s.selectedIds = [id]; return }
+            const newParent = findParent(s.page.root, id)
+            const sameParent = newParent && s.selectedIds.every(sid => {
+              const p = findParent(s.page!.root, sid)
+              return p && p.id === newParent.id
+            })
+            s.selectedIds = sameParent ? [...s.selectedIds, id] : [id]
           }
         } else {
           s.selectedIds = [id]
@@ -263,8 +276,42 @@ export const useEditorStore = create<EditorState>()(
       })
     },
 
+    setSelection: (ids) => {
+      set((s) => {
+        // 仅保留同父容器内的兄弟节点（多选约束）
+        if (!s.page || ids.length <= 1) { s.selectedIds = ids; return }
+        let commonParentId: string | null = null
+        const kept: string[] = []
+        for (const id of ids) {
+          const p = findParent(s.page!.root, id)
+          if (!p) continue
+          if (commonParentId === null) { commonParentId = p.id; kept.push(id) }
+          else if (p.id === commonParentId) { kept.push(id) }
+          // 不同父的丢弃，保证 selectedIds 始终同父
+        }
+        s.selectedIds = kept
+      })
+    },
+
     clearSelection: () => {
       set((s) => { s.selectedIds = [] })
+    },
+
+    moveSelection: (dx, dy) => {
+      // 批量平移选中节点（整组同一偏移），单次历史记录
+      if (dx === 0 && dy === 0) return
+      get().pushHistory()
+      set((s) => {
+        if (!s.page) return
+        for (const id of s.selectedIds) {
+          const node = findNode(s.page!.root, id)
+          if (!node || !node.transform) continue
+          // 对基准 x/y 加偏移（拉伸轴下 x/y 是基准值，改了不影响实际位置，但留着无害）
+          node.transform.x = Math.round((node.transform.x ?? 0) + dx)
+          node.transform.y = Math.round((node.transform.y ?? 0) + dy)
+        }
+        if (s.activePageId) s.allPages[s.activePageId] = s.page
+      })
     },
 
     pushHistory: () => {

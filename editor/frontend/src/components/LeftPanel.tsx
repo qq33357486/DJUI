@@ -118,7 +118,7 @@ function buildControlTree(
 const PAGE_KEY = (pageId: string) => `__page:${pageId}`
 
 export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage }: LeftPanelProps) {
-  const { allPages, activePageId, selectedIds, selectNode, moveNode, setActivePage, updateNode, addNode, removeNode, duplicateNode, pasteNode } = useEditorStore()
+  const { allPages, activePageId, selectedIds, selectNode, setSelection, moveNode, setActivePage, updateNode, addNode, removeNode, duplicateNode, pasteNode } = useEditorStore()
 
   const [newPageOpen, setNewPageOpen] = useState(false)
 
@@ -384,25 +384,32 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
     if (changed) setUserExpanded(Array.from(newKeys))
   }, [selectedIds])
 
-  // 选中
+  // 选中（支持多选）
   const handleSelect = async (keys: React.Key[]) => {
-    if (keys.length === 0) return
-    const key = String(keys[0])
-    // 页面节点：切换激活 + 清除控件选中（显示页面属性面板）
-    if (key.startsWith('__page:')) {
-      const pageId = key.slice('__page:'.length)
-      // 即使是当前页面也要清除选中
+    if (keys.length === 0) {
+      useEditorStore.getState().clearSelection()
+      return
+    }
+    // 分离页面节点与控件节点
+    const pageKeys = keys.filter(k => String(k).startsWith('__page:'))
+    const controlKeys = keys.filter(k => !String(k).startsWith('__page:')).map(String)
+
+    // 选中了页面节点：切换到（最后一个）页面 + 清除控件选中
+    if (pageKeys.length > 0 && controlKeys.length === 0) {
+      const pageId = String(pageKeys[pageKeys.length - 1]).slice('__page:'.length)
       useEditorStore.getState().clearSelection()
       onSwitchPage(pageId)
       return
     }
-    // 控件节点：若属于非当前页面，先切换画布到该页面再选中
-    // （否则画布仍渲染旧页面，看不到选中效果）
-    const belongPageId = findPageIdOfNode(allPages, key)
-    if (belongPageId && belongPageId !== activePageId) {
-      await onSwitchPage(belongPageId)
+
+    // 控件节点：若属于非当前页面，先切换画布到（第一个）控件所属页面
+    if (controlKeys.length > 0) {
+      const belongPageId = findPageIdOfNode(allPages, controlKeys[0])
+      if (belongPageId && belongPageId !== activePageId) {
+        await onSwitchPage(belongPageId)
+      }
+      setSelection(controlKeys)
     }
-    selectNode(key)
   }
 
   // 拖拽改层级（仅控件间，不能跨页面）
@@ -466,9 +473,9 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
     },
   ]
 
-  // 当前选中（页面级 or 控件级）
+  // 当前选中（页面级 or 控件级，多选时回填全部控件 id）
   const selectedKeys: React.Key[] = useMemo(() => {
-    if (selectedIds.length > 0) return [selectedIds[selectedIds.length - 1]]
+    if (selectedIds.length > 0) return selectedIds
     if (activePageId) return [PAGE_KEY(activePageId)]
     return []
   }, [selectedIds, activePageId])
@@ -507,6 +514,7 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
             expandedKeys={expandedKeys}
             onExpand={handleExpand}
             onSelect={handleSelect}
+            multiple
             showLine={{ showLeafIcon: false }}
             draggable
             onDrop={handleDrop}

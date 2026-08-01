@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
-import { Stage, Layer, Rect, Text, Group, Transformer, Line, Image as KImage, Circle, Path } from 'react-konva'
-import { useEditorStore, createNode, findNode, findParent, getClipboard, setClipboard } from '@/store/editorStore'
+import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KImage, Circle, Path } from 'react-konva'
+import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { UiNode } from '@/types/layout'
 import * as api from '@/api/client'
@@ -649,7 +649,9 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const y = solved.y
   const width = solved.width
   const height = solved.height
-  const ownDragDelta = dragPreview?.id === node.id ? { x: dragPreview.dx, y: dragPreview.dy } : { x: 0, y: 0 }
+  const ownDragDelta = (dragPreview?.id === node.id || (isSelected && dragPreview?.id === '__group__'))
+    ? { x: dragPreview.dx, y: dragPreview.dy }
+    : { x: 0, y: 0 }
   const renderDelta = { x: inheritedDragDelta.x + ownDragDelta.x, y: inheritedDragDelta.y + ownDragDelta.y }
   const displayX = x + renderDelta.x
   const displayY = y + renderDelta.y
@@ -1743,6 +1745,42 @@ export default function CanvasArea() {
               return newBox
             }}
           />
+          {/* 多选移动 Gizmo（Unity 风格 XY 轴箭头，≥2 个同父选中节点时显示） */}
+          {(() => {
+            if (!page || selectedIds.length < 2) return null
+            // 算选中组的包围盒中心（画布坐标）
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+            let count = 0
+            for (const id of selectedIds) {
+              const path = findPath(page.root, id)
+              if (!path) continue
+              let parentRect: LayoutRect = { x: 0, y: 0, width: actualW, height: actualH }
+              for (let i = 1; i < path.length; i++) {
+                const solved = solveLayout(path[i], parentRect, actualW, actualH)
+                if (i === path.length - 1) {
+                  const r = solved.rect
+                  minX = Math.min(minX, r.x); minY = Math.min(minY, r.y)
+                  maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height)
+                  count++
+                }
+                parentRect = solved.rect
+              }
+            }
+            if (count < 2) return null
+            const cx = (minX + maxX) / 2
+            const cy = (minY + maxY) / 2
+            return (
+              <MoveGizmo
+                centerX={cx} centerY={cy} scale={viewport.scale}
+                onDragStart={() => setDragPreview({ id: '__group__', dx: 0, dy: 0 })}
+                onDrag={(dx, dy) => setDragPreview({ id: '__group__', dx, dy })}
+                onDragEnd={(dx, dy) => {
+                  setDragPreview(null)
+                  useEditorStore.getState().moveSelection(Math.round(dx), Math.round(dy))
+                }}
+              />
+            )
+          })()}
         </Layer>
       </Stage>
 
@@ -1948,5 +1986,87 @@ function AnchorOverlay({ node, parentRect, designW, designH, invScale }: AnchorO
         />
       </Group>
     </>
+  )
+}
+
+// === 多选移动 Gizmo（Unity 风格 XY 轴箭头）===
+// 仅多选时渲染于选中组中心；拖 X 轴改 x、Y 轴改 y、中心原点改 x+y。
+interface MoveGizmoProps {
+  centerX: number          // 选中组包围盒中心（画布坐标）
+  centerY: number
+  scale: number            // 视口缩放（用于恒定屏幕像素尺寸）
+  onDragStart: () => void  // 开始拖动（设 dragPreview = __group__）
+  onDrag: (dx: number, dy: number) => void   // 拖动中（dx/dy 为画布位移）
+  onDragEnd: (dx: number, dy: number) => void // 结束拖动（提交 moveSelection）
+}
+
+function MoveGizmo({ centerX, centerY, scale, onDragStart, onDrag, onDragEnd }: MoveGizmoProps) {
+  const invScale = 1 / scale
+  const arrowLen = 36 * invScale       // 箭头长度（屏幕 36px）
+  const pointerLen = 8 * invScale      // 箭头头长
+  const pointerWidth = 8 * invScale    // 箭头头宽
+  const axisStroke = 2 * invScale      // 轴线粗细
+  const handleRadius = 5 * invScale    // 中心原点半径
+
+  // 拖动状态：哪个轴 + 起始屏幕坐标 + 累计画布位移
+  const dragRef = useRef<{ axis: 'x' | 'y' | 'center'; startClientX: number; startClientY: number; cur: { dx: number; dy: number } } | null>(null)
+
+  const beginDrag = (e: any, axis: 'x' | 'y' | 'center') => {
+    e.evt.stopPropagation()
+    e.evt.preventDefault()
+    const cx = e.evt.clientX
+    const cy = e.evt.clientY
+    dragRef.current = { axis, startClientX: cx, startClientY: cy, cur: { dx: 0, dy: 0 } }
+    onDragStart()
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return
+      const ddx = (ev.clientX - dragRef.current.startClientX) / scale
+      const ddy = (ev.clientY - dragRef.current.startClientY) / scale
+      // 按轴约束：x 轴只 dx、y 轴只 dy、center 都要
+      const ndx = dragRef.current.axis === 'y' ? 0 : ddx
+      const ndy = dragRef.current.axis === 'x' ? 0 : ddy
+      dragRef.current.cur = { dx: ndx, dy: ndy }
+      onDrag(ndx, ndy)
+    }
+    const onUp = () => {
+      if (dragRef.current) {
+        onDragEnd(dragRef.current.cur.dx, dragRef.current.cur.dy)
+        dragRef.current = null
+      }
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <Group x={centerX} y={centerY}>
+      {/* X 轴（红，水平向右）*/}
+      <Arrow
+        points={[0, 0, arrowLen, 0]}
+        pointerLength={pointerLen} pointerWidth={pointerWidth}
+        stroke="#ff5a5a" fill="#ff5a5a" strokeWidth={axisStroke}
+        hitStrokeWidth={12 * invScale}
+        onMouseDown={(e) => beginDrag(e, 'x')}
+        style={{ cursor: 'ew-resize' }}
+      />
+      {/* Y 轴（绿，垂直向上，Konva Y 向下为正，故箭头指 -y）*/}
+      <Arrow
+        points={[0, 0, 0, -arrowLen]}
+        pointerLength={pointerLen} pointerWidth={pointerWidth}
+        stroke="#5aff7a" fill="#5aff7a" strokeWidth={axisStroke}
+        hitStrokeWidth={12 * invScale}
+        onMouseDown={(e) => beginDrag(e, 'y')}
+        style={{ cursor: 'ns-resize' }}
+      />
+      {/* 中心原点（同时改 x+y）*/}
+      <Circle
+        radius={handleRadius}
+        fill="#5ab9ff" stroke="#000" strokeWidth={0.5 * invScale}
+        onMouseDown={(e) => beginDrag(e, 'center')}
+        style={{ cursor: 'move' }}
+      />
+    </Group>
   )
 }

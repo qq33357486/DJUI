@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.7.6] - 2026-08-01
+
+### 修复
+- 修复图层树拖拽换位置后控件坐标发生偏移的问题。根因：`moveNode` 的坐标换算函数 `recalcOffset` 的 `oldParentRect` 参数误传了「拖动节点自身的绝对矩形」，而该函数逻辑（`oldParentRect.x + t.x`）需要的是「原父节点矩形」——多算了一次 `t.x`，导致同父换位时坐标翻倍偏移。修复为移除前先算出原父节点矩形再传入。
+- 修复拖拽指示线颜色未按落点类型变化的问题。根因：antd 5.x 的 `Tree` 在 `Object.assign({}, props, { dropIndicatorRender })` 中用模块默认导入的 `dropIndicatorRender` **覆盖**了组件 props 传入的自定义版本，导致 `dropIndicatorRender` prop 实际不生效。改为 CSS 方案：基于 rc-tree 给节点加的 `drag-over`（inside）/ `drag-over-gap-top` / `drag-over-gap-bottom`（换位）class，用 `!important` 覆盖指示线 `background-color`——inside 橙 `#ff8c42`、换位蓝 `#5ab9ff`。
+
 ## [0.7.5] - 2026-08-01
 
 ### 优化

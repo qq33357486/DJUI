@@ -325,14 +325,16 @@ export const useEditorStore = create<EditorState>()(
         const canvasW = s.page.designWidth
         const canvasH = s.page.designHeight
 
-        // 算出拖动节点的当前绝对矩形
-        const dragAbsRect = solveAbsoluteRect(root, dragId, canvasW, canvasH)
+        // 记录 drag 的原父节点（在移除前判断，用于 inside 时区分「同父移动 vs 跨父移入」）
+        const origParent = findParent(root, dragId)
+        // 原父节点的绝对矩形（用于坐标换算；recalcOffset 的 oldParentRect 是父矩形而非节点自身矩形）
+        const origParentRect = !origParent
+          ? { x: 0, y: 0, width: canvasW, height: canvasH }
+          : (solveAbsoluteRect(root, origParent.id, canvasW, canvasH)
+            ?? { x: 0, y: 0, width: canvasW, height: canvasH })
 
         // ★ 深拷贝 dragNode（避免 immer draft 引用问题）
         const dragCopy: UiNode = JSON.parse(JSON.stringify(dragNode))
-
-        // 记录 drag 的原父节点（在移除前判断，用于 inside 时区分「同父移动 vs 跨父移入」）
-        const origParent = findParent(root, dragId)
 
         // 从旧位置移除
         if (!removeFromParent(root, dragId)) return
@@ -350,9 +352,9 @@ export const useEditorStore = create<EditorState>()(
           ? { x: 0, y: 0, width: canvasW, height: canvasH }
           : solveAbsoluteRect(root, newParentId, canvasW, canvasH)
 
-        // 换算坐标
-        if (dragAbsRect && newParentRect) {
-          recalcOffset(dragCopy, dragAbsRect, newParentRect, canvasW, canvasH)
+        // 换算坐标（同父移动时 origParentRect === newParentRect，t.x/y 不变）
+        if (newParentRect) {
+          recalcOffset(dragCopy, origParentRect, newParentRect, canvasW, canvasH)
         }
 
         // 插入到新位置（使用拷贝，不是 draft）

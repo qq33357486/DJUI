@@ -331,6 +331,9 @@ export const useEditorStore = create<EditorState>()(
         // ★ 深拷贝 dragNode（避免 immer draft 引用问题）
         const dragCopy: UiNode = JSON.parse(JSON.stringify(dragNode))
 
+        // 记录 drag 的原父节点（在移除前判断，用于 inside 时区分「同父移动 vs 跨父移入」）
+        const origParent = findParent(root, dragId)
+
         // 从旧位置移除
         if (!removeFromParent(root, dragId)) return
 
@@ -355,7 +358,14 @@ export const useEditorStore = create<EditorState>()(
         // 插入到新位置（使用拷贝，不是 draft）
         if (position === 'inside') {
           const target = findNode(root, realTargetId)
-          if (target) target.children.push(dragCopy)
+          if (target) {
+            // 落点在父节点本体上时，区分两种语义：
+            //   - 同父移动（drag 原本就是 target 的子节点）→ 插到子列表头（换位置）
+            //   - 跨父移入（drag 来自别的父）→ 追加到末尾
+            const sameParent = origParent?.id === target.id
+            if (sameParent) target.children.unshift(dragCopy)
+            else target.children.push(dragCopy)
+          }
         } else {
           // before/after：找到 target 的父节点，在 children 里定位
           const parent = findParent(root, realTargetId)

@@ -292,9 +292,9 @@ export const COMPONENT_LIBRARY: ComponentDef[] = [
       transform: { positionType: 'Absolute', width: 200, height: 14 },
       children: [
         // 子节点1：背景图（先渲染，在下层）。贴图后做九宫格背景。
-        { id: '__GEN__', starType: 'Panel', name: '背景', basic: { isStatic: true }, transform: { positionType: 'Absolute', width: 200, height: 14, x: 0, y: 0 }, children: [] },
+        { id: '__GEN__', starType: 'Panel', name: '背景', basic: { isStatic: true }, transform: { positionType: 'Absolute', width: 200, height: 14, x: 0, y: 0 }, stretch: { style: 'Both', margins: { left: 0, right: 0, top: 0, bottom: 0 } }, children: [] },
         // 子节点2：滑块（后渲染，在上层）。引擎 Progress 类按 value 裁剪自身 image。
-        { id: '__GEN__', starType: 'Progress', name: '滑块', basic: { visible: true }, transform: { positionType: 'Absolute', width: 200, height: 14, x: 0, y: 0 }, progress: { value: 0.5, progressionMode: 'LeftToRight' }, children: [] },
+        { id: '__GEN__', starType: 'Progress', name: '滑块', basic: { visible: true }, transform: { positionType: 'Absolute', width: 200, height: 14, x: 0, y: 0 }, stretch: { style: 'Both', margins: { left: 0, right: 0, top: 0, bottom: 0 } }, progress: { value: 0.5, progressionMode: 'LeftToRight' }, children: [] },
       ],
     },
   },

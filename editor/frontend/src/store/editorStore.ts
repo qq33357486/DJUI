@@ -19,6 +19,8 @@ interface EditorState {
 
   // 选中
   selectedIds: string[]
+  // 选择锚点（最近一次单选/范围选的起点节点 id，供 Shift 连续范围选择）
+  selectionAnchor: string | null
 
   // 撤销重做
   undoStack: HistoryEntry[]
@@ -32,7 +34,7 @@ interface EditorState {
   setActivePage: (pageId: string) => void
   setPage: (page: UiPage | null) => void
   updatePageMeta: (pageId: string, updates: Partial<UiPage>) => void
-  selectNode: (id: string, additive?: boolean) => void
+  selectNode: (id: string, modifier?: 'none' | 'ctrl' | 'shift') => void
   setSelection: (ids: string[]) => void
   clearSelection: () => void
   moveSelection: (dx: number, dy: number) => void
@@ -171,6 +173,7 @@ export const useEditorStore = create<EditorState>()(
     activePageId: null,
     page: null,
     selectedIds: [],
+    selectionAnchor: null,
     undoStack: [],
     redoStack: [],
     historyLock: false,
@@ -251,18 +254,15 @@ export const useEditorStore = create<EditorState>()(
       })
     },
 
-    selectNode: (id, additive = false) => {
+    selectNode: (id, modifier = 'none') => {
       set((s) => {
-        if (additive) {
+        if (!s.page) { s.selectedIds = [id]; s.selectionAnchor = id; return }
+        if (modifier === 'ctrl') {
+          // Ctrl：单点 toggle（Excel 的"追加/取消单个"）
           if (s.selectedIds.includes(id)) {
-            // 已选 → 移除
             s.selectedIds = s.selectedIds.filter(x => x !== id)
-          } else if (s.selectedIds.length === 0) {
-            // 无选中 → 单选
-            s.selectedIds = [id]
           } else {
-            // 同父容器约束：新选节点必须与已选节点同父，否则重置为单选
-            if (!s.page) { s.selectedIds = [id]; return }
+            // 同父容器约束：与已选不同父则重置为单选该节点
             const newParent = findParent(s.page.root, id)
             const sameParent = newParent && s.selectedIds.every(sid => {
               const p = findParent(s.page!.root, sid)
@@ -270,9 +270,38 @@ export const useEditorStore = create<EditorState>()(
             })
             s.selectedIds = sameParent ? [...s.selectedIds, id] : [id]
           }
-        } else {
-          s.selectedIds = [id]
+          // Ctrl 不更新锚点（保持锚点供下次 Shift 用）
+          return
         }
+        if (modifier === 'shift') {
+          // Shift：从锚点到当前节点的连续范围（同父兄弟）
+          const anchor = s.selectionAnchor
+          if (!anchor) {
+            // 无锚点 → 当作单选
+            s.selectedIds = [id]
+            s.selectionAnchor = id
+            return
+          }
+          const anchorParent = findParent(s.page.root, anchor)
+          const curParent = findParent(s.page.root, id)
+          // 锚点与当前节点必须同父，否则重置锚点为当前节点并单选
+          if (!anchorParent || !curParent || anchorParent.id !== curParent.id) {
+            s.selectedIds = [id]
+            s.selectionAnchor = id
+            return
+          }
+          const siblings = anchorParent.children.map(c => c.id)
+          const ai = siblings.indexOf(anchor)
+          const ci = siblings.indexOf(id)
+          if (ai < 0 || ci < 0) { s.selectedIds = [id]; s.selectionAnchor = id; return }
+          const [lo, hi] = ai <= ci ? [ai, ci] : [ci, ai]
+          s.selectedIds = siblings.slice(lo, hi + 1)
+          // Shift 不更新锚点（保持锚点，可反复 Shift 到不同终点）
+          return
+        }
+        // 无修饰：单选 + 设锚点
+        s.selectedIds = [id]
+        s.selectionAnchor = id
       })
     },
 
@@ -294,7 +323,7 @@ export const useEditorStore = create<EditorState>()(
     },
 
     clearSelection: () => {
-      set((s) => { s.selectedIds = [] })
+      set((s) => { s.selectedIds = []; s.selectionAnchor = null })
     },
 
     moveSelection: (dx, dy) => {

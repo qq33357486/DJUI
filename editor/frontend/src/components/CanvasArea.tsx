@@ -36,6 +36,13 @@ interface SliceEdges { left: number; top: number; right: number; bottom: number 
 interface DragPreview { id: string; dx: number; dy: number }
 interface Vec2 { x: number; y: number }
 
+// 修饰键 → 选择 modifier（Shift 范围选择优先于 Ctrl 单点）
+function pickModifier(e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): 'none' | 'ctrl' | 'shift' {
+  if (e.shiftKey) return 'shift'
+  if (e.ctrlKey || e.metaKey) return 'ctrl'
+  return 'none'
+}
+
 // === 选中/拖动交互阈值 ===
 // 指针位移低于此值（屏幕像素）视为「点击」，在 mouseUp 时才改变选中；
 // 超过则视为「拖动」，拖动 dragTarget（不触发对命中顶层节点的选中）。
@@ -47,7 +54,7 @@ interface PointerSession {
   hitTopId: string | null      // 命中的最顶层节点 id（点击时选中它）
   dragTargetId: string | null  // 待拖动目标：hitTop 祖先链（含自身）中第一个已选中节点
   startScreen: Vec2            // 按下时的屏幕坐标
-  additive: boolean            // shift/ctrl/meta
+  modifier: 'none' | 'ctrl' | 'shift'   // 按下时的修饰键
   moved: boolean               // 是否已超过阈值
   activeDragId: string | null  // 一旦超过阈值，锁定的拖动节点 id
   dragOrigin: Vec2             // activeDragId 拖动起点的画布坐标（solved.x/y）
@@ -437,7 +444,7 @@ function RefImageLayer({ refPath, visible, opacity, width, height }: {
 //  - 选中：由 Stage 在 mouseUp（未拖动）时决定；点击已选节点不改变选中
 function DragProxyLayer({ entries, onProxyDown }: {
   entries: ProxyEntry[]
-  onProxyDown: (nodeId: string, additive: boolean, clientX: number, clientY: number) => void
+  onProxyDown: (nodeId: string, modifier: 'none' | 'ctrl' | 'shift', clientX: number, clientY: number) => void
 }) {
   if (entries.length === 0) return null
   return (
@@ -460,7 +467,7 @@ function DragProxyLayer({ entries, onProxyDown }: {
             if (evt.button !== 0) return
             // 阻止冒泡：独占本次按下，不被下层节点抢走，也不被 Stage 当作空白
             ke.cancelBubble = true
-            onProxyDown(e.id, evt.shiftKey || evt.ctrlKey || evt.metaKey, evt.clientX, evt.clientY)
+            onProxyDown(e.id, pickModifier(evt), evt.clientX, evt.clientY)
           }}
           // 触摸兜底：tap 命中已选中节点，保持选中不变（cancelBubble 防止下层重复处理）
           onTap={(ke) => { ke.cancelBubble = true }}
@@ -607,7 +614,7 @@ interface NodeShapeProps {
   node: UiNode
   isSelected: boolean
   selectedIds: string[]    // 全局选中列表，子节点用于独立选中
-  onSelect: (id: string, additive: boolean) => void
+  onSelect: (id: string, modifier: 'none' | 'ctrl' | 'shift') => void
   onDragEnd: (id: string, rect: LayoutRect) => void
   onDragPreviewChange: (preview: DragPreview | null) => void
   onTransformEnd: (node: UiNode) => void
@@ -725,7 +732,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           onTap={(e) => {
             const evt = e.evt as MouseEvent
             e.cancelBubble = true
-            onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
+            onSelect(node.id, pickModifier(evt))
           }}
           onDragStart={() => onDragPreviewChange({ id: node.id, dx: 0, dy: 0 })}
           onDragMove={(e) => {
@@ -801,7 +808,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           const evt = e.evt as MouseEvent
           // 触摸设备兜底：tap 即选中（触摸无独立「拖动后再 click」语义）
           e.cancelBubble = true
-          onSelect(node.id, evt.shiftKey || evt.ctrlKey || evt.metaKey)
+          onSelect(node.id, pickModifier(evt))
         }}
         onDragStart={() => onDragPreviewChange({ id: node.id, dx: 0, dy: 0 })}
         onDragMove={(e) => {
@@ -1367,7 +1374,7 @@ export default function CanvasArea() {
       p = p.parent
     }
 
-    const additive = e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey
+    const modifier = pickModifier(e.evt)
     const startScreen = { x: e.evt.clientX, y: e.evt.clientY }
 
     // 命中判定：target 带 id → 命中节点；否则（Stage/背景 Rect）→ 空白
@@ -1382,7 +1389,7 @@ export default function CanvasArea() {
         hitTopId,
         dragTargetId,
         startScreen,
-        additive,
+        modifier,
         moved: false,
         activeDragId: null,
         dragOrigin: { x: 0, y: 0 },
@@ -1394,7 +1401,7 @@ export default function CanvasArea() {
         hitTopId: null,
         dragTargetId: null,
         startScreen,
-        additive,
+        modifier,
         moved: false,
         activeDragId: null,
         dragOrigin: { x: 0, y: 0 },
@@ -1403,13 +1410,13 @@ export default function CanvasArea() {
   }
 
   // 捕获层命中：命中了一个已选中节点（可能是被更大子节点遮挡的父节点）
-  const handleProxyDown = (nodeId: string, additive: boolean, clientX: number, clientY: number) => {
+  const handleProxyDown = (nodeId: string, modifier: 'none' | 'ctrl' | 'shift', clientX: number, clientY: number) => {
     pointerSession.current = {
       mode: 'node',
       hitTopId: nodeId,      // proxy 命中的就是已选中节点本身
       dragTargetId: nodeId,  // 它已选中，直接作为拖动目标
       startScreen: { x: clientX, y: clientY },
-      additive,
+      modifier,
       moved: false,
       activeDragId: null,
       dragOrigin: { x: 0, y: 0 },
@@ -1443,9 +1450,9 @@ export default function CanvasArea() {
         session.dragOrigin = entry
           ? { x: entry.baseDragX, y: entry.baseDragY }
           : { x: 0, y: 0 }
-        // 若拖动的是未选中节点（单选模式），立即选中它（符合「拖谁选谁」）
-        if (!useEditorStore.getState().selectedIds.includes(targetId) && !session.additive) {
-          selectNode(targetId, false)
+        // 若拖动的是未选中节点（非多选模式），立即选中它（符合「拖谁选谁」）
+        if (!useEditorStore.getState().selectedIds.includes(targetId) && session.modifier === 'none') {
+          selectNode(targetId, 'none')
         }
         // 开启 dragPreview（视觉偏移由 NodeShape 渲染树自动跟随）
         setDragPreview({ id: targetId, dx: 0, dy: 0 })
@@ -1477,9 +1484,8 @@ export default function CanvasArea() {
       if (session.mode === 'blank') {
         clearSelection()
       } else if (session.hitTopId) {
-        // 点击节点：选中命中顶层节点（additive 时 toggle）
-        // 注意：proxy 命中时 hitTopId 是已选中节点，点击它通常不改变选中（除非 additive toggle）
-        selectNode(session.hitTopId, session.additive)
+        // 点击节点：按 modifier 语义选中（none 单选 / ctrl 单点 toggle / shift 范围）
+        selectNode(session.hitTopId, session.modifier)
       }
       return
     }
@@ -1563,8 +1569,8 @@ export default function CanvasArea() {
   }
 
   // 选中回调
-  const handleSelect = (id: string, additive: boolean) => {
-    selectNode(id, additive)
+  const handleSelect = (id: string, modifier: 'none' | 'ctrl' | 'shift') => {
+    selectNode(id, modifier)
   }
 
   const invScale = 1 / viewport.scale

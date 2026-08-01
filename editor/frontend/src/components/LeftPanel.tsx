@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons'
 import { UiNode, UiPage, COMPONENT_LIBRARY } from '@/types/layout'
 import { useEditorStore, findNode, findParent, createNode, setClipboard } from '@/store/editorStore'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 
 // 在所有页面中查找节点（用于锁/可见性切换）
 function findNodeInAll(allPages: Record<string, UiPage>, id: string): UiNode | null {
@@ -119,6 +119,12 @@ const PAGE_KEY = (pageId: string) => `__page:${pageId}`
 
 export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage }: LeftPanelProps) {
   const { allPages, activePageId, selectedIds, selectNode, setSelection, moveNode, setActivePage, updateNode, addNode, removeNode, duplicateNode, pasteNode } = useEditorStore()
+
+  // 记录树点击时的修饰键（antd onSelect 拿不到原生事件，用 title 的 mousedown 捕获）
+  const clickModifier = useRef<'none' | 'ctrl' | 'shift'>('none')
+  const captureModifier = (e: React.MouseEvent) => {
+    clickModifier.current = e.shiftKey ? 'shift' : (e.ctrlKey || e.metaKey ? 'ctrl' : 'none')
+  }
 
   const [newPageOpen, setNewPageOpen] = useState(false)
 
@@ -384,32 +390,27 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
     if (changed) setUserExpanded(Array.from(newKeys))
   }, [selectedIds])
 
-  // 选中（支持多选）
+  // 选中（Excel 语义：无修饰单选 / Ctrl 单点 toggle / Shift 范围连选）
   const handleSelect = async (keys: React.Key[]) => {
-    if (keys.length === 0) {
-      useEditorStore.getState().clearSelection()
-      return
-    }
-    // 分离页面节点与控件节点
-    const pageKeys = keys.filter(k => String(k).startsWith('__page:'))
-    const controlKeys = keys.filter(k => !String(k).startsWith('__page:')).map(String)
+    if (keys.length === 0) return
+    const key = String(keys[0])
+    const modifier = clickModifier.current
+    clickModifier.current = 'none'  // 用完即清，避免后续 onSelect 误用
 
-    // 选中了页面节点：切换到（最后一个）页面 + 清除控件选中
-    if (pageKeys.length > 0 && controlKeys.length === 0) {
-      const pageId = String(pageKeys[pageKeys.length - 1]).slice('__page:'.length)
+    // 页面节点：切换激活 + 清除控件选中（不受 modifier 影响）
+    if (key.startsWith('__page:')) {
+      const pageId = key.slice('__page:'.length)
       useEditorStore.getState().clearSelection()
       onSwitchPage(pageId)
       return
     }
 
-    // 控件节点：若属于非当前页面，先切换画布到（第一个）控件所属页面
-    if (controlKeys.length > 0) {
-      const belongPageId = findPageIdOfNode(allPages, controlKeys[0])
-      if (belongPageId && belongPageId !== activePageId) {
-        await onSwitchPage(belongPageId)
-      }
-      setSelection(controlKeys)
+    // 控件节点：若属于非当前页面，先切换画布到该页面再选中
+    const belongPageId = findPageIdOfNode(allPages, key)
+    if (belongPageId && belongPageId !== activePageId) {
+      await onSwitchPage(belongPageId)
     }
+    selectNode(key, modifier)
   }
 
   // 拖拽改层级（仅控件间，不能跨页面）
@@ -504,7 +505,7 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
       </div>
 
       {/* === 树 === */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }} onMouseDown={captureModifier}>
         {pages.length === 0 ? (
           <Empty description="点击 + 新建窗口或模板" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '24px 0' }} />
         ) : (
@@ -514,7 +515,6 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
             expandedKeys={expandedKeys}
             onExpand={handleExpand}
             onSelect={handleSelect}
-            multiple
             showLine={{ showLeafIcon: false }}
             draggable
             onDrop={handleDrop}

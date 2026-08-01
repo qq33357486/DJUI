@@ -164,6 +164,14 @@ cd editor/frontend; npm run build      # 产物在 frontend/dist
 - **每次提交涉及用户可见变化的，必须在 CHANGELOG.md 对应版本下记录**
 - CHANGELOG.md 会被 vite build 通过 `?raw` 内联到前端 JS bundle
 
+#### 条目写法（重要！面向用户，不是开发笔记）
+CHANGELOG 是**给用户看的更新公告**，会在 WhatsNewModal 里直接展示。务必：
+- **用用户视角**：写「能做什么 / 修了什么现象」，不写代码实现
+- **一句话说清**：每条控制在 1~2 行，要点突出
+- **禁止写技术细节**：不要出现根因分析、源码行号、变量名、函数名、框架内部机制、上游 bug 等。这些属于 git commit message 或代码注释，不属于公告
+- ❌ 反例：「修复 moveNode 的 recalcOffset 误传节点自身矩形导致 t.x 多算一次」
+- ✅ 正例：「修复拖拽控件换位置后坐标偏移的问题」
+
 ### 更新公告功能工作流
 1. `editor/frontend/src/lib/changelog.ts` 解析 CHANGELOG.md 为结构化数据
 2. 用户打开编辑器时，App.tsx 比对 `localStorage('djui.lastSeenVersion')` 与 `APP_VERSION`

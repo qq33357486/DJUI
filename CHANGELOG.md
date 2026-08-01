@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.7.3] - 2026-08-01
+
+### 修复
+- 彻底修复左侧图层树「把控件拖到列表第一个位置会被甩到末尾」的问题。根因（上游缺陷）：`rc-tree` 的 `calcDropPosition` 中，「拖到列表最前」对应的关键分支 `dropPosition = -1` 带 `level === 0` 门禁——仅对顶层节点生效；而 DJUI 的控件都位于页面节点之下（level >= 1），永远走不到该分支，导致 `info.node` 回退成前一节点、`dropPosition` 被误判为 after，最终插到末尾。上一版（0.7.1）只改了 DJUI 侧的解析公式，无法弥补上游残缺的输入信号。
+  - 本次修复彻底弃用 `info.dropPosition`/`info.node` 的歧义语义：在 `buildControlTree` 给每个节点打 `data-node-key`，drop 时从鼠标实际悬停的 DOM 反查真实 target；并用鼠标 Y 坐标 vs 目标节点边界的三分法直接判定 before/after/inside，与 rc-tree 内部怪癖完全解耦。
+
 ## [0.7.2] - 2026-08-01
 
 ### 优化

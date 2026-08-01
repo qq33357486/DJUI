@@ -59,6 +59,7 @@ function buildControlTree(
     key: node.id,
     title: (
       <div
+        data-node-key={node.id}
         onContextMenu={(e) => onCtxRightClick(e, node.id)}
         style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -407,34 +408,46 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
   // 拖拽改层级（仅控件间，不能跨页面）
   const handleDrop: React.ComponentProps<typeof Tree>['onDrop'] = (info) => {
     const dragKey = String(info.dragNode.key)
-    const dropNode = info.node
-    const dropKey = String(dropNode?.key ?? '')
 
     // 页面节点不可拖拽
     if (dragKey.startsWith('__page:')) return
 
-    // 拖到页面节点上或页面节点的间隙 → 成为该页面的根级子节点
-    if (dropKey.startsWith('__page:')) {
+    // ★ 不直接用 info.node.key —— rc-tree 的 calcDropPosition 对「嵌套层级>=1 的列表
+    //   拖到第一个位置」会把 abstractDropNode 回退到 prevNode，导致 info.node 报告的是
+    //   前一个节点而非用户瞄准的节点，且 dropPosition 也给不出可靠的 before 信号。
+    //   这里从鼠标实际悬停的 DOM 反查真实 target（buildControlTree 里标了 data-node-key），
+    //   并用鼠标 Y 坐标 vs 目标节点边界直接判断 before/after/inside，彻底绕开上游缺陷。
+    const evt = info.event as React.DragEvent
+    const hoverEl = (evt.target as HTMLElement | null)?.closest('[data-node-key]') as (HTMLElement & { dataset: { nodeKey: string } }) | null
+    // 从 DOM 拿到的真实 target key（鼠标悬停节点）；取不到时退回 info.node.key
+    const realDropKey = hoverEl?.dataset.nodeKey ?? String(info.node.key ?? '')
+
+    // 拖到页面节点上 → 成为该页面的根级子节点
+    if (realDropKey.startsWith('__page:')) {
       moveNode(dragKey, 'root', 'inside')
       return
     }
 
-    // ★ antd Tree 的 info.dropPosition 是「绝对序号」(内部相对值 + target 索引)，
-    //   不能直接当 -1/0/1 用。官方推荐：用 info.node.pos 反推相对落点。
-    //   pos 形如 '0-0-2'，末位是 target 在父节点中的索引。
-    const posArr = String(dropNode?.pos ?? '').split('-')
-    const targetIndex = Number(posArr[posArr.length - 1])
-    const dropPositionOffset = info.dropPosition - targetIndex
-    // dropPositionOffset: <0 = 插到 target 之前, >0 = 之后, =0 = 作为 target 子节点
-
     let position: 'before' | 'after' | 'inside'
-    if (!info.dropToGap) {
-      position = 'inside'
+    if (hoverEl) {
+      const rect = hoverEl.getBoundingClientRect()
+      const clientY = evt.clientY
+      // 三分：上 1/3 → before，下 1/3 → after，中间 → inside
+      // 用三分让「成为子节点」有合理命中区，同时 before/after 稳定可触发
+      const third = rect.height / 3
+      if (clientY < rect.top + third) {
+        position = 'before'
+      } else if (clientY > rect.bottom - third) {
+        position = 'after'
+      } else {
+        position = 'inside'
+      }
     } else {
-      position = dropPositionOffset < 0 ? 'before' : 'after'
+      // 取不到 DOM 时退回 dropToGap 语义
+      position = info.dropToGap ? 'after' : 'inside'
     }
 
-    moveNode(dragKey, dropKey, position)
+    moveNode(dragKey, realDropKey, position)
   }
 
   // 新建下拉菜单

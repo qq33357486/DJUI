@@ -106,10 +106,11 @@ export default function App() {
     initialized.current = true
 
     void (async () => {
+      // 字体列表先加载（不依赖 patches/pages，避免前置步骤阻塞导致字体永远不加载）
+      useProjectStore.getState().refreshFonts()
       await applyPatchesAndNotify(true)
       await refreshPages()
-      // 加载字体列表 + 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
-      useProjectStore.getState().refreshFonts()
+      // 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
       loadEngineFonts().then(() => useProjectStore.getState().bumpFontVersion())
       useProjectStore.getState().refreshAgents()
       useProjectStore.getState().refreshScripts()

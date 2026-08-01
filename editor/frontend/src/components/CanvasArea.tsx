@@ -1713,6 +1713,43 @@ export default function CanvasArea() {
                 />
               )
             })()}
+            {/* 多选移动 Gizmo（Unity 风格 XY 轴箭头，≥2 个同父选中节点时显示）。
+                放在 viewport Group 内，坐标随画布缩放/平移，与节点一致。 */}
+            {(() => {
+              if (!page || selectedIds.length < 2) return null
+              // 算选中组的包围盒中心（画布坐标）
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+              let count = 0
+              for (const id of selectedIds) {
+                const path = findPath(page.root, id)
+                if (!path) continue
+                let parentRect: LayoutRect = { x: 0, y: 0, width: actualW, height: actualH }
+                for (let i = 1; i < path.length; i++) {
+                  const solved = solveLayout(path[i], parentRect, actualW, actualH)
+                  if (i === path.length - 1) {
+                    const r = solved.rect
+                    minX = Math.min(minX, r.x); minY = Math.min(minY, r.y)
+                    maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height)
+                    count++
+                  }
+                  parentRect = solved.rect
+                }
+              }
+              if (count < 2) return null
+              const cx = (minX + maxX) / 2
+              const cy = (minY + maxY) / 2
+              return (
+                <MoveGizmo
+                  centerX={cx} centerY={cy} scale={viewport.scale}
+                  onDragStart={() => setDragPreview({ id: '__group__', dx: 0, dy: 0 })}
+                  onDrag={(dx, dy) => setDragPreview({ id: '__group__', dx, dy })}
+                  onDragEnd={(dx, dy) => {
+                    setDragPreview(null)
+                    useEditorStore.getState().moveSelection(Math.round(dx), Math.round(dy))
+                  }}
+                />
+              )
+            })()}
           </Group>
         </Layer>
 
@@ -1751,42 +1788,6 @@ export default function CanvasArea() {
               return newBox
             }}
           />
-          {/* 多选移动 Gizmo（Unity 风格 XY 轴箭头，≥2 个同父选中节点时显示） */}
-          {(() => {
-            if (!page || selectedIds.length < 2) return null
-            // 算选中组的包围盒中心（画布坐标）
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-            let count = 0
-            for (const id of selectedIds) {
-              const path = findPath(page.root, id)
-              if (!path) continue
-              let parentRect: LayoutRect = { x: 0, y: 0, width: actualW, height: actualH }
-              for (let i = 1; i < path.length; i++) {
-                const solved = solveLayout(path[i], parentRect, actualW, actualH)
-                if (i === path.length - 1) {
-                  const r = solved.rect
-                  minX = Math.min(minX, r.x); minY = Math.min(minY, r.y)
-                  maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height)
-                  count++
-                }
-                parentRect = solved.rect
-              }
-            }
-            if (count < 2) return null
-            const cx = (minX + maxX) / 2
-            const cy = (minY + maxY) / 2
-            return (
-              <MoveGizmo
-                centerX={cx} centerY={cy} scale={viewport.scale}
-                onDragStart={() => setDragPreview({ id: '__group__', dx: 0, dy: 0 })}
-                onDrag={(dx, dy) => setDragPreview({ id: '__group__', dx, dy })}
-                onDragEnd={(dx, dy) => {
-                  setDragPreview(null)
-                  useEditorStore.getState().moveSelection(Math.round(dx), Math.round(dy))
-                }}
-              />
-            )
-          })()}
         </Layer>
       </Stage>
 
@@ -2018,8 +2019,8 @@ function MoveGizmo({ centerX, centerY, scale, onDragStart, onDrag, onDragEnd }: 
   const dragRef = useRef<{ axis: 'x' | 'y' | 'center'; startClientX: number; startClientY: number; cur: { dx: number; dy: number } } | null>(null)
 
   const beginDrag = (e: any, axis: 'x' | 'y' | 'center') => {
-    e.evt.stopPropagation()
-    e.evt.preventDefault()
+    // 必须用 cancelBubble 阻止 Konva 事件冒泡到 Stage（否则 Stage 会创建 pointerSession 干扰）
+    e.cancelBubble = true
     const cx = e.evt.clientX
     const cy = e.evt.clientY
     dragRef.current = { axis, startClientX: cx, startClientY: cy, cur: { dx: 0, dy: 0 } }

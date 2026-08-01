@@ -24,6 +24,7 @@ interface ProjectState {
   agents: AgentsState
   scripts: ScriptsState
   fontVersion: number  // 字体注册完成后 bump，触发画布重渲染用真实字体
+  fonts: string[]  // 可用字体列表（来自工程 fontref.txt，主流程集中加载）
 
   initFromHandles: (handles: { star: boolean; ws: boolean }) => void
   setConfig: (config: ProjectConfig) => void
@@ -34,6 +35,7 @@ interface ProjectState {
   refreshScripts: () => Promise<void>
   setScripts: (s: ScriptsState) => void
   bumpFontVersion: () => void
+  refreshFonts: () => Promise<void>
 }
 
 const initialAgents: AgentsState = {
@@ -57,6 +59,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   agents: initialAgents,
   scripts: initialScripts,
   fontVersion: 0,
+  fonts: [],
 
   initFromHandles: (handles) => {
     // 从 projectContext 恢复配置
@@ -123,4 +126,13 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   bumpFontVersion: () => set((s) => ({ fontVersion: s.fontVersion + 1 })),
+
+  refreshFonts: async () => {
+    try {
+      const list = await api.getFonts()
+      set({ fonts: list })
+    } catch {
+      set({ fonts: [] })
+    }
+  },
 }))

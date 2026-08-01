@@ -1281,17 +1281,8 @@ function FontSelect({ node, updateNodeField }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
 }) {
-  const { config, handlesReady } = useProjectStore()
-  const [fonts, setFonts] = useState<string[]>([])
+  const { config, fonts } = useProjectStore()
   const [warning, setWarning] = useState(false)
-
-  // 依赖 handlesReady（handle 真正就绪 + 权限通过），而非 config.starProjectPath
-  // （刷新后 config 从 localStorage 同步恢复较快，但 handle 从 IndexedDB restore 较慢，
-  //  若依赖 starProjectPath 会在 handle 还没就绪时就调 getFonts 导致返回空）
-  useEffect(() => {
-    if (!handlesReady) return
-    api.getFonts().then(list => setFonts(list))
-  }, [handlesReady])
 
   const currentFont = node.text?.font ?? null
   const globalFont = config?.defaultFont ?? null

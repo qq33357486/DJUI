@@ -108,7 +108,8 @@ export default function App() {
     void (async () => {
       await applyPatchesAndNotify(true)
       await refreshPages()
-      // 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
+      // 加载字体列表 + 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
+      useProjectStore.getState().refreshFonts()
       loadEngineFonts().then(() => useProjectStore.getState().bumpFontVersion())
       useProjectStore.getState().refreshAgents()
       useProjectStore.getState().refreshScripts()

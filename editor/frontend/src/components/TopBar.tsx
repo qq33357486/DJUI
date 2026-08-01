@@ -51,7 +51,6 @@ export default function TopBar(props: TopBarProps) {
   const [globalFontOpen, setGlobalFontOpen] = useState(false)
   const [unifyFontOpen, setUnifyFontOpen] = useState(false)
   const [soundConfigOpen, setSoundConfigOpen] = useState(false)
-  const [fontList, setFontList] = useState<string[]>([])
   const [globalFontValue, setGlobalFontValue] = useState<string | null>(null)
   const [unifyFontValue, setUnifyFontValue] = useState<string | null>(null)
 
@@ -71,12 +70,8 @@ export default function TopBar(props: TopBarProps) {
     ? '未选择按钮默认音效；配置后后续创建 Button 会自动带点击音效。'
     : '未配置按钮默认音效；先在星火数编新增 GameDataSound，再到 DJUI 声音配置选择默认音效。配置后后续创建 Button 会自动带点击音效。'
 
-  // 加载字体列表（依赖 handlesReady：handle 就绪后再读，避免刷新时序导致空列表）
-  const handlesReady = useProjectStore(s => s.handlesReady)
-  useEffect(() => {
-    if (!handlesReady) return
-    api.getFonts().then(setFontList)
-  }, [handlesReady])
+  // 字体列表从 store 读取（主流程集中加载，避免各组件 effect 时序问题）
+  const fontList = useProjectStore(s => s.fonts)
 
   const handleSave = useCallback(async () => {
     if (!page) return

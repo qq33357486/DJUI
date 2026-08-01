@@ -71,12 +71,12 @@ export default function TopBar(props: TopBarProps) {
     ? '未选择按钮默认音效；配置后后续创建 Button 会自动带点击音效。'
     : '未配置按钮默认音效；先在星火数编新增 GameDataSound，再到 DJUI 声音配置选择默认音效。配置后后续创建 Button 会自动带点击音效。'
 
-  // 加载字体列表（路径参数已忽略）
+  // 加载字体列表（依赖 handlesReady：handle 就绪后再读，避免刷新时序导致空列表）
+  const handlesReady = useProjectStore(s => s.handlesReady)
   useEffect(() => {
-    if (config?.starProjectPath) {
-      api.getFonts().then(setFontList)
-    }
-  }, [config?.starProjectPath])
+    if (!handlesReady) return
+    api.getFonts().then(setFontList)
+  }, [handlesReady])
 
   const handleSave = useCallback(async () => {
     if (!page) return

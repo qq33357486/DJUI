@@ -594,14 +594,16 @@ export default function TopBar(props: TopBarProps) {
           if (config) {
             useProjectStore.getState().setConfig({ ...config, defaultFont: globalFontValue })
           }
+          // 同时把全局字体统一写入所有控件（导出 JSON 每个控件都明确指向字体，引擎无需回退层）
+          useEditorStore.getState().setAllFonts(globalFontValue)
           setGlobalFontOpen(false)
-          message.success('全局字体已设置')
+          message.success('全局字体已设置并应用到所有控件')
         }}
         okText="保存"
         cancelText="取消"
       >
         <p style={{ fontSize: 12, color: '#9aa3b4', marginBottom: 12 }}>
-          未单独设置字体的 Label/Input 控件将使用此字体。
+          设置后将统一应用到所有文字控件，新建控件也会默认使用此字体。
         </p>
         <Select
           style={{ width: '100%' }}

@@ -23,6 +23,7 @@ interface ProjectState {
   lastPageId: string | null
   agents: AgentsState
   scripts: ScriptsState
+  fontVersion: number  // 字体注册完成后 bump，触发画布重渲染用真实字体
 
   initFromHandles: (handles: { star: boolean; ws: boolean }) => void
   setConfig: (config: ProjectConfig) => void
@@ -32,6 +33,7 @@ interface ProjectState {
   setAgents: (s: AgentsState) => void
   refreshScripts: () => Promise<void>
   setScripts: (s: ScriptsState) => void
+  bumpFontVersion: () => void
 }
 
 const initialAgents: AgentsState = {
@@ -54,6 +56,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   lastPageId: null,
   agents: initialAgents,
   scripts: initialScripts,
+  fontVersion: 0,
 
   initFromHandles: (handles) => {
     // 从 projectContext 恢复配置
@@ -118,4 +121,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       set({ scripts: initialScripts })
     }
   },
+
+  bumpFontVersion: () => set((s) => ({ fontVersion: s.fontVersion + 1 })),
 }))

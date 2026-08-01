@@ -649,9 +649,14 @@ export const useEditorStore = create<EditorState>()(
 // 辅助：创建新节点
 let nodeCounter = 0
 let defaultButtonSoundId: string | null = null
+let defaultFontForNew: string | null = null  // 新建控件的预填字体（来自全局默认字体）
 
 export function setDefaultButtonSoundId(id: string | null) {
   defaultButtonSoundId = id
+}
+
+export function setDefaultFontForNew(font: string | null) {
+  defaultFontForNew = font
 }
 
 export function createNode(starType: string, label: string): UiNode {
@@ -674,6 +679,10 @@ export function createNode(starType: string, label: string): UiNode {
   reassignChildIds(node)
   if (node.starType === 'Button' && defaultButtonSoundId) {
     node.djui = { ...(node.djui ?? {}), clickSoundId: defaultButtonSoundId }
+  }
+  // 带文字的控件预填全局默认字体（这样导出的 JSON 每个控件都明确指向字体，引擎无需回退层）
+  if (node.text && defaultFontForNew && !node.text.font) {
+    node.text.font = defaultFontForNew
   }
   return node
 }

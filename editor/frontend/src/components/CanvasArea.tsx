@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KImage, Circle, Path } from 'react-konva'
 import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
+import { engineFontToCss } from '@/lib/fontLoader'
 import { UiNode } from '@/types/layout'
 import * as api from '@/api/client'
 import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
@@ -104,7 +105,9 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
   const text = node.text?.text ?? ''
   const baseFontSize = node.text?.fontSize ?? 16
   const font = node.text?.font ?? defaultFont
-  const fontFamily = font ? `"${font}"` : undefined
+  // 引擎 family（如 ui/font/regular）→ 浏览器 CSS family（如 djui-regular）；未注册则回退
+  const cssFont = font ? (engineFontToCss(font) ?? font) : undefined
+  const fontFamily = cssFont ? `"${cssFont}"` : undefined
   const bold = node.text?.bold ?? false
   const wrapEnabled = node.text?.textWrap ?? false
   const overflow = node.text?.textOverflow ?? 'Shrink'
@@ -975,6 +978,9 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
 export default function CanvasArea() {
   const { page, selectedIds, selectNode, clearSelection, addNode } = useEditorStore()
   const { config } = useProjectStore()
+  // 订阅 fontVersion：字体注册完成后 bump，触发画布用真实字体重渲染
+  const fontVersion = useProjectStore(s => s.fontVersion)
+  void fontVersion
   const workspacePath = config?.workspacePath ?? ''
   const projectPath = config?.starProjectPath ?? ''
   const stageRef = useRef<Konva.Stage>(null)

@@ -7,8 +7,9 @@ import RightPanel from './components/RightPanel'
 import ConfigModal from './components/ConfigModal'
 import WhatsNewModal from './components/WhatsNewModal'
 import { useProjectStore } from './store/projectStore'
-import { setDefaultButtonSoundId, useEditorStore } from './store/editorStore'
+import { setDefaultButtonSoundId, setDefaultFontForNew, useEditorStore } from './store/editorStore'
 import { projectContext } from './fs/projectContext'
+import { loadEngineFonts } from './lib/fontLoader'
 import * as api from './api/client'
 import { APP_VERSION } from './lib/changelog'
 import { UiPage } from './types/layout'
@@ -107,6 +108,8 @@ export default function App() {
     void (async () => {
       await applyPatchesAndNotify(true)
       await refreshPages()
+      // 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
+      loadEngineFonts().then(() => useProjectStore.getState().bumpFontVersion())
       useProjectStore.getState().refreshAgents()
       useProjectStore.getState().refreshScripts()
     })()
@@ -137,6 +140,11 @@ export default function App() {
     return () => window.removeEventListener('djui:soundsChanged', handleSoundsChanged)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handlesReady])
+
+  // 全局默认字体变化时同步给 createNode（新建控件预填字体用）
+  useEffect(() => {
+    setDefaultFontForNew(config?.defaultFont ?? null)
+  }, [config?.defaultFont])
 
   const openSoundConfig = () => {
     window.dispatchEvent(new CustomEvent('djui:openSoundConfig'))

@@ -267,6 +267,17 @@ export async function readImageBlob(
   return file
 }
 
+// 读取任意文件为 ArrayBuffer（用于字体二进制等）
+export async function readFileArrayBuffer(
+  root: FileSystemDirectoryHandle,
+  path: string
+): Promise<ArrayBuffer | null> {
+  const handle = await getFileHandle(root, path, false)
+  if (!handle) return null
+  const file = await handle.getFile()
+  return file.arrayBuffer()
+}
+
 // 创建图片 Blob URL（带缓存）
 const blobUrlCache = new Map<string, string>()
 

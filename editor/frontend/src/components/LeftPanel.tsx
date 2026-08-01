@@ -504,6 +504,23 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
             showLine={{ showLeafIcon: false }}
             draggable
             onDrop={handleDrop}
+            // 自定义拖拽指示线颜色：放入子节点(inside=橙) vs 交换位置(before/after=蓝)
+            dropIndicatorRender={(props: any) => {
+              const { dropPosition, dropLevelOffset, prefixCls, indent } = props
+              const style: React.CSSProperties = {
+                left: -dropLevelOffset * indent + 4,
+                right: 0,
+                // inside(0)=橙色提示「进入容器」；before(-1)/after(1)=蓝色提示「换位置」
+                backgroundColor: dropPosition === 0 ? '#ff8c42' : '#5ab9ff',
+              }
+              if (dropPosition === -1) {
+                style.top = -3
+              } else {
+                style.bottom = -3
+                if (dropPosition === 0) style.left = indent + 4
+              }
+              return <div style={style} className={`${prefixCls}-drop-indicator`} />
+            }}
             allowDrop={(opts: any) => {
               const dragK = String(opts.dragNode?.key ?? '')
               const dk = String(opts.dropNode?.key ?? '')

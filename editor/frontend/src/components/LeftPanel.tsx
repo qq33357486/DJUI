@@ -407,9 +407,8 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
   // 拖拽改层级（仅控件间，不能跨页面）
   const handleDrop: React.ComponentProps<typeof Tree>['onDrop'] = (info) => {
     const dragKey = String(info.dragNode.key)
-    const dropKey = String(info.node?.key ?? '')
-    const dropPos = info.dropPosition
-    const dropToGap = info.dropToGap
+    const dropNode = info.node
+    const dropKey = String(dropNode?.key ?? '')
 
     // 页面节点不可拖拽
     if (dragKey.startsWith('__page:')) return
@@ -420,18 +419,22 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
       return
     }
 
-    let targetId: string
-    let position: 'before' | 'after' | 'inside'
+    // ★ antd Tree 的 info.dropPosition 是「绝对序号」(内部相对值 + target 索引)，
+    //   不能直接当 -1/0/1 用。官方推荐：用 info.node.pos 反推相对落点。
+    //   pos 形如 '0-0-2'，末位是 target 在父节点中的索引。
+    const posArr = String(dropNode?.pos ?? '').split('-')
+    const targetIndex = Number(posArr[posArr.length - 1])
+    const dropPositionOffset = info.dropPosition - targetIndex
+    // dropPositionOffset: <0 = 插到 target 之前, >0 = 之后, =0 = 作为 target 子节点
 
-    if (dropToGap) {
-      targetId = dropKey
-      position = dropPos <= 0 ? 'before' : 'after'
-    } else {
-      targetId = dropKey
+    let position: 'before' | 'after' | 'inside'
+    if (!info.dropToGap) {
       position = 'inside'
+    } else {
+      position = dropPositionOffset < 0 ? 'before' : 'after'
     }
 
-    moveNode(dragKey, targetId, position)
+    moveNode(dragKey, dropKey, position)
   }
 
   // 新建下拉菜单

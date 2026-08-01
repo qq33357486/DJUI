@@ -305,17 +305,19 @@ export const useEditorStore = create<EditorState>()(
     moveNode: (dragId, targetId, position) => {
       // 不允许拖到自己
       if (dragId === targetId) return
-      // 不允许拖到 root（root 不可移动）
-      if (targetId === 'root' && position === 'before') return
       get().pushHistory()
       set((s) => {
         if (!s.page) return
         const root = s.page.root
+        // 'root' 是 LeftPanel 拖到页面节点时传入的魔法值，统一映射为真实 root id
+        const realTargetId = targetId === 'root' ? root.id : targetId
+        // 不允许拖到 root 上方（root 是页面根，不可有兄弟）
+        if (realTargetId === root.id && position === 'before') return
         // 循环检测：如果 target 是 drag 的子孙，禁止
         const dragNode = findNode(root, dragId)
         if (!dragNode) return
-        if (dragId !== targetId) {
-          const targetInDragSubtree = findNode(dragNode, targetId)
+        if (dragId !== realTargetId) {
+          const targetInDragSubtree = findNode(dragNode, realTargetId)
           if (targetInDragSubtree) return // 会造成循环
         }
 
@@ -335,13 +337,13 @@ export const useEditorStore = create<EditorState>()(
         // 算出新父节点的绝对矩形（插入前算，因为插入不影响父节点位置）
         let newParentId: string
         if (position === 'inside') {
-          newParentId = targetId
+          newParentId = realTargetId
         } else {
           // before/after：target 的父节点就是新父节点
-          const targetParent = findParent(root, targetId)
-          newParentId = targetParent ? targetParent.id : 'root'
+          const targetParent = findParent(root, realTargetId)
+          newParentId = targetParent ? targetParent.id : root.id
         }
-        const newParentRect = newParentId === 'root'
+        const newParentRect = newParentId === root.id
           ? { x: 0, y: 0, width: canvasW, height: canvasH }
           : solveAbsoluteRect(root, newParentId, canvasW, canvasH)
 
@@ -352,13 +354,13 @@ export const useEditorStore = create<EditorState>()(
 
         // 插入到新位置（使用拷贝，不是 draft）
         if (position === 'inside') {
-          const target = findNode(root, targetId)
+          const target = findNode(root, realTargetId)
           if (target) target.children.push(dragCopy)
         } else {
           // before/after：找到 target 的父节点，在 children 里定位
-          const parent = findParent(root, targetId)
+          const parent = findParent(root, realTargetId)
           if (!parent) return
-          const idx = parent.children.findIndex(c => c.id === targetId)
+          const idx = parent.children.findIndex(c => c.id === realTargetId)
           if (idx < 0) return
           const insertAt = position === 'before' ? idx : idx + 1
           parent.children.splice(insertAt, 0, dragCopy)

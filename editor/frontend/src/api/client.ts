@@ -375,10 +375,10 @@ export async function checkRuntime(_projectPath: string): Promise<RuntimeStatus>
   const versionText = await fs.readFileText(star, 'src/DjuiRuntime/djui_version.txt')
   const installedVersion = versionText?.trim() ?? 'unknown'
 
-  // 检查文件差异
+  // 检查文件差异（AGENTS.md 随 .cs 一起分发）
   const installedFileNames: string[] = []
   for await (const entry of runtimeDir.values()) {
-    if (entry.kind === 'file' && entry.name.endsWith('.cs')) {
+    if (entry.kind === 'file' && (entry.name.endsWith('.cs') || entry.name === 'AGENTS.md')) {
       installedFileNames.push(entry.name)
     }
   }
@@ -415,7 +415,6 @@ export async function initRuntime(_projectPath: string): Promise<InitRuntimeResu
       await targetDir.removeEntry(entry.name)
     }
   }
-
   // 写入新文件
   const copied: string[] = []
   for (const file of RUNTIME_FILES) {
@@ -522,44 +521,64 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const imageTarget = await fs.ensureDir(star, 'ui/image/djui')
   const assetCount = await fs.mirrorDir(finishedDir, imageTarget)
 
-  // 4. 镜像页面 → AppBundle/user_files/djui/pages (client)
-  const clientDjuiDir = await fs.ensureDir(star, 'AppBundle/user_files/djui')
-  // 先清理旧的 pages 目录
-  await fs.removeDir(star, 'AppBundle/user_files/djui/pages')
-  const clientPagesDir = await fs.ensureDir(star, 'AppBundle/user_files/djui/pages')
-  const pageCount = await fs.mirrorDir(pagesSourceDir, clientPagesDir)
+  // 4. 镜像页面 → 双端 AppBundle/user_files/djui/pages
+  // 星火工程有两个 AppBundle：根 AppBundle（服务端进程）与 ui/AppBundle（客户端进程，工作目录在 ui/）。
+  // Runtime 的 PagesDir 是相对路径 "user_files/djui/pages"，客户端实际读 ui/AppBundle/...，必须双写。
+  const warningsFromBundle: string[] = []
+  const pageCount = await mirrorPages(star, 'AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
+  const clientUiPageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
 
-  // 5. 镜像页面 → AppBundle/user_files/djui/pages (server - 同一路径)
-  // （client 和 server 使用同一 user_files/djui 路径，无需额外操作）
-
-  // 6. 复制 sounds.json
+  // 5. 复制 sounds.json → 双端
   let copiedSoundsConfig = false
   if (await fs.fileExists(star, 'ui/djui/sounds.json')) {
     const soundData = await fs.readFileText(star, 'ui/djui/sounds.json')
     if (soundData) {
+      await fs.ensureDir(star, 'AppBundle/user_files/djui')
       await fs.writeFileText(star, 'AppBundle/user_files/djui/sounds.json', soundData)
+      // ui/AppBundle 可能不存在（非标准工程结构）：ensureDir 会创建
+      await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
+      await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/sounds.json', soundData)
       copiedSoundsConfig = true
     }
   }
 
-  // 7. 发布警告
-  const warnings = await buildPublishWarnings(pagesSourceDir, star)
+  // 6. 发布警告
+  const warnings = [...warningsFromBundle, ...await buildPublishWarnings(pagesSourceDir, star)]
 
   return {
     ok: true,
     copiedAssets: new Array(assetCount).fill(''),
     copiedPages: new Array(pageCount).fill(''),
-    copiedClientPages: new Array(pageCount).fill(''),
+    copiedClientPages: new Array(clientUiPageCount).fill(''),
     copiedSoundsConfig,
     warnings,
     targetDir: 'ui/image/djui',
     targetDirs: {
       images: 'ui/image/djui',
-      clientPages: 'AppBundle/user_files/djui/pages',
-      clientSounds: copiedSoundsConfig ? 'AppBundle/user_files/djui/sounds.json' : undefined,
+      serverPages: 'AppBundle/user_files/djui/pages',
+      clientPages: 'ui/AppBundle/user_files/djui/pages',
+      clientSounds: copiedSoundsConfig ? 'AppBundle/user_files/djui/sounds.json + ui/AppBundle/user_files/djui/sounds.json' : undefined,
     },
     message: '发布完成',
   }
+}
+
+// 镜像页面目录到指定目标（清空再复制）；目标在 ui/ 下不存在时创建并提示
+async function mirrorPages(
+  star: FileSystemDirectoryHandle,
+  targetPath: string,
+  pagesSourceDir: FileSystemDirectoryHandle,
+  warnings: string[]
+): Promise<number> {
+  const parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+  await fs.ensureDir(star, parentPath)
+  const existed = await fs.getDirHandle(star, targetPath, false)
+  if (!existed) {
+    warnings.push(`目录 ${targetPath} 原本不存在，已自动创建（若这不是星火工程结构请检查）`)
+  }
+  await fs.removeDir(star, targetPath)
+  const targetDir = await fs.ensureDir(star, targetPath)
+  return await fs.mirrorDir(pagesSourceDir, targetDir)
 }
 
 async function buildPublishWarnings(pagesDir: FileSystemDirectoryHandle, star: FileSystemDirectoryHandle): Promise<string[]> {

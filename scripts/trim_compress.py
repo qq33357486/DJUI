@@ -3,7 +3,7 @@
 """
 DJUI 工具：裁边 + 压缩 + 尺寸规范化
 
-把任意透明 PNG 处理成符合 DJUI 成品素材分类规范的尺寸，并做有损压缩。
+把任意透明 PNG 按分类最大边限制压缩，并保留原始比例。
 对应工作区 AGENTS.md「加工流程」的第二步。
 
 用法:
@@ -13,15 +13,16 @@ DJUI 工具：裁边 + 压缩 + 尺寸规范化
     # 显式指定分类
     python trim_compress.py --input-dir 临时文件/去绿幕后 --output-dir 成品素材/buttons --category buttons
 
-    # 自定义尺寸（覆盖分类默认）
+    # 只有需要固定画布时才显式指定宽高
     python trim_compress.py --input-dir 输入 --output-dir 输出 --width 1024 --height 512 --padding 40
 
 说明:
     - 自动 alpha 裁边（去掉四周透明像素）
-    - 居中适配到目标尺寸画布（保留比例，加 padding）
+    - 默认保持 alpha 紧裁与原始比例，只限制分类最大边
+    - 仅在显式传入 --width/--height 时居中适配到固定画布
     - PNG 量化压缩（默认 192 色，FASTOCTREE 算法）
     - 可选调用 oxipng 做最终无损优化（如果系统装了）
-    - 输出文件名自动加尺寸后缀（如 icon_coin_256.png），符合 DJUI 命名规范
+    - 输出文件名自动记录实际尺寸后缀（如 icon_coin_256x180.png）
 """
 
 from __future__ import annotations
@@ -36,29 +37,28 @@ from pathlib import Path
 from PIL import Image
 
 
-# ---------- DJUI 分类尺寸表（对应工作区 AGENTS.md §3.3） ----------
+# ---------- DJUI 分类尺寸表（对应工作区 AGENTS.md §3） ----------
 # 依据 Apple/Google 移动应用建议：
 #   - 单张贴图 ≤ 1024
-#   - UI 元素尽量 ≤ 512
+#   - 常规 UI 元素最大边 ≤ 512
 #   - 小图标 ≤ 256
 
 @dataclass(frozen=True)
 class AssetSpec:
-    """分类目标尺寸规范"""
-    size: tuple[int, int]      # 目标画布尺寸
-    padding: int               # 安全区 padding（四周）
+    """分类默认最大边规范（保留原始宽高比，不强制固定画布）"""
+    max_edge: int
     colors: int = 192          # PNG 量化颜色数
 
 
 DEFAULT_SPECS: dict[str, AssetSpec] = {
-    "icons":        AssetSpec((256, 256),  32, 192),   # 图标
-    "buttons":      AssetSpec((512, 128),  24, 192),   # 横长按钮
-    "backgrounds":  AssetSpec((1024, 1024), 0, 160),   # 全屏背景
-    "frames":       AssetSpec((256, 256),  16, 192),   # 九宫格切片框
-    "lists":        AssetSpec((512, 256),  24, 192),   # 列表项/卡片
-    "decorations":  AssetSpec((256, 256),  16, 192),   # 装饰物
-    "text":         AssetSpec((512, 256),  16, 192),   # 艺术字标题
-    "misc":         AssetSpec((512, 512),  24, 192),   # 未分类
+    "icons":        AssetSpec(256, 192),   # 功能、物品、状态图标
+    "buttons":      AssetSpec(512, 192),   # 保留按钮原比例
+    "backgrounds":  AssetSpec(1024, 160),  # 全屏或分区背景
+    "frames":       AssetSpec(512, 192),   # 九宫格外框
+    "lists":        AssetSpec(512, 192),   # 列表项、卡片
+    "decorations":  AssetSpec(512, 192),   # 插画、花纹、角标
+    "text":         AssetSpec(512, 192),   # 艺术字标题
+    "misc":         AssetSpec(512, 192),   # 未分类
 }
 
 
@@ -93,7 +93,7 @@ def alpha_bbox(img: Image.Image):
 
 
 def fit_to_canvas(img: Image.Image, size: tuple[int, int], padding: int) -> Image.Image:
-    """裁边 + 居中适配到目标尺寸画布"""
+    """仅供明确要求固定画布的素材使用。"""
     bbox = alpha_bbox(img)
     if bbox:
         img = img.crop(bbox)
@@ -107,6 +107,21 @@ def fit_to_canvas(img: Image.Image, size: tuple[int, int], padding: int) -> Imag
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.alpha_composite(resized, ((size[0] - new_size[0]) // 2, (size[1] - new_size[1]) // 2))
     return canvas
+
+
+def fit_to_max_edge(img: Image.Image, max_edge: int) -> Image.Image:
+    """alpha 紧裁后，仅在超过最大边时等比缩小；绝不补透明方形画布。"""
+    bbox = alpha_bbox(img)
+    if bbox:
+        img = img.crop(bbox)
+
+    largest_edge = max(img.width, img.height)
+    if largest_edge <= max_edge:
+        return img
+
+    scale = max_edge / largest_edge
+    new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+    return img.resize(new_size, Image.Resampling.LANCZOS)
 
 
 def save_compressed_png(img: Image.Image, dst: Path, colors: int) -> None:
@@ -128,12 +143,30 @@ def run_optional_optimizer(path: Path) -> None:
         )
 
 
-def process_file(src: Path, dst_dir: Path, spec: AssetSpec, category: str) -> tuple[Path, int, int]:
+def normalize_image(
+    img: Image.Image,
+    max_edge: int,
+    canvas_size: tuple[int, int] | None,
+    padding: int,
+) -> Image.Image:
+    if canvas_size is not None:
+        return fit_to_canvas(img, canvas_size, padding)
+    return fit_to_max_edge(img, max_edge)
+
+
+def process_file(
+    src: Path,
+    dst_dir: Path,
+    spec: AssetSpec,
+    category: str,
+    canvas_size: tuple[int, int] | None,
+    padding: int,
+) -> tuple[Path, int, int]:
     original_size = src.stat().st_size
     img = Image.open(src).convert("RGBA")
-    normalized = fit_to_canvas(img, spec.size, spec.padding)
+    normalized = normalize_image(img, spec.max_edge, canvas_size, padding)
 
-    out_stem = normalize_output_name(src.stem, category, spec.size)
+    out_stem = normalize_output_name(src.stem, category, normalized.size)
     dst = dst_dir / f"{out_stem}.png"
 
     save_compressed_png(normalized, dst, spec.colors)
@@ -168,9 +201,12 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True, help="输出目录（成品素材/分类名）")
     parser.add_argument("--category", type=str, default=None,
                         help="显式分类（icons/buttons/...）。不填则从 output-dir 目录名推断")
-    parser.add_argument("--width", type=int, default=None, help="自定义目标宽度（覆盖分类默认）")
-    parser.add_argument("--height", type=int, default=None, help="自定义目标高度（覆盖分类默认）")
-    parser.add_argument("--padding", type=int, default=None, help="自定义 padding（覆盖分类默认）")
+    parser.add_argument("--width", type=int, default=None, help="明确要求固定画布时的目标宽度")
+    parser.add_argument("--height", type=int, default=None, help="明确要求固定画布时的目标高度")
+    parser.add_argument("--max-edge", type=int, default=None,
+                        help="仅限制最长边并保留原始比例（覆盖分类默认）")
+    parser.add_argument("--padding", type=int, default=None,
+                        help="固定画布四周 padding；仅配合 --width/--height 使用，默认 0")
     parser.add_argument("--colors", type=int, default=None, help="自定义量化颜色数（默认 192）")
     parser.add_argument("--keep-name", action="store_true", help="不规范化输出文件名")
     args = parser.parse_args()
@@ -187,17 +223,29 @@ def main() -> None:
         raise SystemExit(f"未知分类 '{category}'，可选: {', '.join(DEFAULT_SPECS.keys())}")
 
     spec = DEFAULT_SPECS[category]
+    canvas_size: tuple[int, int] | None = None
+    padding = 0
     if args.width is not None and args.height is not None:
-        spec = AssetSpec((args.width, args.height), args.padding if args.padding is not None else spec.padding,
-                         args.colors if args.colors is not None else spec.colors)
+        if args.max_edge is not None:
+            raise SystemExit("--max-edge 不能与 --width/--height 同时使用")
+        canvas_size = (args.width, args.height)
+        padding = args.padding if args.padding is not None else 0
+        spec = AssetSpec(max(args.width, args.height), args.colors if args.colors is not None else spec.colors)
     elif args.width is not None or args.height is not None:
         raise SystemExit("--width 和 --height 必须同时指定")
-    elif args.padding is not None or args.colors is not None:
-        spec = AssetSpec(spec.size,
-                         args.padding if args.padding is not None else spec.padding,
+    else:
+        if args.padding is not None:
+            raise SystemExit("--padding 仅能与 --width/--height 一起使用")
+        spec = AssetSpec(args.max_edge if args.max_edge is not None else spec.max_edge,
                          args.colors if args.colors is not None else spec.colors)
 
-    print(f"分类: {category}  目标尺寸: {spec.size[0]}x{spec.size[1]}  padding: {spec.padding}  colors: {spec.colors}")
+    if spec.max_edge <= 0:
+        raise SystemExit("最大边必须为正整数")
+
+    if canvas_size is not None:
+        print(f"分类: {category}  固定画布: {canvas_size[0]}x{canvas_size[1]}  padding: {padding}  colors: {spec.colors}")
+    else:
+        print(f"分类: {category}  最大边: {spec.max_edge}  保留比例/紧裁  colors: {spec.colors}")
 
     sources = sorted(args.input_dir.glob("*.png"))
     if not sources:
@@ -213,12 +261,12 @@ def main() -> None:
                 dst = args.output_dir / src.name
                 original_size = src.stat().st_size
                 img = Image.open(src).convert("RGBA")
-                normalized = fit_to_canvas(img, spec.size, spec.padding)
+                normalized = normalize_image(img, spec.max_edge, canvas_size, padding)
                 save_compressed_png(normalized, dst, spec.colors)
                 run_optional_optimizer(dst)
                 new_size = dst.stat().st_size
             else:
-                dst, original_size, new_size = process_file(src, args.output_dir, spec, category)
+                dst, original_size, new_size = process_file(src, args.output_dir, spec, category, canvas_size, padding)
             ratio = new_size / original_size if original_size else 0
             print(f"  {src.name} -> {dst.name}  {original_size} -> {new_size} bytes ({ratio:.1%})")
             total_old += original_size

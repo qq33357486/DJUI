@@ -17,11 +17,11 @@ Runtime 版本号由 `editor/frontend/src/lib/bundledAssets.ts` 中的 `RUNTIME_
 
 ## 发布后的文件位置
 
-发布后页面 JSON 会进入：
+发布（DJUI 编辑器 ≥0.9.4）会把页面 JSON 双写到星火工程的**两个 AppBundle**：
 
 ```text
-StarEngine 工程/AppBundle/user_files/djui/pages/
-StarEngine 工程/ui/AppBundle/user_files/djui/pages/
+StarEngine 工程/AppBundle/user_files/djui/pages/     # 服务端进程读取（CWD=工程根）
+StarEngine 工程/ui/AppBundle/user_files/djui/pages/  # 客户端进程读取（CWD=ui/）
 ```
 
 素材会进入：
@@ -30,14 +30,16 @@ StarEngine 工程/ui/AppBundle/user_files/djui/pages/
 StarEngine 工程/ui/image/djui/
 ```
 
-音效配置会进入：
+音效配置会双写到：
 
 ```text
 StarEngine 工程/AppBundle/user_files/djui/sounds.json
 StarEngine 工程/ui/AppBundle/user_files/djui/sounds.json
 ```
 
-Runtime 默认从 `user_files/djui/pages` 扫描页面，并从 `user_files/djui/sounds.json` 读取 DJUI 音效配置。
+Runtime 默认从相对路径 `user_files/djui/pages` 扫描页面（随进程工作目录解析到对应 AppBundle），并从 `user_files/djui/sounds.json` 读取 DJUI 音效配置。
+
+> 部署契约（路径表、使用范式、故障定位）见随 Runtime 分发的 `src/DjuiRuntime/AGENTS.md`。禁止手工拷贝页面 JSON 到 AppBundle——双端版本错位是"页面没开/图不对"类故障的根源。
 
 ## 初始化
 

@@ -44,7 +44,15 @@ public static class DjuiWindowManager
         _closingWindows.Clear();
         _nextWindowOrder = 0;
         DjuiAudioSystem.Initialize();
-        if (!Directory.Exists(PagesDir)) return;
+
+        if (!Directory.Exists(PagesDir))
+        {
+            // 显式报错（原为静默 return，AppBundle 断供会以"页面没开"软故障形式漏过）
+            Game.Logger.LogError(
+                "DJUI: 页面目录 {Dir} 不存在——AppBundle 断供。请在 DJUI 编辑器点「发布」（自动写入 AppBundle 与 ui/AppBundle 双端 user_files/djui/pages），勿手工拷贝。详见 src/DjuiRuntime/AGENTS.md",
+                PagesDir);
+            return;
+        }
 
         foreach (var file in Directory.GetFiles(PagesDir, "*.json"))
         {
@@ -59,11 +67,20 @@ public static class DjuiWindowManager
             }
             catch (Exception ex)
             {
-                Game.Logger.LogWarning("DJUI: 加载页面 {File} 失败: {Error}", file, ex.Message);
+                Game.Logger.LogError("DJUI: 加载页面 {File} 失败: {Error}", file, ex.Message);
             }
         }
 
-        Game.Logger.LogInformation("DJUI: 已加载 {Count} 个页面", _pageCache.Count);
+        if (_pageCache.Count == 0)
+        {
+            Game.Logger.LogError(
+                "DJUI: 页面目录 {Dir} 存在但未扫描到任何页面——发布可能中断或页面 JSON 全部无效。请重新在 DJUI 编辑器点「发布」。详见 src/DjuiRuntime/AGENTS.md",
+                PagesDir);
+        }
+        else
+        {
+            Game.Logger.LogInformation("DJUI: 已加载 {Count} 个页面", _pageCache.Count);
+        }
     }
 
     /// <summary>
@@ -89,7 +106,11 @@ public static class DjuiWindowManager
 
         if (!_pageCache.TryGetValue(pageId, out var page))
         {
-            Game.Logger.LogWarning("DJUI: 页面 {PageId} 不存在", pageId);
+            // 显式列出已注册页面与修复指引（原为单行 warning，排障困难）
+            var registered = _pageCache.Count > 0 ? string.Join(", ", _pageCache.Keys) : "（无——Initialize 未扫描到任何页面，AppBundle 可能断供）";
+            Game.Logger.LogError(
+                "DJUI: 页面 {PageId} 不存在。已注册页面：{Registered}。若清单为空或缺少目标页：请在 DJUI 编辑器点「发布」（双端 AppBundle）；若拼写错误：对照清单修正 pageId。详见 src/DjuiRuntime/AGENTS.md",
+                pageId, registered);
             return null;
         }
 

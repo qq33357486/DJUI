@@ -103,9 +103,9 @@ export default function TopBar(props: TopBarProps) {
               )}
               <div style={{ fontSize: 12, color: '#999' }}>
                 <div>{result.targetDirs?.images ?? result.targetDir}</div>
+                {result.targetDirs?.serverPages && <div>{result.targetDirs.serverPages}</div>}
                 <div>{result.targetDirs?.clientPages}</div>
                 {result.targetDirs?.clientSounds && <div>{result.targetDirs.clientSounds}</div>}
-                {result.targetDirs?.clientConfig && <div>{result.targetDirs.clientConfig}</div>}
               </div>
             </div>
           ),

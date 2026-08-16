@@ -15,13 +15,16 @@ import DjuiUiLoader from '../../../../runtime/DjuiUiLoader.cs?raw'
 import DjuiViewportAdapter from '../../../../runtime/DjuiViewportAdapter.cs?raw'
 import DjuiWindowManager from '../../../../runtime/DjuiWindowManager.cs?raw'
 
+// runtime 附带文档（部署契约，随 Runtime 分发）
+import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
+
 // scripts 文件
 import greenKeyToPng from '../../../../scripts/green_key_to_png.py?raw'
 import trimCompress from '../../../../scripts/trim_compress.py?raw'
 import scriptsReadme from '../../../../scripts/README.md?raw'
 import scriptsVersion from '../../../../scripts/version.txt?raw'
 
-export const RUNTIME_VERSION = '0.3.1'
+export const RUNTIME_VERSION = '0.4.0'
 
 export interface BundledRuntimeFile {
   name: string
@@ -41,6 +44,7 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiUiLoader.cs', content: DjuiUiLoader },
   { name: 'DjuiViewportAdapter.cs', content: DjuiViewportAdapter },
   { name: 'DjuiWindowManager.cs', content: DjuiWindowManager },
+  { name: 'AGENTS.md', content: runtimeAgentsMd },
 ]
 
 export interface BundledScriptFile {

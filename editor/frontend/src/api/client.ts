@@ -521,21 +521,16 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const imageTarget = await fs.ensureDir(star, 'ui/image/djui')
   const assetCount = await fs.mirrorDir(finishedDir, imageTarget)
 
-  // 4. 镜像页面 → 双端 AppBundle/user_files/djui/pages
-  // 星火工程有两个 AppBundle：根 AppBundle（服务端进程）与 ui/AppBundle（客户端进程，工作目录在 ui/）。
-  // Runtime 的 PagesDir 是相对路径 "user_files/djui/pages"，客户端实际读 ui/AppBundle/...，必须双写。
+  // 4. 镜像页面 → ui/AppBundle/user_files/djui/pages（唯一消费方：客户端进程，CWD=ui/）
+  // DJUI Runtime 全部 #if CLIENT，服务端不读页面 JSON——根 AppBundle 无需发布 djui 资源。
   const warningsFromBundle: string[] = []
-  const pageCount = await mirrorPages(star, 'AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
-  const clientUiPageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
+  const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
 
-  // 5. 复制 sounds.json → 双端
+  // 5. 复制 sounds.json → 同一位置
   let copiedSoundsConfig = false
   if (await fs.fileExists(star, 'ui/djui/sounds.json')) {
     const soundData = await fs.readFileText(star, 'ui/djui/sounds.json')
     if (soundData) {
-      await fs.ensureDir(star, 'AppBundle/user_files/djui')
-      await fs.writeFileText(star, 'AppBundle/user_files/djui/sounds.json', soundData)
-      // ui/AppBundle 可能不存在（非标准工程结构）：ensureDir 会创建
       await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
       await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/sounds.json', soundData)
       copiedSoundsConfig = true
@@ -549,15 +544,14 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
     ok: true,
     copiedAssets: new Array(assetCount).fill(''),
     copiedPages: new Array(pageCount).fill(''),
-    copiedClientPages: new Array(clientUiPageCount).fill(''),
+    copiedClientPages: new Array(pageCount).fill(''),
     copiedSoundsConfig,
     warnings,
     targetDir: 'ui/image/djui',
     targetDirs: {
       images: 'ui/image/djui',
-      serverPages: 'AppBundle/user_files/djui/pages',
       clientPages: 'ui/AppBundle/user_files/djui/pages',
-      clientSounds: copiedSoundsConfig ? 'AppBundle/user_files/djui/sounds.json + ui/AppBundle/user_files/djui/sounds.json' : undefined,
+      clientSounds: copiedSoundsConfig ? 'ui/AppBundle/user_files/djui/sounds.json' : undefined,
     },
     message: '发布完成',
   }

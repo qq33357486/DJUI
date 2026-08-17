@@ -7,7 +7,7 @@ import { UiNode, ProjectConfig } from '@/types/layout'
 import * as api from '@/api/client'
 import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
 import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/anchorPresets'
-import { solveLayout, Rect as LayoutRect } from '@/utils/layoutSolver'
+import { solveLayout, setCurrentImageFrame, Rect as LayoutRect } from '@/utils/layoutSolver'
 import { computeImageFit } from '@/utils/imageFit'
 import { createCanvasPlanV6 } from '@/utils/viewportV6'
 import { DEVICE_PRESETS_V6, findDevicePresetV6 } from '@/lib/devicePresetsV6'
@@ -1377,6 +1377,21 @@ function computeRenderDims(
   }
   const referenceRect = previewPlan?.referenceRect ?? { x: 0, y: 0, width: designW, height: designH }
   const safeRect = previewPlan?.safeRect ?? { x: 0, y: 0, width: actualW, height: actualH }
+  // 页面级背景图帧:根下第一个 stretch Both + image 的节点,按 cover 数学算完整缩放图矩形。
+  // 供 anchor.target='image' 的节点(场景建筑等)钉在背景图上 — 图被裁切时内容随图同步移动。
+  const imageFrameHost = (page.root.children ?? []).find(n =>
+    (n.stretch?.style ?? 'None') === 'Both' && !!(n.appearance?.image) && n.basic?.visible !== false)
+  let pageImageFrame: LayoutRect | null = null
+  if (imageFrameHost) {
+    const ap = imageFrameHost.appearance!
+    const sw = ap.sourceSize?.width ?? 0, sh = ap.sourceSize?.height ?? 0
+    if (sw > 0 && sh > 0 && (ap.imageFit ?? 'cover') === 'cover') {
+      const scale = Math.max(actualW / sw, actualH / sh)
+      const fx = Math.max(0, Math.min(1, ap.focalX ?? 0.5)), fy = Math.max(0, Math.min(1, ap.focalY ?? 0.5))
+      pageImageFrame = { x: (actualW - sw * scale) * fx, y: (actualH - sh * scale) * fy, width: sw * scale, height: sh * scale }
+    }
+  }
+  setCurrentImageFrame(pageImageFrame)
   const effectiveRoot = responsiveVariant === 'wide'
     ? cloneTreeWithResponsiveOverrides(page.root, page.responsive?.wide.overrides)
     : page.root

@@ -123,7 +123,7 @@ export interface DjuiTransition {
 // 锚点：只管位置（NGUI UIAnchor 风格，9-way）
 export interface DjuiAnchor {
   // 锚定目标：父节点 / 屏幕 / 安全区；父级局部绝对定位使用 side=None
-  target?: 'screen' | 'parent' | 'safe'
+  target?: 'screen' | 'parent' | 'safe' | 'image'
   safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
   // 9-way 锚点位置（决定控件相对父/屏幕的对齐基准点）
   side?: 'None' | 'TopLeft' | 'Top' | 'TopRight' | 'Left' | 'Center' | 'Right' | 'BottomLeft' | 'Bottom' | 'BottomRight'

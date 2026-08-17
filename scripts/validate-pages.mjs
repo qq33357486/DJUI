@@ -25,7 +25,7 @@ const OVERRIDE_PATHS = new Set([
   'button.imageHover', 'button.imagePressed', 'progress.value',
 ])
 const STAR_TYPES = ['Panel', 'Button', 'Label', 'Input', 'Progress', 'SpacingPanel', 'PanelScrollable', 'TemplateInstance']
-const ANCHOR_TARGETS = ['parent', 'screen', 'safe']
+const ANCHOR_TARGETS = ['parent', 'screen', 'safe', 'image']
 const ANCHOR_SIDES = ['None', 'TopLeft', 'Top', 'TopRight', 'Left', 'Center', 'Right', 'BottomLeft', 'Bottom', 'BottomRight']
 const SAFE_EDGES = new Set(['left', 'top', 'right', 'bottom'])
 

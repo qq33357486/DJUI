@@ -95,15 +95,49 @@ public static class DjuiLayoutSolverV6
     {
         var solved = new Dictionary<string, DjuiRectV6>();
         solved[page.Root.Id] = new DjuiRectV6(0, 0, plan.CanvasRect.Width, plan.CanvasRect.Height); // root is local to the window host
-        foreach (var child in page.Root.Children) SolveTree(child, plan.CanvasRect, plan, solved);
+        // 图帧锚定:页面级寻找背景宿主(根下第一个 stretch Both 且带 image 的节点),
+        // 计算 cover 后图片的可见帧,供 anchor.target="image" 的节点作参考系。
+        // 用途:场景建筑等需要「钉在背景图上」的内容 — 图被裁切时内容随图同步移动,相对位置恒定。
+        DjuiRectV6? imageFrame = null;
+        foreach (var child in page.Root.Children)
+        {
+            var ap = child.Appearance;
+            var st = child.Stretch;
+            bool both = st?.Style == "Both";
+            bool hasImage = !string.IsNullOrEmpty(ap?.Image);
+            if (both && hasImage) { imageFrame = ComputeImageFrame(solved: default, child, plan); break; }
+        }
+        foreach (var child in page.Root.Children) SolveTree(child, plan.CanvasRect, plan, solved, imageFrame);
         return solved;
     }
 
-    public static DjuiRectV6 SolveV6(DjuiNodeV6 node, DjuiRectV6 parent, DjuiCanvasPlanV6 plan)
+    /// <summary>cover/contain 后图片在宿主矩形内的可见帧(锚点按 focal,默认居中)。</summary>
+    private static DjuiRectV6 ComputeImageFrame(DjuiRectV6 solved, DjuiNodeV6 host, DjuiCanvasPlanV6 plan)
+    {
+        var rect = SolveV6(host, plan.CanvasRect, plan);
+        var ap = host.Appearance;
+        float sw = ap?.SourceSize?.Width ?? 0, sh = ap?.SourceSize?.Height ?? 0;
+        if (sw <= 0 || sh <= 0) return rect;
+        float fx = Math.Clamp(ap?.FocalX ?? 0.5f, 0, 1), fy = Math.Clamp(ap?.FocalY ?? 0.5f, 0, 1);
+        string fit = ap?.ImageFit ?? "stretch";
+        if (fit == "contain")
+        {
+            float scale = Math.Min(rect.Width / sw, rect.Height / sh);
+            float w = sw * scale, h = sh * scale;
+            return new DjuiRectV6(rect.X + (rect.Width - w) * fx, rect.Y + (rect.Height - h) * fy, w, h);
+        }
+        // cover(默认按 cover 处理):图缩放铺满宿主,可见帧=宿主尺寸,但坐标系取「图内容对齐」—
+        // 对锚定语义而言,可见帧就是宿主矩形本身;建筑要钉在图上,需要的是图的完整缩放框:
+        float scaleC = Math.Max(rect.Width / sw, rect.Height / sh);
+        float fw = sw * scaleC, fh = sh * scaleC;
+        return new DjuiRectV6(rect.X + (rect.Width - fw) * fx, rect.Y + (rect.Height - fh) * fy, fw, fh);
+    }
+
+    public static DjuiRectV6 SolveV6(DjuiNodeV6 node, DjuiRectV6 parent, DjuiCanvasPlanV6 plan, DjuiRectV6? imageFrame = null)
     {
         var a = node.Anchor; var t = node.Transform; var s = node.Stretch; var ar = node.AspectRatio;
         string side = a?.Side ?? "TopLeft";
-        DjuiRectV6 reference = a?.Target == "screen" ? plan.CanvasRect : a?.Target == "safe" ? DjuiCanvasV6.SelectSafeEdges(plan.CanvasRect, plan.SafeRect, a.SafeEdges) : parent;
+        DjuiRectV6 reference = a?.Target == "screen" ? plan.CanvasRect : a?.Target == "safe" ? DjuiCanvasV6.SelectSafeEdges(plan.CanvasRect, plan.SafeRect, a.SafeEdges) : a?.Target == "image" ? (imageFrame ?? plan.CanvasRect) : parent;
         float x, y, w = t?.Width ?? 100, h = t?.Height ?? 100;
         bool hs = s?.Style == "Horizontal" || s?.Style == "Both", vs = s?.Style == "Vertical" || s?.Style == "Both";
         var m = s?.Margins; float ml = m?.Left ?? 0, mt = m?.Top ?? 0, mr = m?.Right ?? 0, mb = m?.Bottom ?? 0;
@@ -123,11 +157,11 @@ public static class DjuiLayoutSolverV6
         return new DjuiRectV6(x, y, w, h);
     }
 
-    private static void SolveTree(DjuiNodeV6 node, DjuiRectV6 parent, DjuiCanvasPlanV6 plan, Dictionary<string, DjuiRectV6> output)
+    private static void SolveTree(DjuiNodeV6 node, DjuiRectV6 parent, DjuiCanvasPlanV6 plan, Dictionary<string, DjuiRectV6> output, DjuiRectV6? imageFrame = null)
     {
-        var rect = SolveV6(node, parent, plan);
+        var rect = SolveV6(node, parent, plan, imageFrame);
         output[node.Id] = rect;
-        foreach (var child in node.Children) SolveTree(child, rect, plan, output);
+        foreach (var child in node.Children) SolveTree(child, rect, plan, output, imageFrame);
     }
 
 

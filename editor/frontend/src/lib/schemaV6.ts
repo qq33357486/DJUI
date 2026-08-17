@@ -81,7 +81,7 @@ function validateNode(value: Record<string, unknown>, path: string, issues: Comp
   const starTypes = ['Panel', 'Button', 'Label', 'Input', 'Progress', 'SpacingPanel', 'PanelScrollable', 'TemplateInstance']
   if (!starTypes.includes(String(value.starType))) issues.push({ path: path + '.starType', message: '不支持的控件类型' })
   if (isRecord(value.anchor)) {
-    if (!['parent', 'screen', 'safe'].includes(String(value.anchor.target ?? 'parent'))) issues.push({ path: path + '.anchor.target', message: '必须是 parent、screen 或 safe' })
+    if (!['parent', 'screen', 'safe', 'image'].includes(String(value.anchor.target ?? 'parent'))) issues.push({ path: path + '.anchor.target', message: '必须是 parent、screen、safe 或 image' })
     const sides = ['None', 'TopLeft', 'Top', 'TopRight', 'Left', 'Center', 'Right', 'BottomLeft', 'Bottom', 'BottomRight']
     if (!sides.includes(String(value.anchor.side ?? 'TopLeft'))) issues.push({ path: path + '.anchor.side', message: '不支持的锚点位置' })
     if (value.anchor.target === 'safe') {

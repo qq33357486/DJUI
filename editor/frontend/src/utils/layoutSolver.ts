@@ -37,7 +37,13 @@ export interface AutoSizeConflict {
 interface SolveContext {
   measuring?: Set<string>
   safeRect?: Rect
+  imageFrame?: Rect  // 背景图帧(cover 缩放后的完整图矩形),target='image' 时作参考系
 }
+
+// 当前页面级背景图帧(编辑器单例:CanvasArea 渲染前设置,solveLayout 未显式传 imageFrame 时读取)
+let currentImageFrame: Rect | null = null
+export function setCurrentImageFrame(rect: Rect | null): void { currentImageFrame = rect }
+export function getCurrentImageFrame(): Rect | null { return currentImageFrame }
 
 function selectSafeEdges(canvas: Rect, safe: Rect, edges?: Array<'left' | 'top' | 'right' | 'bottom'>): Rect {
   const selected = edges ?? ['left', 'top', 'right', 'bottom']
@@ -72,7 +78,9 @@ export function solveLayout(
     ? canvasRect
     : target === 'safe'
       ? selectSafeEdges(canvasRect, context.safeRect ?? canvasRect, anchor.safeEdges)
-      : parent
+      : target === 'image'
+        ? (context.imageFrame ?? currentImageFrame ?? canvasRect)
+        : parent
 
   // === 无锚点：纯绝对定位 ===
   if (sideId === 'None') {

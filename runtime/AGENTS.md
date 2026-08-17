@@ -80,6 +80,15 @@ DjuiBindingSystem.Set("coin_count", 999);
 
 每个节点各自携带正确的 `sourceSize`（cover/contain 的裁切依据），运行时按层切换可见性即可。
 
+### 背景图帧锚定（target="image"）
+
+需要「钉在背景图上」的内容（场景建筑、地图标记等）使用 `anchor.target: "image"`：
+
+- 参考系 = 页面根下第一个 stretch Both 且带 image 的背景节点，其图片（contain 时为完整显示框，cover 时为缩放后全图框）矩形
+- 配合 `stretch: Both` 可让内容容器与图框同尺寸，内容与背景的相对位置在任何屏幕比例下恒定
+- 典型组合：背景 `contain`（完整显示）+ 内容组 `target=image + stretch Both` —— 非基准比例屏幕在上下/左右出现补边（页面 root 背景色兜底），构图关系严格稳定
+- 业务前提：关键内容设计在图的安全区内（参考工作区规范 §3.4）
+
 ## 字体
 
 - 页面控件不写 `text.font` 时，用 `project.json` 的 `defaultFont`；`defaultFont` 为 `null` 时用**引擎默认字体**

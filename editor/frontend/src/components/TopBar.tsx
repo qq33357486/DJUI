@@ -522,14 +522,31 @@ export default function TopBar(props: TopBarProps) {
   // 快捷键
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      const isModifier = e.ctrlKey || e.metaKey
+      if (!isModifier) return
+      const target = e.target as HTMLElement | null
+      // 文本输入框保留浏览器原生的撤回/重做，避免抢走编辑文字的快捷键。
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      const key = e.key.toLowerCase()
+      if (key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (key === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        redo()
+        return
+      }
+      if (key === 's') {
         e.preventDefault()
         handleSave()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [handleSave])
+  }, [handleSave, redo, undo])
 
   return (
     <>

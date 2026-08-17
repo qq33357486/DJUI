@@ -62,6 +62,7 @@ interface PointerSession {
   modifier: 'none' | 'ctrl' | 'shift'   // 按下时的修饰键
   moved: boolean               // 是否已超过阈值
   activeDragId: string | null  // 一旦超过阈值，锁定的拖动节点 id
+  isGroupDrag: boolean         // 拖动已选中的多选组，而不是只拖命中节点
   dragOrigin: Vec2             // activeDragId 拖动起点的画布坐标（solved.x/y）
 }
 
@@ -328,6 +329,9 @@ function getStretchAxes(node: UiNode) {
 interface ProxyEntry {
   id: string
   rect: LayoutRect        // 当前显示矩形（已含 dragPreview 偏移）
+  baseLayoutRect: LayoutRect // 节点所属布局空间中的原始矩形（场景画板内为 artboard 局部坐标）
+  layoutScaleX: number    // 布局坐标 → 当前画布坐标的缩放
+  layoutScaleY: number
   rotation: number
   baseDragX: number       // 无偏移时的 x（dragPreview 起点基准）
   baseDragY: number
@@ -364,6 +368,9 @@ function collectProxyEntries(
   out.push({
     id: node.id,
     rect: { x: solved.x + renderDelta.x, y: solved.y + renderDelta.y, width: solved.width, height: solved.height },
+    baseLayoutRect: authored,
+    layoutScaleX: sceneSpace?.scaleX ?? 1,
+    layoutScaleY: sceneSpace?.scaleY ?? 1,
     rotation,
     baseDragX: solved.x + inheritedDelta.x,
     baseDragY: solved.y + inheritedDelta.y,
@@ -1688,6 +1695,7 @@ function computeRenderDims(
         modifier,
         moved: false,
         activeDragId: null,
+        isGroupDrag: false,
         dragOrigin: { x: 0, y: 0 },
       }
     } else {
@@ -1700,6 +1708,7 @@ function computeRenderDims(
         modifier,
         moved: false,
         activeDragId: null,
+        isGroupDrag: false,
         dragOrigin: { x: 0, y: 0 },
       }
     }
@@ -1715,6 +1724,7 @@ function computeRenderDims(
       modifier,
       moved: false,
       activeDragId: null,
+      isGroupDrag: false,
       dragOrigin: { x: 0, y: 0 },
     }
   }
@@ -1743,6 +1753,9 @@ function computeRenderDims(
         // 锁定拖动目标，记录其拖动基准点（无偏移时的位置）
         const entry = proxyEntriesRef.current.find(en => en.id === targetId)
         session.activeDragId = targetId
+        const currentSelection = useEditorStore.getState().selectedIds
+        session.isGroupDrag = currentSelection.length > 1
+          && currentSelection.includes(targetId)
         session.dragOrigin = entry
           ? { x: entry.baseDragX, y: entry.baseDragY }
           : { x: 0, y: 0 }
@@ -1751,7 +1764,7 @@ function computeRenderDims(
           selectNode(targetId, 'none')
         }
         // 开启 dragPreview（视觉偏移由 NodeShape 渲染树自动跟随）
-        setDragPreview({ id: targetId, dx: 0, dy: 0 })
+        setDragPreview({ id: session.isGroupDrag ? '__group__' : targetId, dx: 0, dy: 0 })
       }
     }
 
@@ -1799,14 +1812,16 @@ function computeRenderDims(
       const dy = e.evt ? (e.evt.clientY - session.startScreen.y) : 0
       const inv = 1 / viewport.scale
       const entry = proxyEntriesRef.current.find(en => en.id === session.activeDragId)
-      const width = entry?.rect.width ?? 0
-      const height = entry?.rect.height ?? 0
-      handleNodeDragEnd(session.activeDragId, {
-        x: Math.round(session.dragOrigin.x + dx * inv),
-        y: Math.round(session.dragOrigin.y + dy * inv),
-        width,
-        height,
-      })
+      if (session.isGroupDrag) {
+        handleSelectedNodesDragEnd(dx * inv, dy * inv)
+      } else {
+        handleNodeDragEnd(session.activeDragId, {
+          x: Math.round((entry?.baseLayoutRect.x ?? session.dragOrigin.x) + dx * inv / (entry?.layoutScaleX ?? 1)),
+          y: Math.round((entry?.baseLayoutRect.y ?? session.dragOrigin.y) + dy * inv / (entry?.layoutScaleY ?? 1)),
+          width: entry?.baseLayoutRect.width ?? 0,
+          height: entry?.baseLayoutRect.height ?? 0,
+        })
+      }
       setDragPreview(null)
     }
   }
@@ -1822,6 +1837,29 @@ function computeRenderDims(
     const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH)
     const patch = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, desiredRect)
     store.batchUpdateNode(id, patch)
+  }
+
+  // 多选整体平移：为每个节点分别按锚点/stretch 语义反算布局，最终作为一个历史步骤提交。
+  // 不能直接加 transform.x/y：拉伸轴的位置由 margins 决定，之前因此会出现“只移动部分”的现象。
+  const handleSelectedNodesDragEnd = (dx: number, dy: number) => {
+    if (dx === 0 && dy === 0) return
+    const store = useEditorStore.getState()
+    const currentPage = store.page
+    if (!currentPage) return
+    const updatesById: Record<string, Record<string, unknown>> = {}
+    for (const id of store.selectedIds) {
+      const node = findNode(currentPage.root, id)
+      const entry = proxyEntriesRef.current.find(item => item.id === id)
+      if (!node || !entry || node.editorLocked || node.editorHidden) continue
+      const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH)
+      updatesById[id] = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, {
+        x: entry.baseLayoutRect.x + dx / entry.layoutScaleX,
+        y: entry.baseLayoutRect.y + dy / entry.layoutScaleY,
+        width: entry.baseLayoutRect.width,
+        height: entry.baseLayoutRect.height,
+      })
+    }
+    store.batchUpdateNodes(updatesById)
   }
 
   // 缩放/旋转结束：写回 x/y/width/height/rotation（单次批量更新）
@@ -2089,7 +2127,7 @@ function computeRenderDims(
                   onDrag={(dx, dy) => setDragPreview({ id: '__group__', dx, dy })}
                   onDragEnd={(dx, dy) => {
                     setDragPreview(null)
-                    useEditorStore.getState().moveSelection(Math.round(dx), Math.round(dy))
+                    handleSelectedNodesDragEnd(dx, dy)
                   }}
                 />
               )

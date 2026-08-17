@@ -301,11 +301,12 @@ export default function App() {
       const state = useEditorStore.getState()
       for (const [pid, p] of Object.entries(state.allPages)) {
         if (p.nodeKind === 'template') continue
-        let dirty = false
-        if (cfg.designWidth && p.designWidth !== cfg.designWidth) { p.designWidth = cfg.designWidth; dirty = true }
-        if (cfg.designHeight && p.designHeight !== cfg.designHeight) { p.designHeight = cfg.designHeight; dirty = true }
+        const designWidth = cfg.designWidth ?? p.designWidth
+        const designHeight = cfg.designHeight ?? p.designHeight
+        const dirty = designWidth !== p.designWidth || designHeight !== p.designHeight
         if (dirty) {
-          updatePageMeta(pid, { designWidth: p.designWidth, designHeight: p.designHeight })
+          // 通过 store 写入，确保工程级撤回能保留变更前的完整快照。
+          updatePageMeta(pid, { designWidth, designHeight })
           await api.savePage(p)
         }
       }

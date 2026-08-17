@@ -4,9 +4,12 @@ import { UiNode, UiPage, COMPONENT_LIBRARY } from '@/types/layout'
 import { solveLayout, Rect as LayoutRect, solveChildrenFlex } from '@/utils/layoutSolver'
 import { getAnchorSide, DEFAULT_ANCHOR_SIDE } from '@/utils/anchorPresets'
 
-// 撤销/重做栈
+// 撤销/重做栈：整个 UI 工程共用一条历史，而不是按页面各自分段。
 interface HistoryEntry {
-  root: UiNode
+  allPages: Record<string, UiPage>
+  activePageId: string | null
+  selectedIds: string[]
+  selectionAnchor: string | null
 }
 
 interface EditorState {
@@ -54,6 +57,7 @@ interface EditorState {
   setAllFonts: (font: string | null) => void
   applyFlexLayout: (parentId: string) => void
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
+  batchUpdateNodes: (updatesById: Record<string, Record<string, unknown>>) => void
 
   pushHistory: () => void
   undo: () => void
@@ -62,6 +66,20 @@ interface EditorState {
 
 function cloneNode(node: UiNode): UiNode {
   return JSON.parse(JSON.stringify(node))
+}
+
+function clonePages(pages: Record<string, UiPage>): Record<string, UiPage> {
+  return JSON.parse(JSON.stringify(pages))
+}
+
+function setNodeFieldValue(node: UiNode, path: string, value: unknown) {
+  const parts = path.split('.')
+  let target: any = node
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!target[parts[i]]) target[parts[i]] = {}
+    target = target[parts[i]]
+  }
+  target[parts[parts.length - 1]] = value
 }
 
 // 全局 id 去重：保证 allPages 内所有节点 id 跨页面唯一。
@@ -239,8 +257,6 @@ export const useEditorStore = create<EditorState>()(
         s.activePageId = pageId
         s.page = s.allPages[pageId] ?? null
         s.selectedIds = []
-        s.undoStack = []
-        s.redoStack = []
       })
     },
 
@@ -260,6 +276,8 @@ export const useEditorStore = create<EditorState>()(
     },
 
     updatePageMeta: (pageId, updates) => {
+      if (!get().allPages[pageId]) return
+      get().pushHistory()
       set((s) => {
         const p = s.allPages[pageId]
         if (p) Object.assign(p, updates)
@@ -362,8 +380,13 @@ export const useEditorStore = create<EditorState>()(
       const state = get()
       if (state.historyLock || !state.page) return
       set((s) => {
-        s.undoStack.push({ root: cloneNode(s.page!.root) })
-        if (s.undoStack.length > 50) s.undoStack.shift()
+        s.undoStack.push({
+          allPages: clonePages(state.allPages),
+          activePageId: state.activePageId,
+          selectedIds: [...state.selectedIds],
+          selectionAnchor: state.selectionAnchor,
+        })
+        if (s.undoStack.length > 100) s.undoStack.shift()
         s.redoStack = []
       })
     },
@@ -493,13 +516,7 @@ export const useEditorStore = create<EditorState>()(
           const map = responsive.wide.overrides[id] ??= {}
           map[path] = value
         } else {
-          const parts = path.split('.')
-          let target: any = node
-          for (let i = 0; i < parts.length - 1; i++) {
-            if (!target[parts[i]]) target[parts[i]] = {}
-            target = target[parts[i]]
-          }
-          target[parts[parts.length - 1]] = value
+          setNodeFieldValue(node, path, value)
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
       })
@@ -512,13 +529,23 @@ export const useEditorStore = create<EditorState>()(
         const node = findNode(s.page.root, id)
         if (!node) return
         for (const [path, value] of Object.entries(updates)) {
-          const parts = path.split('.')
-          let target: any = node
-          for (let i = 0; i < parts.length - 1; i++) {
-            if (!target[parts[i]]) target[parts[i]] = {}
-            target = target[parts[i]]
+          setNodeFieldValue(node, path, value)
+        }
+        if (s.activePageId) s.allPages[s.activePageId] = s.page
+      })
+    },
+
+    batchUpdateNodes: (updatesById) => {
+      if (Object.keys(updatesById).length === 0) return
+      get().pushHistory()
+      set((s) => {
+        if (!s.page) return
+        for (const [id, updates] of Object.entries(updatesById)) {
+          const node = findNode(s.page.root, id)
+          if (!node) continue
+          for (const [path, value] of Object.entries(updates)) {
+            setNodeFieldValue(node, path, value)
           }
-          target[parts[parts.length - 1]] = value
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
       })
@@ -649,9 +676,17 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         if (s.undoStack.length === 0 || !s.page) return
         const entry = s.undoStack.pop()!
-        s.redoStack.push({ root: cloneNode(s.page.root) })
-        s.page.root = entry.root
-        if (s.activePageId) s.allPages[s.activePageId] = s.page
+        s.redoStack.push({
+          allPages: clonePages(s.allPages),
+          activePageId: s.activePageId,
+          selectedIds: [...s.selectedIds],
+          selectionAnchor: s.selectionAnchor,
+        })
+        s.allPages = entry.allPages
+        s.activePageId = entry.activePageId
+        s.page = entry.activePageId ? entry.allPages[entry.activePageId] ?? null : null
+        s.selectedIds = entry.selectedIds
+        s.selectionAnchor = entry.selectionAnchor
       })
     },
 
@@ -659,9 +694,17 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         if (s.redoStack.length === 0 || !s.page) return
         const entry = s.redoStack.pop()!
-        s.undoStack.push({ root: cloneNode(s.page.root) })
-        s.page.root = entry.root
-        if (s.activePageId) s.allPages[s.activePageId] = s.page
+        s.undoStack.push({
+          allPages: clonePages(s.allPages),
+          activePageId: s.activePageId,
+          selectedIds: [...s.selectedIds],
+          selectionAnchor: s.selectionAnchor,
+        })
+        s.allPages = entry.allPages
+        s.activePageId = entry.activePageId
+        s.page = entry.activePageId ? entry.allPages[entry.activePageId] ?? null : null
+        s.selectedIds = entry.selectedIds
+        s.selectionAnchor = entry.selectionAnchor
       })
     },
   }))

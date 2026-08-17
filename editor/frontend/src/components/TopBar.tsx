@@ -9,7 +9,11 @@ import {
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
+import { projectContext } from '@/fs/projectContext'
+import { getRecentProjects, pushRecentProject, type RecentProject } from '@/lib/recentProjects'
 import SoundConfigModal from './SoundConfigModal'
+import FontManagerModal from './FontManagerModal'
+import { buildFontSelectOptions, FONT_MANAGE_VALUE, ENGINE_DEFAULT_FONT_VALUE } from './RightPanel'
 import * as api from '@/api/client'
 import { APP_VERSION } from '@/lib/changelog'
 import { useState, useCallback, useEffect, useMemo } from 'react'
@@ -71,7 +75,41 @@ export default function TopBar(props: TopBarProps) {
     : '未配置按钮默认音效；先在星火数编新增 GameDataSound，再到 DJUI 声音配置选择默认音效。配置后后续创建 Button 会自动带点击音效。'
 
   // 字体列表从 store 读取（主流程集中加载，避免各组件 effect 时序问题）
+  // 最近工程快捷切换(VS Code Recent 风格)与字体列表同区
+  const [recentProjects] = useState<RecentProject[]>(() => getRecentProjects())
+  const currentStar = useProjectStore(s => s.config?.starProjectPath ?? '')
+  const handleSwitchProject = async (p: RecentProject) => {
+    try {
+      const ok = await projectContext.switchTo(p.starName, p.wsName)
+      if (!ok) {
+        message.warning('工程 ' + p.starName + ' 的目录授权已失效，请通过「打开工程」重新选择')
+        onOpenProject()
+        return
+      }
+      const verified = await projectContext.requestPermissions()
+      if (!verified.star || !verified.ws) {
+        message.warning('未能获得目录访问授权，未切换')
+        return
+      }
+      const cfg = useProjectStore.getState().config
+      if (cfg) {
+        await useProjectStore.getState().setConfig({ ...cfg, starProjectPath: p.starName, workspacePath: p.wsName })
+      }
+      pushRecentProject(p.starName, p.wsName)
+      window.location.reload()
+    } catch (err) {
+      message.error('切换工程失败：' + (err instanceof Error ? err.message : String(err)))
+    }
+  }
+
   const fontList = useProjectStore(s => s.fonts)
+  const fontInfos = useProjectStore(s => s.fontInfos)
+  const setFontManagerOpen = useProjectStore(s => s.setFontManagerOpen)
+  const fontOptions = buildFontSelectOptions(fontList, fontInfos)
+  const interceptManage = (v: unknown, setValue: (val: string | null) => void) => {
+    if (v === FONT_MANAGE_VALUE) { setFontManagerOpen(true); return }
+    setValue(v === ENGINE_DEFAULT_FONT_VALUE ? null : ((v as string | null) || null))
+  }
 
   const handleSave = useCallback(async () => {
     if (!page) return
@@ -325,6 +363,15 @@ export default function TopBar(props: TopBarProps) {
       icon: <FolderOpenOutlined />,
       onClick: () => onOpenProject(),
     },
+    ...(recentProjects.length > 0 ? [{
+      key: 'recent-group',
+      label: '最近打开的工程',
+      children: recentProjects.map((p: RecentProject) => ({
+        key: 'recent-' + p.id,
+        label: p.starName === currentStar ? p.starName + '(当前)' : p.starName + ' / ' + p.wsName,
+        onClick: () => { void handleSwitchProject(p) },
+      })),
+    }] : []),
     { type: 'divider' },
     {
       key: 'config',
@@ -578,6 +625,7 @@ export default function TopBar(props: TopBarProps) {
       </div>
 
       <SoundConfigModal open={soundConfigOpen} onClose={() => setSoundConfigOpen(false)} />
+      <FontManagerModal />
 
       {/* 全局字体设置 */}
       <Modal
@@ -586,7 +634,7 @@ export default function TopBar(props: TopBarProps) {
         onCancel={() => setGlobalFontOpen(false)}
         onOk={() => {
           if (config) {
-            useProjectStore.getState().setConfig({ ...config, defaultFont: globalFontValue })
+            void useProjectStore.getState().setConfig({ ...config, defaultFont: globalFontValue })
           }
           // 同时把全局字体统一写入所有控件（导出 JSON 每个控件都明确指向字体，引擎无需回退层）
           useEditorStore.getState().setAllFonts(globalFontValue)
@@ -597,15 +645,15 @@ export default function TopBar(props: TopBarProps) {
         cancelText="取消"
       >
         <p style={{ fontSize: 12, color: '#9aa3b4', marginBottom: 12 }}>
-          设置后将统一应用到所有文字控件，新建控件也会默认使用此字体。
+          设置后将统一应用到所有文字控件，新建控件也会默认使用此字体。留空 = 引擎默认字体。
         </p>
         <Select
           style={{ width: '100%' }}
           value={globalFontValue}
-          onChange={setGlobalFontValue}
+          onChange={v => interceptManage(v, setGlobalFontValue)}
           allowClear
-          placeholder="使用引擎默认字体"
-          options={fontList.map(f => ({ value: f, label: f }))}
+          placeholder="引擎默认字体"
+          options={fontOptions}
         />
       </Modal>
 
@@ -628,10 +676,10 @@ export default function TopBar(props: TopBarProps) {
         <Select
           style={{ width: '100%' }}
           value={unifyFontValue}
-          onChange={setUnifyFontValue}
+          onChange={v => interceptManage(v, setUnifyFontValue)}
           allowClear
-          placeholder="清除字体（使用全局默认）"
-          options={fontList.map(f => ({ value: f, label: f }))}
+          placeholder="清除字体（使用引擎默认）"
+          options={fontOptions}
         />
       </Modal>
     </>

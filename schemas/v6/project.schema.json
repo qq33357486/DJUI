@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://djui.duojie.games/schemas/v6/project.schema.json",
+  "title": "DJUI v6 Project",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "schemaVersion", "orientation", "canvas", "responsive"],
+  "properties": {
+    "protocolVersion": { "const": 6 },
+    "schemaVersion": { "const": 1 },
+    "projectId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "orientation": { "enum": ["portrait", "landscape"] },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["referenceWidth", "referenceHeight", "mode"],
+      "properties": {
+        "referenceWidth": { "type": "number", "exclusiveMinimum": 0 },
+        "referenceHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "mode": { "enum": ["Contain", "MatchWidth", "MatchHeight"] }
+      }
+    },
+    "responsive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wideRatio"],
+      "properties": {
+        "wideRatio": { "type": "number", "exclusiveMinimum": 1 }
+      }
+    },
+    "defaultFont": { "type": ["string", "null"] }
+  }
+}

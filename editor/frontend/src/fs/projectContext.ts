@@ -73,6 +73,7 @@ class ProjectContext {
       const handle = await fs.pickDirectory()
       this.starHandle = handle
       await fs.saveHandle(STAR_KEY, handle)
+      await this.persistHandlesForCurrent()
       return true
     } catch {
       return false
@@ -85,11 +86,46 @@ class ProjectContext {
       const handle = await fs.pickDirectory()
       this.wsHandle = handle
       await fs.saveHandle(WS_KEY, handle)
+      await this.persistHandlesForCurrent()
       return true
     } catch {
       return false
     }
   }
+
+  // === 最近工程:按工程 id 保存独立 handle,切回旧工程不必重选目录 ===
+  // 约定 key: star@<id> / ws@<id>;当前激活工程 id 存 activeIdKey
+  private static readonly ACTIVE_KEY = 'activeProjectId'
+
+  private recentId(): string | null {
+    try { return localStorage.getItem(ProjectContext.ACTIVE_KEY) } catch { return null }
+  }
+
+  // 当前 handle 变化时调用:把 handle 存到该工程的专属 key
+  private async persistHandlesForCurrent(): Promise<void> {
+    const id = this.starHandle && this.wsHandle ? this.starHandle.name + '/' + this.wsHandle.name : null
+    try {
+      if (id) localStorage.setItem(ProjectContext.ACTIVE_KEY, id)
+    } catch { /* 忽略存储异常 */ }
+    if (!id) return
+    if (this.starHandle) await fs.saveHandle('star@' + id, this.starHandle)
+    if (this.wsHandle) await fs.saveHandle('ws@' + id, this.wsHandle)
+  }
+
+  // 切换到最近工程:加载它的两个 handle 并设为当前(不写默认 key,默认 key 始终指向当前工程供下次启动恢复)
+  async switchTo(starName: string, wsName: string): Promise<boolean> {
+    const id = starName + '/' + wsName
+    const star = await fs.loadHandle('star@' + id)
+    const ws = await fs.loadHandle('ws@' + id)
+    if (!star || !ws) return false
+    this.starHandle = star
+    this.wsHandle = ws
+    await fs.saveHandle(STAR_KEY, star)
+    await fs.saveHandle(WS_KEY, ws)
+    try { localStorage.setItem(ProjectContext.ACTIVE_KEY, id) } catch { /* 忽略 */ }
+    return true
+  }
+
 
   // 清除
   async clear(): Promise<void> {

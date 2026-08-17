@@ -36,6 +36,16 @@ export interface AutoSizeConflict {
 
 interface SolveContext {
   measuring?: Set<string>
+  safeRect?: Rect
+}
+
+function selectSafeEdges(canvas: Rect, safe: Rect, edges?: Array<'left' | 'top' | 'right' | 'bottom'>): Rect {
+  const selected = edges ?? ['left', 'top', 'right', 'bottom']
+  const left = selected.includes('left') ? safe.x - canvas.x : 0
+  const top = selected.includes('top') ? safe.y - canvas.y : 0
+  const right = selected.includes('right') ? canvas.x + canvas.width - safe.x - safe.width : 0
+  const bottom = selected.includes('bottom') ? canvas.y + canvas.height - safe.y - safe.height : 0
+  return { x: canvas.x + left, y: canvas.y + top, width: Math.max(0, canvas.width - left - right), height: Math.max(0, canvas.height - top - bottom) }
 }
 
 // 主入口：解析单个节点的最终布局
@@ -57,12 +67,15 @@ export function solveLayout(
   const margins = stretch.margins ?? { left: 0, right: 0, top: 0, bottom: 0 }
 
   // 1. 参考矩形
+  const canvasRect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
   const ref = target === 'screen'
-    ? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
-    : parent
+    ? canvasRect
+    : target === 'safe'
+      ? selectSafeEdges(canvasRect, context.safeRect ?? canvasRect, anchor.safeEdges)
+      : parent
 
   // === 无锚点：纯绝对定位 ===
-  if (sideId === 'None' || target === 'none') {
+  if (sideId === 'None') {
     let rect: Rect = {
       x: t.x ?? 0,
       y: t.y ?? 0,
@@ -343,7 +356,7 @@ function getChildAutoSizeConflict(child: UiNode, axis: 'width' | 'height'): stri
 
   if (target === 'screen') return '锚定到屏幕，尺寸不属于父容器内容流'
   if (stretchUsesAxis(stretchStyle, axis)) return axis === 'width' ? '水平拉伸依赖父宽' : '垂直拉伸依赖父高'
-  if (sideId === 'None' || target === 'none') return null
+  if (sideId === 'None') return null
 
   const side = getAnchorSide(sideId)
   if (!side) return null

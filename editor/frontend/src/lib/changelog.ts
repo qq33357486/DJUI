@@ -43,12 +43,12 @@ export function parseChangelog(raw: string): ChangelogEntry[] {
 
   for (const line of lines) {
     // ## [版本号] - 日期 或 ## 版本号
-    const versionMatch = line.match(/^##\s+\[?([^\]]+)\]?\s*(?:-\s*(.+))?$/)
+    const versionMatch = line.match(/^##\s+(?:\[([^\]]+)\]|([^\s]+))(?:\s+-\s+(.+))?\s*$/)
     if (versionMatch) {
       if (currentEntry) entries.push(currentEntry)
       currentEntry = {
-        version: versionMatch[1].trim(),
-        date: versionMatch[2]?.trim() || null,
+        version: (versionMatch[1] ?? versionMatch[2]).trim(),
+        date: versionMatch[3]?.trim() || null,
         sections: [],
       }
       currentSection = null

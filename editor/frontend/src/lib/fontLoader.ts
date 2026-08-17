@@ -14,10 +14,22 @@ const fontMap = new Map<string, string>()
 // 已注册的 CSS family 集合（去重）
 const registered = new Set<string>()
 
-// 引擎 family（如 "ui/font/regular"）转 CSS family（如 "djui-regular"）
-// 未注册的 family 返回 undefined（调用方回退到默认字体）
+// 系统字体映射：引擎从 OS 系统字体解析的 family，浏览器同样直接可用（无需文件注册）。
+// 这些字体编辑器与引擎渲染完全一致。
+const SYSTEM_FONT_MAP: Record<string, string> = {
+  'ui/font/msyh': '"Microsoft YaHei", "PingFang SC", sans-serif',
+  'ui/font/seguiemj': '"Segoe UI Emoji", "Apple Color Emoji", sans-serif',
+}
+
+// 系统字体族清单（供字体分类/列表使用）
+export const SYSTEM_FONT_FAMILIES: readonly string[] = Object.keys(SYSTEM_FONT_MAP)
+
+// 引擎 family（如 "ui/font/msyh" 或 "ui/font/regular"）转 CSS font-family 值。
+// 优先级：系统字体映射 > 工程文件注册（djui-*）> undefined（调用方回退默认字体）
 export function engineFontToCss(engineFamily: string | null | undefined): string | undefined {
   if (!engineFamily) return undefined
+  const system = SYSTEM_FONT_MAP[engineFamily]
+  if (system) return system
   return fontMap.get(engineFamily)
 }
 
@@ -54,6 +66,8 @@ export async function loadEngineFonts(): Promise<number> {
 
   let count = 0
   for (const family of families) {
+    // 系统字体无需注册文件
+    if (SYSTEM_FONT_MAP[family]) { count++; continue }
     // 已注册则跳过
     if (fontMap.has(family)) { count++; continue }
 
@@ -83,6 +97,7 @@ async function registerFamilyDir(
   } catch {
     return false  // 目录不存在（fontref.txt 列了但磁盘没有）→ 跳过
   }
+
   const fontFiles = entries.files.filter(f => /\.(otf|ttf|ttc)$/i.test(f))
   if (fontFiles.length === 0) return false
 
@@ -91,6 +106,15 @@ async function registerFamilyDir(
     const fullPath = `${familyPath}/${file}`
     const buf = await fs.readFileArrayBuffer(root, fullPath)
     if (!buf) continue
+    // 星火引擎会把字体封装为自有格式（魔数 TNND 等非标准头），浏览器无法解析。
+    // 这类字体画布回退近似预览；系统字体映射或标准字体文件才能完全一致。
+    const head = new Uint8Array(buf, 0, 4)
+    const magic = String.fromCharCode(head[0], head[1], head[2], head[3])
+    const isSfnt = magic === 'OTTO' || magic === 'true' || magic === 'ttcf' || (head[0] === 0 && head[1] === 1 && head[2] === 0 && head[3] === 0)
+    if (!isSfnt) {
+      console.warn(`[DJUI] 字体 ${fullPath} 是引擎封装格式（非标准字体文件），画布将使用回退字体预览；如需完全一致可改用系统字体（如 ui/font/msyh）。`)
+      continue
+    }
     // 粗体识别：文件名含 bold（如 regularbold.otf）
     const isBold = /bold/i.test(file)
     try {

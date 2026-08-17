@@ -3,11 +3,14 @@ import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KIm
 import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { engineFontToCss } from '@/lib/fontLoader'
-import { UiNode } from '@/types/layout'
+import { UiNode, ProjectConfig } from '@/types/layout'
 import * as api from '@/api/client'
 import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
 import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/anchorPresets'
 import { solveLayout, Rect as LayoutRect } from '@/utils/layoutSolver'
+import { computeImageFit } from '@/utils/imageFit'
+import { createCanvasPlanV6 } from '@/utils/viewportV6'
+import { DEVICE_PRESETS_V6, findDevicePresetV6 } from '@/lib/devicePresetsV6'
 import type Konva from 'konva'
 
 // === 自定义 useImage hook：从 URL 加载 HTMLImageElement ===
@@ -107,7 +110,8 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
   const font = node.text?.font ?? defaultFont
   // 引擎 family（如 ui/font/regular）→ 浏览器 CSS family（如 djui-regular）；未注册则回退
   const cssFont = font ? (engineFontToCss(font) ?? font) : undefined
-  const fontFamily = cssFont ? `"${cssFont}"` : undefined
+  // 多 family 回退串(如系统字体映射)已含引号/逗号,直接使用;单个裸 family 名才包引号
+  const fontFamily = cssFont ? (/[,"]/.test(cssFont) ? cssFont : `"${cssFont}"`) : undefined
   const bold = node.text?.bold ?? false
   const wrapEnabled = node.text?.textWrap ?? false
   const overflow = node.text?.textOverflow ?? 'Shrink'
@@ -123,6 +127,11 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
     const widthScale = Math.min(1, width / measuredWidth)
     const heightScale = height > 0 ? Math.min(1, height / Math.max(1, baseFontSize * 1.2)) : 1
     fontSize = Math.max(1, Math.floor(baseFontSize * Math.min(widthScale, heightScale)))
+  } else if (overflow === 'Shrink' && wrapEnabled && width > 0 && height > 0) {
+    // 引擎 TextWrap+Shrink 会缩字号直到文本装进宽高；预估行数后等比收缩
+    const lines = Math.max(1, Math.ceil(measuredWidth / width))
+    const requiredHeight = lines * baseFontSize * 1.25
+    fontSize = Math.max(1, Math.floor(baseFontSize * Math.min(1, height / requiredHeight)))
   } else if (overflow === 'None') {
     renderHeight = undefined
     if (!wrapEnabled) {
@@ -141,7 +150,8 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
     bold,
     align,
     verticalAlign: verticalTextAlign(node.layout?.verticalContentAlignment),
-    wrap: wrapEnabled ? 'word' as const : 'none' as const,
+    // char 模式：中文无空格，word 模式整段不断行会横向溢出被裁；引擎也按字符断行
+    wrap: wrapEnabled ? 'char' as const : 'none' as const,
     ellipsis: overflow === 'Ellipsis',
   }
 }
@@ -169,6 +179,18 @@ function cloneNodeWithOverrides(node: UiNode, overrides?: TemplateOverrides | nu
       }
     }
     n.children.forEach(apply)
+  }
+  apply(cloned)
+  return cloned
+}
+
+function cloneTreeWithResponsiveOverrides(root: UiNode, overrides?: Record<string, Record<string, unknown>>): UiNode {
+  const cloned: UiNode = JSON.parse(JSON.stringify(root))
+  const apply = (node: UiNode) => {
+    for (const [path, value] of Object.entries(overrides?.[node.id] ?? {})) {
+      applyFieldPath(node as unknown as Record<string, any>, path, value)
+    }
+    node.children.forEach(apply)
   }
   apply(cloned)
   return cloned
@@ -364,7 +386,7 @@ function computeLayoutPatchFromRect(
   }
 
   if (!stretchAxes.horizontal) {
-    if (sideId === 'None' || target === 'none' || !side) {
+    if (sideId === 'None' || !side) {
       patch['transform.x'] = Math.round(desiredRect.x)
     } else {
       const anchorX = ref.x + side.nx * ref.width
@@ -374,7 +396,7 @@ function computeLayoutPatchFromRect(
   }
 
   if (!stretchAxes.vertical) {
-    if (sideId === 'None' || target === 'none' || !side) {
+    if (sideId === 'None' || !side) {
       patch['transform.y'] = Math.round(desiredRect.y)
     } else {
       const anchorY = ref.y + (1 - side.ny) * ref.height
@@ -501,6 +523,8 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
 
   const t = node.transform ?? {}
   const app = node.appearance ?? {}
+  // 隐藏节点不渲染（与引擎运行时一致）
+  if (node.basic?.visible === false) return null
   const rect = solvePreviewRect(node, parentRect, canvasWidth, canvasHeight, screenOrigin)
   const x = rect.x
   const y = rect.y
@@ -583,6 +607,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
             fill={node.text?.textColor ?? '#FFFFFF'}
             stroke={strokeWidth > 0 ? (node.text?.strokeColor ?? '#000000FF') : undefined}
             strokeWidth={strokeWidth}
+            fillAfterStrokeEnabled={strokeWidth > 0}
             fontStyle={preview.bold ? 'bold' : 'normal'}
             align={preview.align}
             verticalAlign={preview.verticalAlign}
@@ -627,13 +652,14 @@ interface NodeShapeProps {
   parentRect: LayoutRect       // 父节点矩形（屏幕坐标）
   canvasWidth: number          // 画布（设计/模拟）宽度
   canvasHeight: number
+  safeRect: LayoutRect
   showEditorOverlay: boolean   // 编辑器辅助渲染开关
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
   dragPreview: DragPreview | null
   inheritedDragDelta: Vec2
 }
 
-function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
+function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
   const { config } = useProjectStore()
   const allPages = useEditorStore(s => s.allPages)
   const defaultFont = config?.defaultFont ?? null
@@ -646,6 +672,9 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
 
   // 编辑器隐藏：不渲染（子节点也跟着隐藏）
   if (node.editorHidden) return null
+  // basic.visible=false 与引擎运行时一致：节点（含子树）不渲染。
+  // 曾因漏掉此判断，隐藏的宽屏背景节点照常绘制并盖住竖屏背景，造成编辑器与引擎画面不一致。
+  if (node.basic?.visible === false) return null
 
   const t = node.transform ?? {}
   const opacity = t.opacity ?? 1
@@ -654,7 +683,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const bgColor = app.background
 
   // ★ 用 solver 算出最终屏幕矩形（应用了 anchor + stretch + aspectRatio）
-  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight)
+  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight, { safeRect })
   const x = solved.x
   const y = solved.y
   const width = solved.width
@@ -846,18 +875,33 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           opacity={opacity}
           edges={sliceEdges}
         />
-      ) : hasImage && (
-        <KImage
-          image={image}
-          x={displayX}
-          y={displayY}
-          width={width}
-          height={height}
-          rotation={rotation}
-          opacity={opacity}
-          listening={false}
-        />
-      )}
+      ) : hasImage && image && (() => {
+        const fit = computeImageFit(
+          app.sourceSize?.width ?? image.naturalWidth ?? image.width,
+          app.sourceSize?.height ?? image.naturalHeight ?? image.height,
+          width,
+          height,
+          app.imageFit ?? 'stretch',
+          app.focalX ?? 0.5,
+          app.focalY ?? 0.5,
+        )
+        return (
+          <KImage
+            image={image}
+            x={displayX + fit.x}
+            y={displayY + fit.y}
+            width={fit.width}
+            height={fit.height}
+            cropX={fit.crop?.x}
+            cropY={fit.crop?.y}
+            cropWidth={fit.crop?.width}
+            cropHeight={fit.crop?.height}
+            rotation={rotation}
+            opacity={opacity}
+            listening={false}
+          />
+        )
+      })()}
       {borderThickness > 0 && (
         <Rect
           x={displayX}
@@ -904,6 +948,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             fill={node.text?.textColor ?? '#FFFFFF'}
             stroke={strokeWidth > 0 ? (node.text?.strokeColor ?? '#000000FF') : undefined}
             strokeWidth={strokeWidth}
+            fillAfterStrokeEnabled={strokeWidth > 0}
             fontStyle={preview.bold ? 'bold' : 'normal'}
             align={preview.align}
             verticalAlign={preview.verticalAlign}
@@ -964,6 +1009,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             parentRect={solved}
             canvasWidth={canvasWidth}
             canvasHeight={canvasHeight}
+            safeRect={safeRect}
             showEditorOverlay={showEditorOverlay}
             sliceMeta={sliceMeta}
             dragPreview={dragPreview}
@@ -976,7 +1022,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
 
 // === 主画布组件 ===
 export default function CanvasArea() {
-  const { page, selectedIds, selectNode, clearSelection, addNode } = useEditorStore()
+  const { page, selectedIds, selectNode, clearSelection, addNode, responsiveVariant, setResponsiveVariant } = useEditorStore()
   const { config } = useProjectStore()
   // 订阅 fontVersion：字体注册完成后 bump，触发画布用真实字体重渲染
   const fontVersion = useProjectStore(s => s.fontVersion)
@@ -990,7 +1036,27 @@ export default function CanvasArea() {
   // 画布视口状态
   const [viewport, setViewport] = useState({ x: 40, y: 40, scale: 0.4 })
   const [isPanning, setIsPanning] = useState(false)
-  // 多分辨率预览：默认 = 设计分辨率
+  // 渲染画布尺寸统一换算：预设物理像素 → Canvas 模式换算后的逻辑画布；无预设 = 设计画布
+// zoomFit 与渲染共用，保证适配缩放按真实画布大小计算
+function computeRenderDims(
+  page: { nodeKind?: string; designWidth: number; designHeight: number },
+  previewW: number | null,
+  previewH: number | null,
+  config: ProjectConfig | null,
+): { w: number; h: number } {
+  const isTemplate = page.nodeKind === 'template'
+  if (isTemplate) return { w: page.designWidth, h: page.designHeight }
+  const preset = findDevicePresetV6(previewW, previewH)
+  const plan = preset && config
+    ? createCanvasPlanV6(preset.widthPx, preset.heightPx, preset.safeInsetsPx, api.createProjectFileV6(config))
+    : null
+  return {
+    w: plan?.canvasRect.width ?? page.designWidth,
+    h: plan?.canvasRect.height ?? page.designHeight,
+  }
+}
+
+// 多分辨率预览：默认 = 设计分辨率
   const [previewW, setPreviewW] = useState<number | null>(null)
   const [previewH, setPreviewH] = useState<number | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
@@ -1056,9 +1122,10 @@ export default function CanvasArea() {
     const margin = 60
     const sw = stage.width()
     const sh = stage.height()
-    const isTemplate = page.nodeKind === 'template'
-    const dw = isTemplate ? page.designWidth : (previewW ?? page.designWidth)
-    const dh = isTemplate ? page.designHeight : (previewH ?? page.designHeight)
+    // 与渲染处同源：预设物理像素需经 Canvas 模式换算成实际渲染画布尺寸，否则适配按错误大小计算导致画布溢出视口
+    const dims = computeRenderDims(page, previewW, previewH, config)
+    const dw = dims.w
+    const dh = dims.h
     const scale = Math.max(0.05, Math.min(5, Math.min((sw - margin * 2) / dw, (sh - margin * 2) / dh)))
     setViewport({ scale, x: (sw - dw * scale) / 2, y: (sh - dh * scale) / 2 })
   }, [page, previewW, previewH])
@@ -1285,9 +1352,34 @@ export default function CanvasArea() {
   const designW = page.designWidth
   const designH = page.designHeight
   const isTemplate = page.nodeKind === 'template'
-  // 实际预览宽高（未选设备时 = 设计分辨率）
-  const actualW = isTemplate ? designW : (previewW ?? designW)
-  const actualH = isTemplate ? designH : (previewH ?? designH)
+  // 设备预设保存物理像素；按项目 Canvas 模式换算为 Runtime 使用的逻辑可见区。
+  const devicePreset = isTemplate ? null : findDevicePresetV6(previewW, previewH)
+  const previewPlan = devicePreset && config
+    ? createCanvasPlanV6(
+        devicePreset.widthPx,
+        devicePreset.heightPx,
+        devicePreset.safeInsetsPx,
+        api.createProjectFileV6(config),
+      )
+    : null
+  const renderDims = computeRenderDims(page, previewW, previewH, config)
+  const actualW = renderDims.w
+  const actualH = renderDims.h
+  // 调试探针：暴露实际渲染画布尺寸（仅 dev，供 CDP 排查预览换算）
+  if (import.meta.env.DEV) {
+    ;(window as any).__DJUI_CANVAS_DEBUG__ = {
+      previewW, previewH, designW, designH, actualW, actualH,
+      hasPlan: !!previewPlan,
+      planCanvas: previewPlan ? { w: previewPlan.canvasRect.width, h: previewPlan.canvasRect.height } : null,
+      config: config ? { mode: config.canvasMode, dw: config.designWidth, dh: config.designHeight } : null,
+      viewport: { ...viewport },
+    }
+  }
+  const referenceRect = previewPlan?.referenceRect ?? { x: 0, y: 0, width: designW, height: designH }
+  const safeRect = previewPlan?.safeRect ?? { x: 0, y: 0, width: actualW, height: actualH }
+  const effectiveRoot = responsiveVariant === 'wide'
+    ? cloneTreeWithResponsiveOverrides(page.root, page.responsive?.wide.overrides)
+    : page.root
   const stageW = window.innerWidth - 280 - 340
   const stageH = window.innerHeight - 32
 
@@ -1619,17 +1711,6 @@ export default function CanvasArea() {
           <Rect x={0} y={0} width={stageW} height={stageH} fill="#0d0f15" listening={false} />
 
           <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
-            {/* 设计分辨率参考框（仅在预览分辨率 ≠ 设计分辨率时显示） */}
-            {!isTemplate && previewW !== null && (
-              <Rect
-                x={0} y={0} width={designW} height={designH}
-                fill="none"
-                stroke="#3a4258"
-                strokeWidth={1 * invScale}
-                dash={[6 * invScale, 4 * invScale]}
-                listening={false}
-              />
-            )}
             {/* 实际预览分辨率区域 */}
             <Rect
               x={0} y={0} width={actualW} height={actualH}
@@ -1639,6 +1720,16 @@ export default function CanvasArea() {
               dash={[10 * invScale, 5 * invScale]}
               listening={false}
             />
+            {!isTemplate && previewW !== null && (
+              <Rect
+                x={referenceRect.x} y={referenceRect.y}
+                width={referenceRect.width} height={referenceRect.height}
+                fill="none" stroke="#7c89a8"
+                strokeWidth={1 * invScale}
+                dash={[6 * invScale, 4 * invScale]}
+                listening={false}
+              />
+            )}
             <Text
               text={`${actualW} x ${actualH}${isTemplate ? ' (模板)' : (previewW !== null ? ' (预览)' : ' (设计)')}`}
               x={4} y={-20 * invScale}
@@ -1646,9 +1737,32 @@ export default function CanvasArea() {
               fill={isTemplate ? '#b37feb' : (previewW !== null ? '#ffaa44' : '#5b6378')}
               listening={false}
             />
+            {previewPlan && (
+              <>
+                <Rect
+                  x={safeRect.x}
+                  y={safeRect.y}
+                  width={safeRect.width}
+                  height={safeRect.height}
+                  fill="rgba(42, 190, 150, 0.05)"
+                  stroke="#2abe96"
+                  strokeWidth={2 * invScale}
+                  dash={[7 * invScale, 4 * invScale]}
+                  listening={false}
+                />
+                <Text
+                  text="Safe Area"
+                  x={safeRect.x + 4 * invScale}
+                  y={safeRect.y + 4 * invScale}
+                  fontSize={11 * invScale}
+                  fill="#2abe96"
+                  listening={false}
+                />
+              </>
+            )}
 
             {/* 所有控件（root 的子节点，父矩形=实际预览分辨率） */}
-            {page.root.children.map(child => (
+            {effectiveRoot.children.map(child => (
               <NodeShape
                 key={child.id}
                 node={child}
@@ -1664,6 +1778,7 @@ export default function CanvasArea() {
                 parentRect={{ x: 0, y: 0, width: actualW, height: actualH }}
                 canvasWidth={actualW}
                 canvasHeight={actualH}
+                safeRect={safeRect}
                 showEditorOverlay={showEditorOverlay}
                 sliceMeta={sliceMeta}
                 dragPreview={dragPreview}
@@ -1804,6 +1919,21 @@ export default function CanvasArea() {
         padding: '4px 12px', fontSize: 12, color: '#9aa3b4', zIndex: 100,
         display: 'flex', gap: 12, alignItems: 'center',
       }}>
+        {!isTemplate && (
+          <select
+            value={responsiveVariant}
+            onChange={e => setResponsiveVariant(e.target.value as 'base' | 'wide')}
+            style={{
+              background: responsiveVariant === 'wide' ? '#2a1f0f' : '#0f1117',
+              color: responsiveVariant === 'wide' ? '#ffaa44' : '#5ab9ff',
+              border: '1px solid #2a3142', borderRadius: 4, padding: '2px 6px', fontSize: 11,
+            }}
+            title="选择正在编辑的响应式层"
+          >
+            <option value="base">基础层</option>
+            <option value="wide">宽屏层</option>
+          </select>
+        )}
         {/* 设备切换 */}
         {isTemplate ? (
           <span style={{ color: '#b37feb', fontSize: 11 }}>模板 ({designW}×{designH})</span>
@@ -1827,12 +1957,9 @@ export default function CanvasArea() {
             title="切换预览分辨率"
           >
             <option value="design">设计 ({designW}×{designH})</option>
-            <option value="1080x1920">1080×1920 (9:16)</option>
-            <option value="1170x2532">1170×2532 (iPhone 15)</option>
-            <option value="1284x2778">1284×2778 (iPhone 14 Plus)</option>
-            <option value="1440x2560">1440×2560 (2K 安卓)</option>
-            <option value="1080x2400">1080×2400 (20:9 安卓)</option>
-            <option value="888x1920">888×1920 (折叠屏内屏)</option>
+            {DEVICE_PRESETS_V6.map(device => (
+              <option key={device.id} value={`${device.widthPx}x${device.heightPx}`}>{device.label} ({device.widthPx}×{device.heightPx})</option>
+            ))}
           </select>
         )}
         <span

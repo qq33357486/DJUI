@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { pushRecentProject } from '@/lib/recentProjects'
 import { Layout, Modal, Spin, message, Button, Result, Space } from 'antd'
 import TopBar from './components/TopBar'
 import LeftPanel from './components/LeftPanel'
@@ -67,11 +68,22 @@ export default function App() {
         }
 
         const restored = await projectContext.restore()
+        if (restored.star && restored.ws) {
+          // 启动恢复成功 = 打开过该工程,计入最近列表
+          pushRecentProject(projectContext.starName, projectContext.wsName)
+        }
         if (restored.star || restored.ws) {
           // 只查询权限（queryPermission 无需用户手势）
           // 如果权限不是 granted，显示"授权访问"按钮让用户点击触发 requestPermission
           const verified = await projectContext.checkPermissions()
           useProjectStore.getState().initFromHandles(verified)
+          if (verified.star) {
+            const projectResult = await useProjectStore.getState().loadProjectFile()
+            if (projectResult.status === 'blocked') {
+              useProjectStore.setState({ config: null })
+              message.error('当前工程不是有效的 DJUI v6 项目，请先完成显式迁移')
+            }
+          }
         }
         // 恢复 lastPageId
         const lastPageId = api.getLastPageId()
@@ -108,6 +120,26 @@ export default function App() {
     void (async () => {
       // 字体列表先加载（不依赖 patches/pages，避免前置步骤阻塞导致字体永远不加载）
       useProjectStore.getState().refreshFonts()
+      const migrationReport = await api.scanMigrationReportV6()
+      if (!migrationReport.canOpen) {
+        Modal.warning({
+          title: '需要迁移到 DJUI v6',
+          width: 720,
+          content: (
+            <div style={{ fontSize: 13 }}>
+              <p>检测到旧协议或无效文件。DJUI 不会自动修改这些文件，迁移完成前不会加载页面。</p>
+              <p>受影响文件：{migrationReport.files.filter(file => file.status !== 'v6').length} 个</p>
+              <Space>
+                <Button onClick={() => {
+                  void navigator.clipboard.writeText(migrationReport.prompt).then(() => message.success('AI 迁移提示词已复制'))
+                }}>复制 AI 迁移提示词</Button>
+              </Space>
+            </div>
+          ),
+          okText: '知道了',
+        })
+        return
+      }
       await applyPatchesAndNotify(true)
       await refreshPages()
       // 注册工程字体到浏览器（注册完 bump fontVersion 触发画布用真实字体重渲染）
@@ -309,6 +341,11 @@ export default function App() {
       const verified = await projectContext.requestPermissions()
       if (verified.star && verified.ws) {
         useProjectStore.getState().initFromHandles(verified)
+        const projectResult = await useProjectStore.getState().loadProjectFile()
+        if (projectResult.status === 'blocked') {
+          useProjectStore.setState({ config: null })
+          message.error('当前工程不是有效的 DJUI v6 项目，请先完成显式迁移')
+        }
       } else {
         message.warning('授权失败，请重新选择目录')
       }

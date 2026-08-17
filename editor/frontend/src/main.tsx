@@ -5,6 +5,9 @@ import { ConfigProvider, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import './index.css'
+import { installLocalAutomation } from './lib/localAutomation'
+
+installLocalAutomation()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

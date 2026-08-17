@@ -2,6 +2,16 @@
 // 替代原有的后端 HTTP 调用
 
 import { UiPage, ProjectConfig } from '@/types/layout'
+import {
+  DEFAULT_WIDE_RATIO,
+  DJUI_PROTOCOL_VERSION,
+  DJUI_SCHEMA_VERSION,
+  type CompatibilityIssue,
+  type PageFileV6,
+  type ProjectFileV6,
+} from '@/types/protocolV6'
+import { inspectPageV6, inspectProjectV6 } from '@/lib/schemaV6'
+import { buildMigrationReportV6, inspectMigrationFileV6, type MigrationReportV6 } from '@/lib/v5MigrationReport'
 import { projectContext } from '@/fs/projectContext'
 import * as fs from '@/fs/fsAccess'
 import {
@@ -21,6 +31,7 @@ import {
 import { normalizePage, normalizeDetectChanges } from '@/lib/normalize'
 import { AGENTS_VERSION, readAgentsVersion, buildAgentsMd } from '@/lib/agentsTemplate'
 import { EFFECT_PRESETS } from '@/lib/effectsPresets'
+import { SYSTEM_FONT_FAMILIES } from '@/lib/fontLoader'
 import {
   RUNTIME_FILES,
   RUNTIME_VERSION,
@@ -137,6 +148,89 @@ export type { DjuiSoundConfig, DjuiSoundItem, SoundSetupStatus, ApplyPatchesResu
 export interface SliceEdges { left: number; top: number; right: number; bottom: number }
 export type SliceMeta = Record<string, SliceEdges>
 
+// ===== v6 项目配置（工程目录持久化） =====
+
+const PROJECT_FILE_V6 = 'ui/djui/project.json'
+let activeProjectFileV6: ProjectFileV6 | null = null
+
+export type ProjectFileLoadResult =
+  | { status: 'ok'; project: ProjectFileV6 }
+  | { status: 'missing' }
+  | { status: 'blocked'; kind: 'legacy' | 'future' | 'invalid'; issues: CompatibilityIssue[] }
+
+export function createProjectFileV6(config: Pick<ProjectConfig, 'orientation' | 'designWidth' | 'designHeight' | 'defaultFont' | 'canvasMode' | 'wideRatio'>): ProjectFileV6 {
+  return {
+    protocolVersion: DJUI_PROTOCOL_VERSION,
+    schemaVersion: DJUI_SCHEMA_VERSION,
+    orientation: config.orientation,
+    canvas: {
+      referenceWidth: config.designWidth,
+      referenceHeight: config.designHeight,
+      mode: config.canvasMode ?? activeProjectFileV6?.canvas.mode ?? 'Contain',
+    },
+    responsive: { wideRatio: config.wideRatio ?? activeProjectFileV6?.responsive.wideRatio ?? DEFAULT_WIDE_RATIO },
+    defaultFont: config.defaultFont ?? null,
+  }
+}
+
+export function projectConfigFromV6(project: ProjectFileV6): ProjectConfig {
+  return {
+    starProjectPath: projectContext.starName,
+    workspacePath: projectContext.wsName,
+    orientation: project.orientation,
+    designWidth: project.canvas.referenceWidth,
+    designHeight: project.canvas.referenceHeight,
+    canvasScaler: {
+      mode: 'ScaleWithScreenSize',
+      match: project.canvas.mode === 'MatchWidth' ? 0 : project.canvas.mode === 'MatchHeight' ? 1 : 0.5,
+    },
+    canvasMode: project.canvas.mode,
+    wideRatio: project.responsive.wideRatio,
+    defaultFont: project.defaultFont ?? null,
+  }
+}
+
+export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
+  const star = projectContext.star
+  if (!star) return { status: 'missing' }
+  if (!(await fs.fileExists(star, PROJECT_FILE_V6))) return { status: 'missing' }
+  const raw = await fs.readFileJson<unknown>(star, PROJECT_FILE_V6)
+  const result = inspectProjectV6(raw)
+  if (result.ok) {
+    activeProjectFileV6 = result.value
+    return { status: 'ok', project: result.value }
+  }
+  activeProjectFileV6 = null
+  return { status: 'blocked', kind: result.kind, issues: result.issues }
+}
+
+export async function scanMigrationReportV6(): Promise<MigrationReportV6> {
+  const star = projectContext.star
+  if (!star) return buildMigrationReportV6([])
+  const projectRaw = await fs.readFileJson<unknown>(star, PROJECT_FILE_V6)
+  const reports = [inspectMigrationFileV6(PROJECT_FILE_V6, projectRaw, 'project')]
+  const pagesDir = await fs.getDirHandle(star, PAGES_DIR, false)
+  if (pagesDir) {
+    const files = await fs.walkFiles(pagesDir, undefined, ['.json'])
+    for (const file of files) {
+      const raw = await fs.readFileJson<unknown>(pagesDir, file)
+      reports.push(inspectMigrationFileV6(PAGES_DIR + '/' + file, raw, 'page'))
+    }
+  }
+  return buildMigrationReportV6(reports)
+}
+
+export async function saveProjectFileV6(project: ProjectFileV6): Promise<void> {
+  const star = projectContext.star
+  if (!star) throw new Error('未选择星火工程目录')
+  const result = inspectProjectV6(project)
+  if (!result.ok) {
+    throw new Error(result.issues.map(issue => issue.path + ': ' + issue.message).join('；'))
+  }
+  await fs.writeFileJson(star, PROJECT_FILE_V6, result.value)
+  activeProjectFileV6 = result.value
+}
+
 // ===== 配置（localStorage 持久化，DirectoryHandle 持久化在 IndexedDB） =====
 
 const CONFIG_KEY = 'djui.project.config'
@@ -170,6 +264,39 @@ export function saveLastPageId(pageId: string): void {
 
 // ===== 页面 CRUD =====
 
+function uiPageFromV6(page: PageFileV6): UiPage {
+  return {
+    version: DJUI_PROTOCOL_VERSION,
+    pageId: page.pageId,
+    designWidth: page.localSize?.width ?? activeProjectFileV6?.canvas.referenceWidth ?? 1080,
+    designHeight: page.localSize?.height ?? activeProjectFileV6?.canvas.referenceHeight ?? 1920,
+    root: page.root as unknown as UiPage['root'],
+    nodeKind: page.kind,
+    windowMode: page.window?.mode ?? null,
+    transition: page.window?.transition ?? null,
+    responsive: page.responsive ?? (page.kind === 'window' ? { wide: { overrides: {} } } : undefined),
+  }
+}
+
+function pageFileV6FromUiPage(page: UiPage): PageFileV6 {
+  const base = {
+    protocolVersion: DJUI_PROTOCOL_VERSION,
+    schemaVersion: DJUI_SCHEMA_VERSION,
+    pageId: page.pageId,
+    kind: page.nodeKind,
+    root: page.root,
+  }
+  if (page.nodeKind === 'template') {
+    return { ...base, kind: 'template', localSize: { width: page.designWidth, height: page.designHeight } } as PageFileV6
+  }
+  return {
+    ...base,
+    kind: 'window',
+    window: { mode: page.windowMode ?? 'fullscreen', transition: page.transition ?? undefined },
+    responsive: page.responsive ?? { wide: { overrides: {} } },
+  } as PageFileV6
+}
+
 const PAGES_DIR = 'ui/djui/pages'
 
 export async function listPages(): Promise<string[]> {
@@ -184,36 +311,25 @@ export async function loadPage(pageId: string): Promise<UiPage | null> {
   const star = projectContext.star
   if (!star) return null
   const raw = await fs.readFileJson<unknown>(star, `${PAGES_DIR}/${pageId}.json`)
-  // 数据边界关卡：normalizePage 确保返回的结构 100% 符合 UiPage 接口
-  const page = normalizePage(raw)
-  if (page && normalizeDetectChanges(raw)) {
-    // 静默持久化修复（和 patches 系统一致的行为）
-    try {
-      const ws = projectContext.ws
-      const sliceMeta = ws ? await getSliceMetaData() : {}
-      const soundConfig = await readSoundConfig(star)
-      await patchAndSavePage(star, page, sliceMeta, soundConfig.defaultButtonSoundId)
-    } catch { /* 持久化失败不影响内存加载 */ }
+  const result = inspectPageV6(raw)
+  if (!result.ok) {
+    const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
+    throw new Error('页面 ' + pageId + ' 不是可编辑的 DJUI v6 文件：' + detail)
   }
-  return page
+  // v6 仍经过结构边界归一化，但不再运行旧协议补丁或静默写回。
+  return normalizePage(uiPageFromV6(result.value))
 }
 
 export async function savePage(page: UiPage): Promise<void> {
   const star = projectContext.star
   if (!star) throw new Error('未选择星火工程目录')
   await fs.ensureDir(star, PAGES_DIR)
-
-  // 读取 slice meta（如果 workspace 已选）
-  let sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }> = {}
-  const ws = projectContext.ws
-  if (ws) {
-    sliceMeta = await getSliceMetaData()
+  const result = inspectPageV6(pageFileV6FromUiPage(page))
+  if (!result.ok) {
+    const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
+    throw new Error('拒绝保存非 v6 页面：' + detail)
   }
-
-  // 读取默认按钮音效
-  const soundConfig = await readSoundConfig(star)
-
-  await patchAndSavePage(star, page, sliceMeta, soundConfig.defaultButtonSoundId)
+  await fs.writeFileJson(star, `${PAGES_DIR}/${page.pageId}.json`, result.value)
 }
 
 export async function deletePage(pageId: string): Promise<void> {
@@ -526,7 +642,13 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const warningsFromBundle: string[] = []
   const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
 
-  // 5. 复制 sounds.json → 同一位置
+  // 5. 发布 v6 项目配置（Runtime 严格读取 project.json）
+  const projectData = await fs.readFileText(star, PROJECT_FILE_V6)
+  if (!projectData) return { ok: false, error: '缺少 ui/djui/project.json' }
+  await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
+  await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/project.json', projectData)
+
+  // 6. 复制 sounds.json → 同一位置
   let copiedSoundsConfig = false
   if (await fs.fileExists(star, 'ui/djui/sounds.json')) {
     const soundData = await fs.readFileText(star, 'ui/djui/sounds.json')
@@ -546,6 +668,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
     copiedPages: new Array(pageCount).fill(''),
     copiedClientPages: new Array(pageCount).fill(''),
     copiedSoundsConfig,
+    copiedConfig: true,
     warnings,
     targetDir: 'ui/image/djui',
     targetDirs: {
@@ -705,6 +828,167 @@ export async function getFonts(_projectPath?: string): Promise<string[]> {
     if (name) fonts.push(name)
   }
   return fonts
+}
+
+// 字体族在编辑器与引擎间的一致性分类：
+// standard  = 工程内有标准字体文件（ttf/otf/ttc），画布与引擎加载同一文件，完全一致
+// system    = 系统字体（引擎从 OS 解析），浏览器用同名系统字体，完全一致
+// packaged  = 星火 TNND 封装格式，引擎可解码、浏览器不能，画布近似预览
+// missing   = 目录里没有任何字体文件，引擎也无法使用
+export type FontKind = 'standard' | 'system' | 'packaged' | 'missing'
+
+export interface FontInfo {
+  family: string
+  kind: FontKind
+  files: string[]
+  imported: boolean // 是否由 DJUI 导入（可删除）
+}
+
+const IMPORTED_FONTS_FILE = '.djui/imported-fonts.json'
+const FONT_EXTENSIONS = /\.(otf|ttf|ttc)$/i
+
+function isStandardSfntMagic(magic: string, head: Uint8Array): boolean {
+  return magic === 'OTTO' || magic === 'true' || magic === 'ttcf' || (head[0] === 0 && head[1] === 1 && head[2] === 0 && head[3] === 0)
+}
+
+async function readHeadBytes(path: string): Promise<Uint8Array | null> {
+  const star = projectContext.star
+  if (!star) return null
+  const handle = await fs.getFileHandle(star, path, false)
+  if (!handle) return null
+  try {
+    const file = await handle.getFile()
+    return new Uint8Array(await file.slice(0, 4).arrayBuffer())
+  } catch {
+    return null
+  }
+}
+
+async function readImportedFamilies(): Promise<string[]> {
+  const ws = projectContext.ws
+  if (!ws) return []
+  const data = await fs.readFileJson<{ families: string[] }>(ws, IMPORTED_FONTS_FILE)
+  return data?.families ?? []
+}
+
+async function writeImportedFamilies(families: string[]): Promise<void> {
+  const ws = projectContext.ws
+  if (!ws) throw new Error('工作区未连接')
+  await fs.writeFileJson(ws, IMPORTED_FONTS_FILE, { families })
+}
+
+export async function getFontInfos(_projectPath?: string): Promise<FontInfo[]> {
+  const star = projectContext.star
+  if (!star) return []
+
+  const fonts = await getFonts()
+  const imported = await readImportedFamilies()
+  const infos: FontInfo[] = []
+  for (const family of fonts) {
+    if ((SYSTEM_FONT_FAMILIES as readonly string[]).includes(family)) {
+      infos.push({ family, kind: 'system', files: [], imported: imported.includes(family) })
+      continue
+    }
+    let entries: { dirs: string[]; files: string[] }
+    try {
+      entries = await fs.readDirEntries(star, family)
+    } catch {
+      infos.push({ family, kind: 'missing', files: [], imported: imported.includes(family) })
+      continue
+    }
+    const fontFiles = entries.files.filter(f => FONT_EXTENSIONS.test(f))
+    if (fontFiles.length === 0) {
+      infos.push({ family, kind: 'missing', files: [], imported: imported.includes(family) })
+      continue
+    }
+    let hasStandard = false
+    for (const file of fontFiles) {
+      const head = await readHeadBytes(`${family}/${file}`)
+      if (!head) continue
+      const magic = String.fromCharCode(head[0], head[1], head[2], head[3])
+      if (isStandardSfntMagic(magic, head)) { hasStandard = true; break }
+    }
+    infos.push({
+      family,
+      kind: hasStandard ? 'standard' : 'packaged',
+      files: fontFiles,
+      imported: imported.includes(family),
+    })
+  }
+  return infos
+}
+
+function sanitizeFamilyName(raw: string): string {
+  const cleaned = raw.trim().replace(/\.(otf|ttf|ttc)$/i, '').replace(/[^A-Za-z0-9_-]+/g, '-')
+  return cleaned.replace(/^-+|-+$/g, '').toLowerCase()
+}
+
+export interface ImportFontResult {
+  ok: boolean
+  error?: string
+  family?: string
+}
+
+export async function importFontFile(file: File, familyRaw?: string): Promise<ImportFontResult> {
+  const star = projectContext.star
+  if (!star) return { ok: false, error: '工程目录未连接' }
+
+  // 校验是否标准字体文件（引擎与浏览器都能直接加载）
+  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+  const magic = String.fromCharCode(head[0], head[1], head[2], head[3])
+  if (!isStandardSfntMagic(magic, head)) {
+    return { ok: false, error: '不是标准字体文件（仅支持未封装的 .ttf / .otf / .ttc）' }
+  }
+
+  const familyName = sanitizeFamilyName(familyRaw && familyRaw.trim() ? familyRaw : file.name)
+  if (!familyName) return { ok: false, error: '字体族名无效' }
+  const family = `ui/font/${familyName}`
+
+  const existing = await getFonts()
+  if (existing.includes(family)) {
+    return { ok: false, error: `字体族 ${family} 已存在，请换一个名字` }
+  }
+
+  // 写入工程字体目录
+  const buffer = await file.arrayBuffer()
+  await fs.ensureDir(star, family)
+  await fs.writeFileBinary(star, `${family}/${file.name}`, buffer)
+
+  // 注册到 fontref.txt（保持原有行不动，追加新行）
+  const text = (await fs.readFileText(star, 'ref/fontref.txt')) ?? ''
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+  lines.push(family)
+  await fs.writeFileText(star, 'ref/fontref.txt', lines.join('\n') + '\n')
+
+  // 记录为 DJUI 导入（可删除）
+  const imported = await readImportedFamilies()
+  if (!imported.includes(family)) imported.push(family)
+  await writeImportedFamilies(imported)
+
+  return { ok: true, family }
+}
+
+export async function removeImportedFont(family: string): Promise<ImportFontResult> {
+  const star = projectContext.star
+  if (!star) return { ok: false, error: '工程目录未连接' }
+
+  const imported = await readImportedFamilies()
+  if (!imported.includes(family)) {
+    return { ok: false, error: '只能删除通过 DJUI 导入的字体' }
+  }
+
+  // 删除字体目录
+  await fs.removeDir(star, family)
+
+  // 从 fontref.txt 移除
+  const text = (await fs.readFileText(star, 'ref/fontref.txt')) ?? ''
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#') && l !== family)
+  await fs.writeFileText(star, 'ref/fontref.txt', lines.length > 0 ? lines.join('\n') + '\n' : '')
+
+  // 更新导入记录
+  await writeImportedFamilies(imported.filter(f => f !== family))
+
+  return { ok: true, family }
 }
 
 // ===== 调色板 =====

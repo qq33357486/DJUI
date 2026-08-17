@@ -37,7 +37,7 @@ const WINDOW_CLOSE_TRANSITION_OPTIONS = [
 ]
 
 export default function RightPanel() {
-  const { page, allPages, selectedIds, updateNodeField, batchUpdateNode, removeNode, updatePageMeta, applyFlexLayout, setActivePage } = useEditorStore()
+  const { page, allPages, selectedIds, updateNodeField, batchUpdateNode, removeNode, updatePageMeta, applyFlexLayout, setActivePage, responsiveVariant, clearResponsiveOverrides } = useEditorStore()
   const { config, setLastPage } = useProjectStore()
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [assetPickerField, setAssetPickerField] = useState('')
@@ -94,7 +94,8 @@ export default function RightPanel() {
         im.onerror = () => resolve(null)
         im.src = url
       })
-      if (img && img.naturalWidth > 0) {
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        updateNodeField(node.id, 'appearance.sourceSize', { width: img.naturalWidth, height: img.naturalHeight })
         updateNodeField(node.id, 'transform.width', img.naturalWidth)
         updateNodeField(node.id, 'transform.height', img.naturalHeight)
       }
@@ -103,7 +104,7 @@ export default function RightPanel() {
     }
   }
 
-  const handleAssetSelected = (assetPath: string) => {
+  const handleAssetSelected = async (assetPath: string) => {
     if (!assetPickerField) return
     if (assetPickerField === '__referenceImage') {
       // 直接从 store 获取最新 page，避免闭包问题
@@ -112,6 +113,19 @@ export default function RightPanel() {
       if (activePageId) updatePageMeta(activePageId, { referenceImage: assetPath })
     } else if (node) {
       updateNodeField(node.id, assetPickerField, assetPath)
+      if (assetPickerField === 'appearance.image') {
+        const url = await api.enginePathToUrl(assetPath)
+        if (!url) return
+        const img = await new Promise<HTMLImageElement | null>((resolve) => {
+          const im = new window.Image()
+          im.onload = () => resolve(im)
+          im.onerror = () => resolve(null)
+          im.src = url
+        })
+        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          updateNodeField(node.id, 'appearance.sourceSize', { width: img.naturalWidth, height: img.naturalHeight })
+        }
+      }
     }
   }
 
@@ -185,6 +199,8 @@ export default function RightPanel() {
             allPages={allPages}
             setActivePage={(pageId) => { setActivePage(pageId); setLastPage(pageId) }}
             soundConfig={soundConfig}
+            responsiveVariant={responsiveVariant}
+            clearResponsiveOverrides={clearResponsiveOverrides}
           />
         )}
       </div>
@@ -215,7 +231,7 @@ export default function RightPanel() {
 }
 
 // === 属性面板内容 ===
-function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig }: {
+function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig, responsiveVariant, clearResponsiveOverrides }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
@@ -229,6 +245,8 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
   allPages: Record<string, UiPage>
   setActivePage: (pageId: string) => void
   soundConfig: api.DjuiSoundConfig
+  responsiveVariant: 'base' | 'wide'
+  clearResponsiveOverrides: (nodeId: string) => void
 }) {
   const t = node.transform ?? {}
   const app = node.appearance ?? {}
@@ -247,8 +265,8 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
   const aspectLockDisabled = stretchWidth || stretchHeight
   const aspectLocked = node.editorLockAspect === true && !aspectLockDisabled
   const aspectRatioWH = (t.width ?? 100) / (t.height ?? 100)  // 当前 W:H
-  const xLabel = anchor.target === 'none' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
-  const yLabel = anchor.target === 'none' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
+  const xLabel = anchor.side === 'None' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
+  const yLabel = anchor.side === 'None' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
   const templateOptions = Object.values(allPages)
     .filter(p => p.nodeKind === 'template')
     .map(p => ({ value: p.pageId, label: `${p.pageId} (${p.designWidth}×${p.designHeight})` }))
@@ -278,6 +296,13 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
           <Button danger icon={<DeleteOutlined />} size="small" onClick={() => removeNode(node.id)} />
         </div>
       </div>
+
+      {responsiveVariant === 'wide' && (
+        <div style={{ marginBottom: 8, padding: 8, border: '1px solid #5c4218', borderRadius: 6, background: '#2a1f0f', color: '#ffaa44', fontSize: 12 }}>
+          正在编辑宽屏覆盖层
+          <Button size="small" style={{ float: 'right' }} onClick={() => clearResponsiveOverrides(node.id)}>清除此节点覆盖</Button>
+        </div>
+      )}
 
       <Collapse
         defaultActiveKey={['common', 'template', 'geometry', 'anchor', 'appearance', 'text', 'interaction']}
@@ -455,6 +480,33 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                     {app.image ? `📷 ${app.image.split('/').pop()}` : '📷 选择图片'}
                   </Button>
                 </FieldRow>
+                {app.image && (
+                  <FieldRow label="图片铺放">
+                    <Select
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={app.imageFit ?? 'stretch'}
+                      disabled={!!sliceMeta[app.image]}
+                      onChange={v => updateNodeField(node.id, 'appearance.imageFit', v)}
+                      options={[
+                        { value: 'stretch', label: '拉伸填满' },
+                        { value: 'contain', label: '完整显示' },
+                        { value: 'cover', label: '等比铺满' },
+                      ]}
+                    />
+                  </FieldRow>
+                )}
+                {app.image && (
+                  <FieldRow label="素材尺寸">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <InputNumber size="small" min={1} placeholder="宽" value={app.sourceSize?.width} onChange={v => updateNodeField(node.id, 'appearance.sourceSize.width', v)} style={{ width: '50%' }} />
+                      <InputNumber size="small" min={1} placeholder="高" value={app.sourceSize?.height} onChange={v => updateNodeField(node.id, 'appearance.sourceSize.height', v)} style={{ width: '50%' }} />
+                    </Space.Compact>
+                  </FieldRow>
+                )}
+                {app.image && ['contain', 'cover'].includes(app.imageFit ?? 'stretch') && !(app.sourceSize?.width > 0 && app.sourceSize?.height > 0) && (
+                  <div style={{ color: '#ff7875', fontSize: 11 }}>完整显示/等比铺满必须填写素材原始尺寸。</div>
+                )}
                 {app.image && (
                   <FieldRow label="适配尺寸">
                     <Button
@@ -725,7 +777,7 @@ function AnchorEditor({ node, updateNodeField }: {
   const anchor = node.anchor ?? {}
   const target = anchor.target ?? 'parent'
   const currentSide = anchor.side ?? DEFAULT_ANCHOR_SIDE
-  const isNone = target === 'none'
+  const isNone = currentSide === 'None'
 
   // 选择具体锚点：重置偏移为 0（让控件跳到锚点位置）
   const applySide = (sideId: string) => {
@@ -736,16 +788,10 @@ function AnchorEditor({ node, updateNodeField }: {
     }
   }
 
-  // 切换目标：选 none 时设置 side=None；选 parent/screen 时恢复默认锚点
   const handleTargetChange = (v: string) => {
     updateNodeField(node.id, 'anchor.target', v)
-    if (v === 'none') {
-      updateNodeField(node.id, 'anchor.side', 'None')
-    } else if (currentSide === 'None') {
-      // 从无锚点切回来时恢复默认
-      updateNodeField(node.id, 'anchor.side', DEFAULT_ANCHOR_SIDE)
-      updateNodeField(node.id, 'transform.x', 0)
-      updateNodeField(node.id, 'transform.y', 0)
+    if (v === 'safe' && !anchor.safeEdges?.length) {
+      updateNodeField(node.id, 'anchor.safeEdges', ['left', 'top', 'right', 'bottom'])
     }
   }
 
@@ -760,12 +806,34 @@ function AnchorEditor({ node, updateNodeField }: {
           options={[
             { value: 'parent', label: '父节点' },
             { value: 'screen', label: '屏幕（全屏）' },
-            { value: 'none', label: '无锚点（绝对定位）' },
+            { value: 'safe', label: '安全区' },
           ]}
         />
       </FieldRow>
 
-      {/* 3×3 网格选择器（无锚点时隐藏） */}
+      {target === 'safe' && (
+        <FieldRow label="安全边">
+          <Space wrap size={4}>
+            {[['left', '左'], ['top', '上'], ['right', '右'], ['bottom', '下']].map(([edge, label]) => {
+              const selected = (anchor.safeEdges ?? ['left', 'top', 'right', 'bottom']).includes(edge)
+              return (
+                <Button
+                  key={edge}
+                  size="small"
+                  type={selected ? 'primary' : 'default'}
+                  onClick={() => {
+                    const current = anchor.safeEdges ?? ['left', 'top', 'right', 'bottom']
+                    const next = selected ? current.filter((item: string) => item !== edge) : [...current, edge]
+                    updateNodeField(node.id, 'anchor.safeEdges', next)
+                  }}
+                >{label}</Button>
+              )
+            })}
+          </Space>
+        </FieldRow>
+      )}
+
+      {/* 3×3 网格选择器；side=None 表示父级局部绝对定位 */}
       {!isNone && (
       <div style={{
         padding: 10,
@@ -774,7 +842,7 @@ function AnchorEditor({ node, updateNodeField }: {
         borderRadius: 6,
       }}>
         <div style={{ fontSize: 10, color: '#5b6378', marginBottom: 8, textAlign: 'center' }}>
-          锚点只管位置 · {target === 'screen' ? '屏幕' : '父节点'}内
+          锚点只管位置 · {target === 'screen' ? '屏幕' : target === 'safe' ? '安全区' : '父节点'}内
         </div>
         <div style={{
           display: 'grid',
@@ -1270,22 +1338,50 @@ const FONT_CN_MAP: Record<string, string> = {
   'simhei': '黑体',
   'arial': 'Arial',
   'helvetica': 'Helvetica',
+  'msyh': '微软雅黑',
+  'seguiemj': '系统表情字体',
+  'notoemoji': 'Noto 表情字体',
+  'noteemoji': '手写表情字体',
+  'nowarrounded': '圆体 NoWarRounded',
+  'lxgwwenkai': '霞鹜文楷',
+  'alimama': '阿里妈妈体',
+  'sourcehanserif': '思源宋体',
+  'chillkai': '楷体 ChillKai',
+  'simkai': '楷体',
+  'firamono': '等宽 FiraMono',
 }
 function fontDisplayName(fontId: string): string {
-  const cn = FONT_CN_MAP[fontId.toLowerCase()]
+  const lastSeg = fontId.split('/').pop()?.toLowerCase() ?? fontId.toLowerCase()
+  const cn = FONT_CN_MAP[lastSeg]
   return cn ? `${cn} (${fontId})` : fontId
 }
 
 // === 字体选择器 ===
+// 字体下拉的「字体管理」哨兵值（选中它时不写入节点，而是打开字体管理弹窗）
+export const FONT_MANAGE_VALUE = '__djui_font_manager__'
+// 「引擎默认」哨兵值（写入节点时转为 null = 不设字体，跟随引擎默认字体）
+export const ENGINE_DEFAULT_FONT_VALUE = '__djui_engine_default__'
+
+// 字体下拉只有两类选项：引擎默认 + 用户导入的字体（画布与引擎加载同一文件，完全一致）
+export function buildFontSelectOptions(fonts: string[], fontInfos: { family: string; imported: boolean }[]) {
+  const importedSet = new Set(fontInfos.filter(f => f.imported).map(f => f.family))
+  const imported = fonts.filter(f => importedSet.has(f)).map(f => ({ value: f, label: fontDisplayName(f) }))
+  return [
+    { value: ENGINE_DEFAULT_FONT_VALUE, label: '引擎默认' },
+    ...(imported.length > 0 ? [{ label: '已导入字体', options: imported }] : []),
+    { label: '', options: [{ value: FONT_MANAGE_VALUE, label: '⚙ 导入新字体…' }] },
+  ]
+}
+
 function FontSelect({ node, updateNodeField }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
 }) {
-  const { config, fonts } = useProjectStore()
+  const { fonts, fontInfos, setFontManagerOpen } = useProjectStore()
   const [warning, setWarning] = useState(false)
 
   const currentFont = node.text?.font ?? null
-  const globalFont = config?.defaultFont ?? null
+  const selectValue = currentFont ?? ENGINE_DEFAULT_FONT_VALUE
   useEffect(() => {
     if (currentFont && fonts.length > 0 && !fonts.includes(currentFont)) {
       setWarning(true)
@@ -1294,21 +1390,19 @@ function FontSelect({ node, updateNodeField }: {
     }
   }, [currentFont, fonts])
 
+  const options = buildFontSelectOptions(fonts, fontInfos)
+
   return (
     <>
       <Select
         size="small" style={{ width: '100%' }}
-        value={currentFont}
-        onChange={v => updateNodeField(node.id, 'text.font', v || null)}
-        allowClear
-        placeholder={globalFont ? `全局: ${fontDisplayName(globalFont)}` : '默认引擎字体'}
-        options={fonts.map(f => ({ value: f, label: fontDisplayName(f) }))}
+        value={selectValue}
+        onChange={v => {
+          if (v === FONT_MANAGE_VALUE) { setFontManagerOpen(true); return }
+          updateNodeField(node.id, 'text.font', v === ENGINE_DEFAULT_FONT_VALUE ? null : (v || null))
+        }}
+        options={options}
       />
-      {!currentFont && globalFont && (
-        <div style={{ fontSize: 10, color: '#5b6378', marginTop: 2 }}>
-          使用全局默认字体: {fontDisplayName(globalFont)}
-        </div>
-      )}
       {warning && (
         <div style={{ fontSize: 10, color: '#ff9800', marginTop: 2 }}>
           ⚠ 该字体不在 ref/fontref.txt 中，可能无法渲染

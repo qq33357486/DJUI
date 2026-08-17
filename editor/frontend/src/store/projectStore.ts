@@ -25,9 +25,12 @@ interface ProjectState {
   scripts: ScriptsState
   fontVersion: number  // 字体注册完成后 bump，触发画布重渲染用真实字体
   fonts: string[]  // 可用字体列表（来自工程 fontref.txt，主流程集中加载）
+  fontInfos: api.FontInfo[]  // 字体分类信息（标准/系统/封装/缺失）
+  fontManagerOpen: boolean  // 字体管理弹窗
 
   initFromHandles: (handles: { star: boolean; ws: boolean }) => void
-  setConfig: (config: ProjectConfig) => void
+  loadProjectFile: () => Promise<api.ProjectFileLoadResult>
+  setConfig: (config: ProjectConfig) => Promise<void>
   clearConfig: () => void
   setLastPage: (pageId: string) => void
   refreshAgents: () => Promise<void>
@@ -36,6 +39,7 @@ interface ProjectState {
   setScripts: (s: ScriptsState) => void
   bumpFontVersion: () => void
   refreshFonts: () => Promise<void>
+  setFontManagerOpen: (open: boolean) => void
 }
 
 const initialAgents: AgentsState = {
@@ -60,6 +64,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   scripts: initialScripts,
   fontVersion: 0,
   fonts: [],
+  fontInfos: [],
+  fontManagerOpen: false,
 
   initFromHandles: (handles) => {
     // 从 projectContext 恢复配置
@@ -73,7 +79,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ config: stored, handlesReady: handles.star && handles.ws })
   },
 
-  setConfig: (config) => {
+  loadProjectFile: async () => {
+    const result = await api.loadProjectFileV6()
+    if (result.status === 'ok') {
+      const config = api.projectConfigFromV6(result.project)
+      api.saveStoredConfig(config)
+      set({ config })
+    }
+    return result
+  },
+
+  setConfig: async (config) => {
+    await api.saveProjectFileV6(api.createProjectFileV6(config))
     api.saveStoredConfig(config)
     set({ config, handlesReady: true })
   },
@@ -130,9 +147,13 @@ export const useProjectStore = create<ProjectState>((set) => ({
   refreshFonts: async () => {
     try {
       const list = await api.getFonts()
-      set({ fonts: list })
+      let infos: api.FontInfo[] = []
+      try { infos = await api.getFontInfos() } catch { /* 分类信息失败不阻塞列表 */ }
+      set({ fonts: list, fontInfos: infos })
     } catch {
-      set({ fonts: [] })
+      set({ fonts: [], fontInfos: [] })
     }
   },
+
+  setFontManagerOpen: (open) => set({ fontManagerOpen: open }),
 }))

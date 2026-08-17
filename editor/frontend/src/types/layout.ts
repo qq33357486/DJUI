@@ -29,6 +29,13 @@ export interface DjuiTransform {
 
 export interface DjuiAppearance {
   image?: string | null
+  /** 图片在节点矩形内的绘制方式；九宫格图片固定按 stretch 处理 */
+  imageFit?: 'stretch' | 'contain' | 'cover'
+  /** cover/contain 焦点，0=左/上，0.5=中，1=右/下 */
+  focalX?: number
+  focalY?: number
+  /** Runtime fallback because StarEngine exposes only a texture path, not synchronous intrinsic dimensions. */
+  sourceSize?: { width: number; height: number } | null
   background?: string | null
   borderThickness?: number | null
   borderColor?: string | null
@@ -115,8 +122,9 @@ export interface DjuiTransition {
 
 // 锚点：只管位置（NGUI UIAnchor 风格，9-way）
 export interface DjuiAnchor {
-  // 锚定目标：屏幕 / 父节点
-  target?: 'screen' | 'parent' | 'none'
+  // 锚定目标：父节点 / 屏幕 / 安全区；父级局部绝对定位使用 side=None
+  target?: 'screen' | 'parent' | 'safe'
+  safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
   // 9-way 锚点位置（决定控件相对父/屏幕的对齐基准点）
   side?: 'None' | 'TopLeft' | 'Top' | 'TopRight' | 'Left' | 'Center' | 'Right' | 'BottomLeft' | 'Bottom' | 'BottomRight'
   // === 向后兼容旧字段（自动迁移用，新代码不写）===
@@ -197,6 +205,8 @@ export interface UiPage {
   windowMode?: DjuiWindowMode | null
   /** 窗口入场/出场动效预设。为空时使用 Runtime 默认值。 */
   transition?: DjuiTransition | null
+  /** v6 宽屏层字段覆盖，编辑器加载/保存必须无损保留 */
+  responsive?: { wide: { overrides: Record<string, Record<string, unknown>> } }
 }
 
 export interface ProjectConfig {
@@ -208,9 +218,10 @@ export interface ProjectConfig {
   // ★ Canvas Scaler（全局适配，对应 uGUI CanvasScaler）
   canvasScaler?: {
     mode: 'ScaleWithScreenSize' | 'ConstantPixelSize'
-    // 0=按宽匹配，1=按高匹配，0.5=平衡
     match?: number
   }
+  canvasMode?: 'Contain' | 'MatchWidth' | 'MatchHeight'
+  wideRatio?: number
   /** 全局默认字体（未单独设字体的 Label/Input 使用） */
   defaultFont?: string | null
 }

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
+import { pushRecentProject } from '@/lib/recentProjects'
 import {
   Modal, Input, Form, InputNumber, message, Button, Space,
-  Tag, Alert, Radio, Tooltip,
+  Tag, Alert, Radio, Tooltip, Select,
 } from 'antd'
 import {
   FolderOpenOutlined, CheckCircleOutlined,
@@ -66,6 +67,8 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
       // 同步目录名
       setStarDirName(projectContext.starName || config?.starProjectPath || '')
       setWsDirName(projectContext.wsName || config?.workspacePath || '')
+      void checkRuntime()
+      void checkWorkspace()
 
       if (config) {
         const orient = config.orientation ?? 'portrait'
@@ -207,11 +210,17 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
         orientation: orient,
         designWidth: values.designWidth ?? 1080,
         designHeight: values.designHeight ?? 1920,
+        canvasMode: values.canvasMode ?? config?.canvasMode ?? 'Contain',
+        wideRatio: values.wideRatio ?? config?.wideRatio ?? 1.25,
         defaultFont: config?.defaultFont,
       }
-      setConfig(finalConfig)
+      await setConfig(finalConfig)
+      pushRecentProject(finalConfig.starProjectPath, finalConfig.workspacePath)
       message.success('工程配置已保存')
       onSave()
+      // 换过工程目录后必须整页刷新:编辑器各 store 还持有旧工程的页面/选中态,
+      // 局部重置容易残留;整页 reload 与 VS Code 重开窗口同语义,最稳。
+      setTimeout(() => window.location.reload(), 200)
     } catch {
       // validation error
     }
@@ -413,6 +422,17 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
               <div style={{ fontSize: 12, color: '#5ab9ff', padding: '4px 0' }}>{activeRes} 比例已选中</div>
             )}
           </Space>
+        </Form.Item>
+
+        <Form.Item name="canvasMode" label={<strong>Canvas 适配</strong>} initialValue={config?.canvasMode ?? 'Contain'}>
+          <Select options={[
+            { value: 'Contain', label: '完整容纳（推荐）' },
+            { value: 'MatchWidth', label: '宽度优先' },
+            { value: 'MatchHeight', label: '高度优先' },
+          ]} />
+        </Form.Item>
+        <Form.Item name="wideRatio" label={<strong>宽屏阈值</strong>} initialValue={config?.wideRatio ?? 1.25}>
+          <InputNumber min={1.01} max={4} step={0.05} style={{ width: '100%' }} addonAfter="物理宽高比" />
         </Form.Item>
 
       </Form>

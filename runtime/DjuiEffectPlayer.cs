@@ -26,6 +26,12 @@ public class DjuiEffectPlayer : IThinker
         EnsureRegistered();
     }
 
+    public static void Stop(Control ctrl)
+    {
+        for (var i = _pulses.Count - 1; i >= 0; i--)
+            if (ReferenceEquals(_pulses[i].ctrl, ctrl)) _pulses.RemoveAt(i);
+    }
+
     private static void EnsureRegistered()
     {
         if (_instance != null) return;
@@ -41,6 +47,7 @@ public class DjuiEffectPlayer : IThinker
         for (int i = _pulses.Count - 1; i >= 0; i--)
         {
             var (ctrl, phase, speed) = _pulses[i];
+            if (!ctrl.IsValid) { _pulses.RemoveAt(i); continue; }
             phase += dt * speed;
             var pulse = 1f + 0.05f * MathF.Sin(phase);
             ctrl.Scale = new Vector2(pulse, pulse);

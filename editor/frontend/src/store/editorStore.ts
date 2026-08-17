@@ -17,6 +17,11 @@ interface EditorState {
   // 当前编辑的页面（allPages[activePageId] 的引用，为兼容保留）
   page: UiPage | null
 
+  // 响应式编辑层
+  responsiveVariant: 'base' | 'wide'
+  setResponsiveVariant: (variant: 'base' | 'wide') => void
+  clearResponsiveOverrides: (nodeId: string) => void
+
   // 选中
   selectedIds: string[]
   // 选择锚点（最近一次单选/范围选的起点节点 id，供 Shift 连续范围选择）
@@ -115,7 +120,7 @@ function recalcOffset(node: UiNode, oldParentRect: LayoutRect, newParentRect: La
   // screen 锚点不随父变，不需要换算
   if (anchorTarget === 'screen') return
 
-  if (sideId === 'None' || anchorTarget === 'none' || !side) {
+  if (sideId === 'None' || !side) {
     // 无锚点：t.x/y 是相对父矩形左上角的绝对偏移
     // oldAbsolute = oldParentRect.x + t.x
     // newT.x = oldAbsolute - newParentRect.x
@@ -172,6 +177,16 @@ export const useEditorStore = create<EditorState>()(
     allPages: {},
     activePageId: null,
     page: null,
+    responsiveVariant: 'base',
+    setResponsiveVariant: (variant) => set((s) => { s.responsiveVariant = variant }),
+    clearResponsiveOverrides: (nodeId) => {
+      get().pushHistory()
+      set((s) => {
+        if (!s.page?.responsive?.wide.overrides) return
+        delete s.page.responsive.wide.overrides[nodeId]
+        if (s.activePageId) s.allPages[s.activePageId] = s.page
+      })
+    },
     selectedIds: [],
     selectionAnchor: null,
     undoStack: [],
@@ -473,13 +488,19 @@ export const useEditorStore = create<EditorState>()(
         if (!s.page) return
         const node = findNode(s.page.root, id)
         if (!node) return
-        const parts = path.split('.')
-        let target: any = node
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (!target[parts[i]]) target[parts[i]] = {}
-          target = target[parts[i]]
+        if (s.responsiveVariant === 'wide' && s.page.nodeKind === 'window') {
+          const responsive = s.page.responsive ??= { wide: { overrides: {} } }
+          const map = responsive.wide.overrides[id] ??= {}
+          map[path] = value
+        } else {
+          const parts = path.split('.')
+          let target: any = node
+          for (let i = 0; i < parts.length - 1; i++) {
+            if (!target[parts[i]]) target[parts[i]] = {}
+            target = target[parts[i]]
+          }
+          target[parts[parts.length - 1]] = value
         }
-        target[parts[parts.length - 1]] = value
         if (s.activePageId) s.allPages[s.activePageId] = s.page
       })
     },

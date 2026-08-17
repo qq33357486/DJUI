@@ -148,6 +148,19 @@ export async function writeFileJson(
   await writeFileText(root, path, JSON.stringify(data, null, 2))
 }
 
+// 写入二进制文件（自动创建父目录）
+export async function writeFileBinary(
+  root: FileSystemDirectoryHandle,
+  path: string,
+  data: ArrayBuffer
+): Promise<void> {
+  const handle = await getFileHandle(root, path, true)
+  if (!handle) throw new Error(`无法创建文件: ${path}`)
+  const writable = await handle.createWritable()
+  await writable.write(data)
+  await writable.close()
+}
+
 // 删除文件
 export async function removeFile(root: FileSystemDirectoryHandle, path: string): Promise<void> {
   const parts = splitPath(path)

@@ -1,100 +1,81 @@
-// DJUI Runtime - 数据绑定系统
-
+// DJUI Runtime - scoped data binding system
 #if CLIENT
 
 using GameUI.Control;
 
 namespace DjuiRuntime;
 
-/// <summary>
-/// 数据绑定系统。业务代码设置值，UI 自动更新。
-/// </summary>
+/// <summary>Global binding values with instance-scoped control registrations.</summary>
 public static class DjuiBindingSystem
 {
-    private static readonly Dictionary<string, object?> _values = new();
-    private static readonly Dictionary<string, List<(Control ctrl, Action<Control> action)>> _bindings = new();
-    private static readonly Dictionary<string, Control> _controlRegistry = new();
-
-    /// <summary>
-    /// 注册控件到绑定系统（由 DjuiNodeBuilder 自动调用）。
-    /// </summary>
-    internal static void RegisterControl(string nodeId, Control ctrl)
+    private sealed class Registration : IDisposable
     {
-        _controlRegistry[nodeId] = ctrl;
-    }
-
-    /// <summary>
-    /// 获取已注册的控件（供 DjuiWindowManager 使用）。
-    /// </summary>
-    internal static Control? GetRegisteredControl(string nodeId)
-    {
-        return _controlRegistry.TryGetValue(nodeId, out var ctrl) ? ctrl : null;
-    }
-
-    /// <summary>
-    /// 为指定节点注册绑定。
-    /// </summary>
-    internal static void RegisterBinding(string nodeId, string propertyName, string bindingKey)
-    {
-        if (!_controlRegistry.TryGetValue(nodeId, out var ctrl)) return;
-
-        var action = CreateBindingAction(propertyName, ctrl);
-        if (action == null) return;
-
-        if (!_bindings.ContainsKey(bindingKey))
-            _bindings[bindingKey] = new List<(Control, Action<Control>)>();
-
-        _bindings[bindingKey].Add((ctrl, action));
-
-        // 初始值应用
-        if (_values.TryGetValue(bindingKey, out _))
-            action(ctrl);
-    }
-
-    private static Action<Control>? CreateBindingAction(string propertyName, Control sampleCtrl)
-    {
-        return propertyName switch
+        public required string Key { get; init; }
+        public required Control Control { get; init; }
+        public required Action<object?> Apply { get; init; }
+        public void Dispose()
         {
-            "visible" => ctrl => ctrl.Visible = Get<bool>("__last_value"),
-            "text" => ctrl =>
+            if (_bindings.TryGetValue(Key, out var list))
             {
-                if (ctrl is Label label)
-                    label.Text = Get<string>("__last_value") ?? "";
-            },
-            "value" => ctrl =>
-            {
-                if (ctrl is Progress progress)
-                    progress.Value = Get<float>("__last_value");
-            },
-            _ => null,
-        };
-    }
-
-    /// <summary>
-    /// 设置绑定值。UI 自动更新。
-    /// </summary>
-    public static void Set<T>(string key, T value)
-    {
-        _values[key] = value;
-        _values["__last_value"] = value!;
-
-        if (_bindings.TryGetValue(key, out var bindings))
-        {
-            foreach (var (ctrl, action) in bindings)
-            {
-                try { action(ctrl); } catch { }
+                list.Remove(this);
+                if (list.Count == 0) _bindings.Remove(Key);
             }
         }
     }
 
-    /// <summary>
-    /// 获取绑定值。
-    /// </summary>
-    public static T? Get<T>(string key)
+    private static readonly Dictionary<string, object?> _values = new();
+    private static readonly Dictionary<string, List<Registration>> _bindings = new();
+    // Legacy v5 registry only. v6 registers controls directly and never uses global bare IDs.
+    private static readonly Dictionary<string, Control> _controlRegistry = new();
+
+    internal static void RegisterControl(string nodeId, Control ctrl) => _controlRegistry[nodeId] = ctrl;
+    internal static Control? GetRegisteredControl(string nodeId) => _controlRegistry.TryGetValue(nodeId, out var ctrl) ? ctrl : null;
+
+    internal static void RegisterBinding(string nodeId, string propertyName, string bindingKey)
     {
-        if (_values.TryGetValue(key, out var val) && val is T typed)
-            return typed;
-        return default;
+        if (_controlRegistry.TryGetValue(nodeId, out var control)) RegisterBinding(control, propertyName, bindingKey);
+    }
+
+    /// <summary>Registers one v6 instance-owned binding without publishing a bare node ID globally.</summary>
+    internal static IDisposable RegisterBinding(Control control, string propertyName, string bindingKey)
+    {
+        var apply = CreateBindingAction(propertyName, control);
+        if (apply == null) return EmptyDisposable.Instance;
+        var registration = new Registration { Key = bindingKey, Control = control, Apply = apply };
+        if (!_bindings.TryGetValue(bindingKey, out var list)) _bindings[bindingKey] = list = new List<Registration>();
+        list.Add(registration);
+        if (_values.TryGetValue(bindingKey, out var value)) apply(value);
+        return registration;
+    }
+
+    private static Action<object?>? CreateBindingAction(string propertyName, Control control)
+    {
+        return propertyName switch
+        {
+            "visible" => value => control.Visible = value is bool visible && visible,
+            "text" when control is Label label => value => label.Text = value?.ToString() ?? "",
+            "value" when control is Progress progress => value => progress.Value = Convert.ToSingle(value ?? 0f),
+            _ => null,
+        };
+    }
+
+    public static void Set<T>(string key, T value)
+    {
+        _values[key] = value;
+        if (!_bindings.TryGetValue(key, out var bindings)) return;
+        foreach (var registration in bindings.ToArray())
+        {
+            if (!registration.Control.IsValid) { registration.Dispose(); continue; }
+            try { registration.Apply(value); } catch (Exception ex) { Game.Logger.LogWarning(ex, "DJUI: 绑定 {Key} 更新失败", key); }
+        }
+    }
+
+    public static T? Get<T>(string key) => _values.TryGetValue(key, out var value) && value is T typed ? typed : default;
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public static readonly EmptyDisposable Instance = new();
+        public void Dispose() { }
     }
 }
 

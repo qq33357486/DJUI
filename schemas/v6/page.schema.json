@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://djui.duojie.games/schemas/v6/page.schema.json",
+  "title": "DJUI v6 Page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "schemaVersion", "pageId", "kind", "root"],
+  "properties": {
+    "protocolVersion": { "const": 6 },
+    "schemaVersion": { "const": 1 },
+    "pageId": { "$ref": "#/$defs/id" },
+    "kind": { "enum": ["window", "template"] },
+    "localSize": {
+      "type": "object", "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": { "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 } }
+    },
+    "window": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["fullscreen", "popup"] },
+        "transition": {
+          "type": "object", "additionalProperties": false,
+          "properties": { "open": { "type": ["string", "null"] }, "close": { "type": ["string", "null"] } }
+        }
+      }
+    },
+    "root": { "$ref": "#/$defs/rootNode" },
+    "responsive": {
+      "type": "object", "additionalProperties": false,
+      "required": ["wide"],
+      "properties": {
+        "wide": {
+          "type": "object", "additionalProperties": false,
+          "required": ["overrides"],
+          "properties": {
+            "overrides": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/overrideMap" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "window" } } }, "then": { "required": ["window"], "not": { "required": ["localSize"] } } },
+    { "if": { "properties": { "kind": { "const": "template" } } }, "then": { "required": ["localSize"], "not": { "required": ["window", "responsive"] } } }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "rootNode": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "starType", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "starType": { "const": "Panel" }, "name": { "type": "string" },
+        "basic": { "$ref": "#/$defs/basic" }, "appearance": { "$ref": "#/$defs/appearance" }, "layout": { "$ref": "#/$defs/layout" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+    "node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "starType", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "starType": { "enum": ["Panel", "Button", "Label", "Input", "Progress", "SpacingPanel", "PanelScrollable", "TemplateInstance"] },
+        "name": { "type": "string" }, "basic": { "$ref": "#/$defs/basic" }, "transform": { "$ref": "#/$defs/transform" },
+        "appearance": { "$ref": "#/$defs/appearance" }, "layout": { "$ref": "#/$defs/layout" }, "interaction": { "$ref": "#/$defs/interaction" },
+        "effects": { "$ref": "#/$defs/effects" }, "text": { "$ref": "#/$defs/text" }, "button": { "$ref": "#/$defs/button" },
+        "progress": { "$ref": "#/$defs/progress" }, "djui": { "$ref": "#/$defs/djui" }, "anchor": { "$ref": "#/$defs/anchor" },
+        "stretch": { "$ref": "#/$defs/stretch" }, "aspectRatio": { "$ref": "#/$defs/aspectRatio" },
+        "templateRef": { "type": ["string", "null"] },
+        "templateOverrides": { "type": ["object", "null"], "additionalProperties": { "$ref": "#/$defs/overrideMap" } },
+        "widthStretchRatio": { "type": ["number", "null"], "minimum": 0 }, "heightStretchRatio": { "type": ["number", "null"], "minimum": 0 },
+        "widthCompactRatio": { "type": ["number", "null"], "minimum": 0 }, "heightCompactRatio": { "type": ["number", "null"], "minimum": 0 },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+      }
+    },
+    "basic": { "type": "object", "additionalProperties": false, "properties": { "visible": { "type": "boolean" }, "disabled": { "type": "boolean" }, "isStatic": { "type": "boolean" } } },
+    "transform": { "type": "object", "additionalProperties": false, "properties": {
+      "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number", "minimum": 0 }, "height": { "type": "number", "minimum": 0 },
+      "rotation": { "type": "number" }, "scale": { "type": "array", "prefixItems": [{"type":"number"},{"type":"number"}], "items": false },
+      "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "zIndex": { "type": "number" }
+    } },
+    "anchor": { "type": "object", "additionalProperties": false, "properties": {
+      "target": { "enum": ["parent", "screen", "safe"] }, "side": { "enum": ["None", "TopLeft", "Top", "TopRight", "Left", "Center", "Right", "BottomLeft", "Bottom", "BottomRight"] },
+      "safeEdges": { "type": "array", "items": { "enum": ["left", "top", "right", "bottom"] }, "uniqueItems": true }
+    } },
+    "stretch": { "type": "object", "additionalProperties": false, "properties": {
+      "style": { "enum": ["None", "Horizontal", "Vertical", "Both"] },
+      "margins": { "type": "object", "additionalProperties": false, "required": ["left", "top", "right", "bottom"], "properties": {
+        "left": { "type": "number" }, "top": { "type": "number" }, "right": { "type": "number" }, "bottom": { "type": "number" }
+      } }
+    } },
+    "aspectRatio": { "type": "object", "additionalProperties": false, "required": ["mode", "ratio"], "properties": {
+      "mode": { "enum": ["None", "WidthControlsHeight", "HeightControlsWidth", "FitInParent"] }, "ratio": { "type": "number", "exclusiveMinimum": 0 }
+    } },
+    "appearance": { "type": "object", "additionalProperties": false, "properties": {
+      "image": { "type": ["string", "null"] }, "background": { "type": ["string", "null"] }, "imageMask": { "type": ["string", "null"] }, "slicedEdges": { "$ref": "#/$defs/fourNumbers" },
+      "imageFit": { "enum": ["stretch", "contain", "cover"] }, "focalX": { "type": "number", "minimum": 0, "maximum": 1 }, "focalY": { "type": "number", "minimum": 0, "maximum": 1 },
+      "sourceSize": { "type": ["object", "null"], "additionalProperties": false, "required": ["width", "height"], "properties": { "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 } } },
+      "borderThickness": { "type": ["number", "null"], "minimum": 0 }, "borderColor": { "type": ["string", "null"] }, "cornerRadius": { "type": "number", "minimum": 0 },
+      "clipContent": { "type": "boolean" }, "imageFlipX": { "type": "boolean" }, "imageFlipY": { "type": "boolean" }, "imageBlurLevel": { "type": "number", "minimum": 0 }, "desaturated": { "type": "boolean" }
+    } },
+    "interaction": { "type": "object", "additionalProperties": false, "properties": {
+      "routedEvents": { "type": ["string", "null"] }, "allowDrag": { "type": "boolean" }, "allowDrop": { "type": "boolean" },
+      "behaviors": { "type": "array", "items": { "$ref": "#/$defs/touchBehavior" } }
+    } },
+    "touchBehavior": { "type": "object", "additionalProperties": false, "required": ["type"], "properties": {
+      "type": { "const": "TouchBehavior" }, "scaleFactor": { "type": "number", "exclusiveMinimum": 0 },
+      "enablePressAnimation": { "type": "boolean" }, "enableLongPress": { "type": "boolean" }
+    } },
+    "effects": { "type": "object", "additionalProperties": false, "properties": { "preset": { "type": ["string", "null"] } } },
+    "layout": { "type": "object", "additionalProperties": false, "properties": {
+      "margin": { "$ref": "#/$defs/fourNumbers" }, "padding": { "$ref": "#/$defs/fourNumbers" }, "autoSize": { "enum": ["None", "Width", "Height", "Both"] },
+      "horizontalAlignment": { "type": ["string", "null"] }, "verticalAlignment": { "type": ["string", "null"] }, "horizontalContentAlignment": { "type": ["string", "null"] }, "verticalContentAlignment": { "type": ["string", "null"] }
+    } },
+    "fourNumbers": { "type": "array", "prefixItems": [{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}], "items": false },
+    "text": { "type": "object", "additionalProperties": false, "properties": {
+      "text": { "type": ["string", "null"] }, "fontSize": { "type": ["number", "null"], "minimum": 0 }, "textColor": { "type": ["string", "null"] },
+      "strokeSize": { "type": ["number", "null"], "minimum": 0 }, "strokeColor": { "type": ["string", "null"] }, "bold": { "type": ["boolean", "null"] },
+      "font": { "type": ["string", "null"] }, "textWrap": { "type": ["boolean", "null"] }, "textOverflow": { "enum": ["None", "Clip", "Ellipsis", "Shrink", null] }
+    } },
+    "button": { "type": "object", "additionalProperties": false, "properties": { "imageHover": { "type": ["string", "null"] }, "imagePressed": { "type": ["string", "null"] } } },
+    "progress": { "type": ["object", "null"], "additionalProperties": false, "properties": { "value": { "type": "number", "minimum": 0, "maximum": 1 }, "progressionMode": { "type": "string" }, "rotation": { "type": "number" } } },
+    "djui": { "type": "object", "additionalProperties": false, "properties": { "action": { "type": ["string", "null"] }, "clickSoundId": { "type": ["string", "null"] }, "bindings": { "type": "object", "additionalProperties": { "type": "string" } }, "locked": { "type": "boolean" } } },
+    "overrideMap": { "type": "object", "propertyNames": { "enum": ["basic.visible", "basic.disabled", "transform.x", "transform.y", "transform.width", "transform.height", "appearance.image", "appearance.background", "appearance.imageFit", "appearance.focalX", "appearance.focalY", "appearance.borderThickness", "appearance.borderColor", "text.text", "text.fontSize", "text.textColor", "text.strokeSize", "text.strokeColor", "text.bold", "text.font", "text.textWrap", "button.imageHover", "button.imagePressed", "progress.value"] } }
+  }
+}

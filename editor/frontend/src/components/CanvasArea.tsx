@@ -1242,6 +1242,8 @@ function computeRenderDims(
   const pointerSession = useRef<PointerSession | null>(null)
   // 选中节点的拖动捕获层信息（每次渲染重新收集，供拖动定位用）
   const proxyEntriesRef = useRef<ProxyEntry[]>([])
+  // 锚点编辑事件在页面尚未载入时也必须保持 Hook 顺序；实际画布参数由已渲染页面更新到此 ref。
+  const reanchorContextRef = useRef<{ actualW: number; actualH: number; safeRect: LayoutRect; imageFrame: LayoutRect | null } | null>(null)
 
   // 注册节点引用
   const registerRef = useCallback((id: string, ref: Konva.Node | null) => {
@@ -1531,6 +1533,50 @@ function computeRenderDims(
     return () => window.removeEventListener('keydown', handleKey)
   }, [])
 
+  // 属性面板请求切换锚点时，先在当前画布求出旧的视觉矩形；再用新锚点反算偏移/边距。
+  // 必须位于“没有页面”的提前 return 之前，保证首次载入页面时 Hook 顺序不变。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        ids: string[]
+        side?: DjuiAnchor['side']
+        target?: 'parent' | 'screen' | 'safe' | 'image'
+        safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
+      }>).detail
+      const layoutContext = reanchorContextRef.current
+      if (!detail?.ids?.length || !layoutContext) return
+      const store = useEditorStore.getState()
+      const currentPage = store.page
+      if (!currentPage) return
+      const displayRoot = store.responsiveVariant === 'wide'
+        ? cloneTreeWithResponsiveOverrides(currentPage.root, currentPage.responsive?.wide.overrides)
+        : currentPage.root
+      const updatesById: Record<string, Record<string, unknown>> = {}
+      for (const id of detail.ids) {
+        const currentNode = findNode(displayRoot, id)
+        if (!currentNode) continue
+        const nextNode: UiNode = JSON.parse(JSON.stringify(currentNode))
+        nextNode.anchor = {
+          ...nextNode.anchor,
+          ...(detail.side !== undefined ? { side: detail.side } : {}),
+          ...(detail.target !== undefined ? { target: detail.target } : {}),
+          ...(detail.safeEdges !== undefined ? { safeEdges: detail.safeEdges } : {}),
+        }
+        const parentRect = solveParentRectForNode(displayRoot, id, layoutContext.actualW, layoutContext.actualH, layoutContext.safeRect, layoutContext.imageFrame)
+        const oldRect = solveLayout(currentNode, parentRect, layoutContext.actualW, layoutContext.actualH, { safeRect: layoutContext.safeRect, imageFrame: layoutContext.imageFrame ?? undefined }).rect
+        const layoutPatch = computeLayoutPatchFromRect(nextNode, parentRect, layoutContext.actualW, layoutContext.actualH, oldRect, layoutContext.safeRect, layoutContext.imageFrame)
+        const anchorPatch: Record<string, unknown> = { ...layoutPatch }
+        if (detail.side !== undefined) anchorPatch['anchor.side'] = detail.side
+        if (detail.target !== undefined) anchorPatch['anchor.target'] = detail.target
+        if (detail.safeEdges !== undefined) anchorPatch['anchor.safeEdges'] = detail.safeEdges
+        updatesById[id] = anchorPatch
+      }
+      store.batchUpdateNodes(updatesById)
+    }
+    window.addEventListener('djui:reanchor', handler)
+    return () => window.removeEventListener('djui:reanchor', handler)
+  }, [])
+
   if (!page) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -1588,6 +1634,7 @@ function computeRenderDims(
     }
   }
   setCurrentImageFrame(pageImageFrame)
+  reanchorContextRef.current = { actualW, actualH, safeRect, imageFrame: pageImageFrame }
   // 适配审计与实际预览使用同一份画布、安全区和布局求解结果；只在选择设备画像时启用。
   const adaptationAudit = !isTemplate && devicePreset
     ? auditPageAdaptation(
@@ -1914,49 +1961,6 @@ function computeRenderDims(
       'transform.rotation': rotation,
     })
   }
-
-  // 属性面板请求切换锚点时，先在当前画布求出旧的视觉矩形；再用新锚点反算偏移/边距。
-  // 这样不论是单选、多选后的单个编辑，还是 parent/screen/safe/image 之间切换，控件都不会跳位。
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        ids: string[]
-        side?: DjuiAnchor['side']
-        target?: 'parent' | 'screen' | 'safe' | 'image'
-        safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
-      }>).detail
-      if (!detail?.ids?.length) return
-      const store = useEditorStore.getState()
-      const currentPage = store.page
-      if (!currentPage) return
-      const displayRoot = store.responsiveVariant === 'wide'
-        ? cloneTreeWithResponsiveOverrides(currentPage.root, currentPage.responsive?.wide.overrides)
-        : currentPage.root
-      const updatesById: Record<string, Record<string, unknown>> = {}
-      for (const id of detail.ids) {
-        const currentNode = findNode(displayRoot, id)
-        if (!currentNode) continue
-        const nextNode: UiNode = JSON.parse(JSON.stringify(currentNode))
-        nextNode.anchor = {
-          ...nextNode.anchor,
-          ...(detail.side !== undefined ? { side: detail.side } : {}),
-          ...(detail.target !== undefined ? { target: detail.target } : {}),
-          ...(detail.safeEdges !== undefined ? { safeEdges: detail.safeEdges } : {}),
-        }
-        const parentRect = solveParentRectForNode(displayRoot, id, actualW, actualH, safeRect, pageImageFrame)
-        const oldRect = solveLayout(currentNode, parentRect, actualW, actualH, { safeRect, imageFrame: pageImageFrame ?? undefined }).rect
-        const layoutPatch = computeLayoutPatchFromRect(nextNode, parentRect, actualW, actualH, oldRect, safeRect, pageImageFrame)
-        const anchorPatch: Record<string, unknown> = { ...layoutPatch }
-        if (detail.side !== undefined) anchorPatch['anchor.side'] = detail.side
-        if (detail.target !== undefined) anchorPatch['anchor.target'] = detail.target
-        if (detail.safeEdges !== undefined) anchorPatch['anchor.safeEdges'] = detail.safeEdges
-        updatesById[id] = anchorPatch
-      }
-      store.batchUpdateNodes(updatesById)
-    }
-    window.addEventListener('djui:reanchor', handler)
-    return () => window.removeEventListener('djui:reanchor', handler)
-  }, [actualH, actualW, page, pageImageFrame, responsiveVariant, safeRect])
 
   // 选中回调
   const handleSelect = (id: string, modifier: 'none' | 'ctrl' | 'shift') => {

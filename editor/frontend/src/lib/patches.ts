@@ -88,10 +88,9 @@ function buildSoundSetupStatus(
   }
 }
 
-// 页面目录：ui/djui/pages
-const PAGES_DIR = 'ui/djui/pages'
-// 声音配置：ui/djui/sounds.json
-const SOUNDS_FILE = 'ui/djui/sounds.json'
+// 页面/声音的编辑源位于 UI 工作区；发布时由 client.ts 镜像到星火工程。
+const PAGES_DIR = '.djui/layout/pages'
+const SOUNDS_FILE = '.djui/layout/sounds.json'
 
 export function getDefaultSoundConfig(): DjuiSoundConfig {
   return { version: SOUND_CONFIG_VERSION, defaultButtonSoundId: null, sounds: [] }

@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.5.1'
+export const AGENTS_VERSION = '0.6.0'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -38,6 +38,7 @@ export function buildAgentsMd(): string {
 \`\`\`
 工作区根目录/
 ├── AGENTS.md          # 本文件（编辑器自动维护）
+├── .djui/layout/      # UI 项目配置源：project.json、sounds.json、pages/
 ├── 原始素材/          # 原图、设计稿、AI 生图（输入素材，不参与发布）
 │   └── YYYY-MM-DD/    # 按日期分目录，可再按主题/批次建子目录
 ├── 成品素材/          # 人工审批后的最终素材，「发布」时同步到星火工程
@@ -321,7 +322,7 @@ python trim_compress.py \\
 
 ### 6.1 本地校验（改完 JSON 必跑）
 
-无论人改还是脚本/AI 改 \`ui/djui/pages/*.json\` 或 \`project.json\`，保存后执行：
+无论人改还是脚本/AI 改 \`.djui/layout/pages/*.json\` 或 \`.djui/layout/project.json\`，保存后执行：
 
 \`\`\`bash
 # 在 DJUI 仓库根目录(需 Node.js,无其他依赖)
@@ -335,7 +336,8 @@ node scripts/validate-pages.mjs <星火工程根目录>
 
 ## 七、发布行为
 
-- 发布会**完整覆盖** \`ui/image/djui/\` 下同名文件
+- 发布会将工作区 \`.djui/layout/\` 的项目配置、页面和音效镜像到星火工程；游戏工程内副本不是编辑源
+- 发布会**完整覆盖** \`ui/image/djui/\` 下同名素材文件
 - 子目录结构原样保留：\`成品素材/icons/abc.png\` → \`ui/image/djui/icons/abc.png\`
 - \`原始素材/\` \`临时文件/\` \`脚本区/\` **不会**被发布
 - 发布前请关闭引擎对相关资源的占用（否则 Windows 可能锁文件）

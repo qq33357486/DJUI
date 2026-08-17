@@ -73,6 +73,7 @@ export interface NodeV6 {
     margins?: { left: number; top: number; right: number; bottom: number }
   }
   aspectRatio?: { mode: 'None' | 'WidthControlsHeight' | 'HeightControlsWidth' | 'FitInParent'; ratio: number }
+  sceneFrame?: { backgroundId: string; artboard: PageLocalSizeV6 } | null
   templateRef?: string | null
   templateOverrides?: Record<string, OverrideMapV6> | null
   children: NodeV6[]

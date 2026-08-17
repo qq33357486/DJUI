@@ -75,7 +75,7 @@ npm run dev
 
 - 页面 ID 使用小写英文、数字、下划线或短横线。
 - 素材路径来自 `成品素材/`。
-- 保存页面后，JSON 会写入 StarEngine 工程的 `ui/djui/pages/`。
+- 保存页面后，JSON 会写入 UI 工作区的 `.djui/layout/pages/`。星火工程中的副本由「发布」生成，不作为编辑源。
 
 ## 5. 配置点击音效（可选）
 
@@ -92,10 +92,10 @@ DJUI 的音效只引用 StarEngine 数编里已经创建好的 `GameDataSound`�
 
 ```text
 UI 工作区/成品素材/*        -> StarEngine 工程/ui/image/djui/*
-StarEngine 工程/ui/djui/pages/* -> StarEngine 工程/AppBundle/user_files/djui/pages/*
-StarEngine 工程/ui/djui/pages/* -> StarEngine 工程/ui/AppBundle/user_files/djui/pages/*
-StarEngine 工程/ui/djui/sounds.json -> StarEngine 工程/AppBundle/user_files/djui/sounds.json
-StarEngine 工程/ui/djui/sounds.json -> StarEngine 工程/ui/AppBundle/user_files/djui/sounds.json
+UI 工作区/.djui/layout/pages/* -> StarEngine 工程/ui/djui/pages/*
+UI 工作区/.djui/layout/pages/* -> StarEngine 工程/ui/AppBundle/user_files/djui/pages/*
+UI 工作区/.djui/layout/project.json -> StarEngine 工程/ui/djui/project.json 与 ui/AppBundle/user_files/djui/project.json
+UI 工作区/.djui/layout/sounds.json -> StarEngine 工程/ui/djui/sounds.json 与 ui/AppBundle/user_files/djui/sounds.json
 ```
 
 发布前请关闭正在占用资源的游戏进程，避免 Windows 文件锁导致复制失败。

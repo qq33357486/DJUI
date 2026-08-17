@@ -68,9 +68,49 @@ export function inspectPageV6(raw: unknown): CompatibilityResult<PageFileV6> {
   }
   const nodeIds = new Set<string>()
   if (!isRecord(raw.root) || !Array.isArray(raw.root.children)) issues.push({ path: '$.root', message: '缺少结构根或 root.children' })
-  else validateNode(raw.root, '$.root', issues, nodeIds)
+  else {
+    validateNode(raw.root, '$.root', issues, nodeIds)
+    validateSceneFrames(raw.root, '$.root', issues)
+  }
   validateOverrideMaps(raw.responsive, '$.responsive', issues, nodeIds)
   return issues.length ? { ok: false, kind: 'invalid', issues } : { ok: true, value: raw as unknown as PageFileV6 }
+}
+
+/** 场景画板必须是根下独立的一棵素材坐标树，避免 image/screen/safe 参考系混入。 */
+function validateSceneFrames(root: Record<string, unknown>, rootPath: string, issues: CompatibilityIssue[]): void {
+  const rootChildren = Array.isArray(root.children) ? root.children : []
+  const rootById = new Map<string, Record<string, unknown>>()
+  rootChildren.forEach(child => {
+    if (isRecord(child) && typeof child.id === 'string') rootById.set(child.id, child)
+  })
+  const walk = (node: Record<string, unknown>, path: string, insideScene: boolean, isRootChild: boolean): void => {
+    const frame = isRecord(node.sceneFrame) ? node.sceneFrame : null
+    const nowInsideScene = insideScene || !!frame
+    if (frame) {
+      if (!isRootChild) issues.push({ path: path + '.sceneFrame', message: '场景画板只能放在页面根节点下' })
+      const backgroundId = typeof frame.backgroundId === 'string' ? frame.backgroundId : ''
+      const background = rootById.get(backgroundId)
+      if (!background) issues.push({ path: path + '.sceneFrame.backgroundId', message: '引用的背景必须是页面根下节点' })
+      else if (!isRecord(background.appearance) || typeof background.appearance.image !== 'string' || !background.appearance.image) {
+        issues.push({ path: path + '.sceneFrame.backgroundId', message: '引用节点必须是带图片的背景' })
+      }
+      if (!isRecord(node.anchor) || node.anchor.target !== 'image') {
+        issues.push({ path: path + '.anchor.target', message: '场景画板容器必须锚定 image 图帧' })
+      }
+      if (!isRecord(node.stretch) || node.stretch.style !== 'Both') {
+        issues.push({ path: path + '.stretch.style', message: '场景画板容器必须使用 Both 拉伸填满图帧' })
+      }
+    } else if (insideScene && isRecord(node.anchor) && node.anchor.target !== undefined && node.anchor.target !== 'parent') {
+      issues.push({ path: path + '.anchor.target', message: '场景画板内节点只能锚定 parent' })
+    }
+    if (!Array.isArray(node.children)) return
+    node.children.forEach((child, index) => {
+      if (isRecord(child)) walk(child, path + '.children[' + index + ']', nowInsideScene, false)
+    })
+  }
+  rootChildren.forEach((child, index) => {
+    if (isRecord(child)) walk(child, rootPath + '.children[' + index + ']', false, true)
+  })
 }
 
 function validateNode(value: Record<string, unknown>, path: string, issues: CompatibilityIssue[], nodeIds: Set<string>): void {
@@ -105,6 +145,21 @@ function validateNode(value: Record<string, unknown>, path: string, issues: Comp
     for (const key of ['focalX', 'focalY']) {
       const n = value.appearance[key]
       if (n !== undefined && (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1)) issues.push({ path: path + '.appearance.' + key, message: '必须是 0 到 1 的有限数字' })
+    }
+  }
+  if (value.sceneFrame !== undefined && value.sceneFrame !== null) {
+    if (!isRecord(value.sceneFrame)) {
+      issues.push({ path: path + '.sceneFrame', message: '场景画板必须是对象' })
+    } else {
+      if (typeof value.sceneFrame.backgroundId !== 'string' || !value.sceneFrame.backgroundId.trim()) {
+        issues.push({ path: path + '.sceneFrame.backgroundId', message: '必须引用背景节点 ID' })
+      }
+      if (!isRecord(value.sceneFrame.artboard)) {
+        issues.push({ path: path + '.sceneFrame.artboard', message: '缺少场景画板尺寸' })
+      } else {
+        checkPositive(value.sceneFrame.artboard.width, path + '.sceneFrame.artboard.width', issues)
+        checkPositive(value.sceneFrame.artboard.height, path + '.sceneFrame.artboard.height', issues)
+      }
     }
   }
   if (isRecord(value.interaction)) {

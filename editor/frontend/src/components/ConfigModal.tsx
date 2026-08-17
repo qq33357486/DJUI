@@ -21,23 +21,11 @@ interface ConfigModalProps {
   mode?: 'new' | 'open' | 'edit'
 }
 
-// 分辨率预设
-interface RatioPreset { ratio: string; w: number; h: number; desc: string }
-
-const RESOLUTION_PRESETS: Record<'landscape' | 'portrait', RatioPreset[]> = {
-  portrait: [
-    { ratio: '9:16', w: 1080, h: 1920, desc: '经典标准' },
-    { ratio: '9:19.5', w: 1080, h: 2340, desc: '全面屏主流' },
-    { ratio: '9:20', w: 1080, h: 2160, desc: '安卓全面屏' },
-    { ratio: '10:21', w: 1080, h: 2268, desc: '超高屏/折叠屏' },
-  ],
-  landscape: [
-    { ratio: '16:9', w: 1920, h: 1080, desc: '经典标准' },
-    { ratio: '19.5:9', w: 2340, h: 1080, desc: '全面屏主流' },
-    { ratio: '20:9', w: 2160, h: 1080, desc: '安卓全面屏' },
-    { ratio: '21:10', w: 2520, h: 1200, desc: '超高屏/折叠屏' },
-  ],
-}
+const DEFAULT_PROJECT_CANVAS = { orientation: 'portrait' as const, width: 1080, height: 2400 }
+const PROJECT_CANVAS_BY_ORIENTATION = {
+  portrait: { width: 1080, height: 2400, ratio: '9:20' },
+  landscape: { width: 2400, height: 1080, ratio: '20:9' },
+} as const
 
 export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: ConfigModalProps) {
   const { config, setConfig } = useProjectStore()
@@ -50,15 +38,13 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
   const [workspaceStatus, setWorkspaceStatus] = useState<api.WorkspaceStatus | null>(null)
   const [workspaceChecking, setWorkspaceChecking] = useState(false)
   const [workspaceInstalling, setWorkspaceInstalling] = useState(false)
-  const [useCustomRes, setUseCustomRes] = useState(false)
-  const [activeRes, setActiveRes] = useState<string | null>(null)
 
   const initialValues: Partial<ProjectConfig> = config ?? {
     starProjectPath: '',
     workspacePath: '',
-    orientation: 'portrait',
-    designWidth: 1080,
-    designHeight: 1920,
+    orientation: DEFAULT_PROJECT_CANVAS.orientation,
+    designWidth: DEFAULT_PROJECT_CANVAS.width,
+    designHeight: DEFAULT_PROJECT_CANVAS.height,
   }
 
   // 打开时恢复选中状态
@@ -70,22 +56,7 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
       void checkRuntime()
       void checkWorkspace()
 
-      if (config) {
-        const orient = config.orientation ?? 'portrait'
-        const preset = RESOLUTION_PRESETS[orient].find(
-          p => p.w === config.designWidth && p.h === config.designHeight
-        )
-        if (preset) {
-          setActiveRes(preset.ratio)
-          setUseCustomRes(false)
-        } else {
-          setActiveRes(null)
-          setUseCustomRes(true)
-        }
-      } else {
-        setActiveRes(RESOLUTION_PRESETS.portrait[0].ratio)
-        setUseCustomRes(false)
-      }
+      if (!config) form.setFieldsValue({ orientation: 'portrait', designWidth: 1080, designHeight: 2400 })
     }
   }, [open, config])
 
@@ -174,26 +145,12 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
     }
   }
 
-  // === 分辨率选择 ===
-  const handleOrientationChange = (orient: 'landscape' | 'portrait') => {
+  // 新建时方向即是项目契约；创建后不允许从竖屏切到横屏或反向切换。
+  const handleNewOrientationChange = (orient: 'landscape' | 'portrait') => {
+    const preset = PROJECT_CANVAS_BY_ORIENTATION[orient]
     form.setFieldValue('orientation', orient)
-    setUseCustomRes(false)
-    const preset = RESOLUTION_PRESETS[orient][0]
-    form.setFieldValue('designWidth', preset.w)
-    form.setFieldValue('designHeight', preset.h)
-    setActiveRes(preset.ratio)
-  }
-
-  const handlePresetClick = (p: RatioPreset) => {
-    setUseCustomRes(false)
-    form.setFieldValue('designWidth', p.w)
-    form.setFieldValue('designHeight', p.h)
-    setActiveRes(p.ratio)
-  }
-
-  const handleCustomToggle = () => {
-    setUseCustomRes(true)
-    setActiveRes(null)
+    form.setFieldValue('designWidth', preset.width)
+    form.setFieldValue('designHeight', preset.height)
   }
 
   // === 保存 ===
@@ -203,15 +160,19 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
       if (!projectContext.star) { message.warning('请选择星火工程目录'); return }
       if (!projectContext.ws) { message.warning('请选择 UI 工程目录'); return }
 
-      const orient = values.orientation ?? 'portrait'
+      const isNewProject = mode === 'new'
+      const orient = isNewProject
+        ? (values.orientation ?? DEFAULT_PROJECT_CANVAS.orientation)
+        : (config?.orientation ?? values.orientation ?? DEFAULT_PROJECT_CANVAS.orientation)
+      const newCanvas = PROJECT_CANVAS_BY_ORIENTATION[orient]
       const finalConfig: ProjectConfig = {
         starProjectPath: projectContext.starName,
         workspacePath: projectContext.wsName,
         orientation: orient,
-        designWidth: values.designWidth ?? 1080,
-        designHeight: values.designHeight ?? 1920,
-        canvasMode: values.canvasMode ?? config?.canvasMode ?? 'Contain',
-        wideRatio: values.wideRatio ?? config?.wideRatio ?? 1.25,
+        designWidth: isNewProject ? newCanvas.width : (config?.designWidth ?? values.designWidth ?? DEFAULT_PROJECT_CANVAS.width),
+        designHeight: isNewProject ? newCanvas.height : (config?.designHeight ?? values.designHeight ?? DEFAULT_PROJECT_CANVAS.height),
+        canvasMode: isNewProject ? 'Contain' : (values.canvasMode ?? config?.canvasMode ?? 'Contain'),
+        wideRatio: isNewProject ? 1.25 : (values.wideRatio ?? config?.wideRatio ?? 1.25),
         defaultFont: config?.defaultFont,
       }
       await setConfig(finalConfig)
@@ -289,14 +250,11 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
     return null
   }
 
-  const currentOrientation = Form.useWatch('orientation', form) ?? 'portrait'
-  const presets = RESOLUTION_PRESETS[currentOrientation as 'landscape' | 'portrait'] ?? []
-
   return (
     <Modal
       title={mode === 'new' ? '新建工程' : mode === 'open' ? '打开工程' : '工程配置'}
       open={open} onOk={handleOk} onCancel={onClose}
-      okText={mode === 'open' ? '打开' : '保存'} cancelText="取消" width={640} destroyOnClose={false}>
+      okText={mode === 'new' ? '创建' : mode === 'open' ? '打开' : '保存'} cancelText="取消" width={640} destroyOnClose={false}>
       <Form form={form} layout="vertical" initialValues={initialValues}>
 
         {/* === 星火工程目录 === */}
@@ -346,94 +304,56 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
         <div style={{ height: 16 }} />
 
         {/* === 设计分辨率 === */}
-        <Form.Item label={<strong>设计分辨率</strong>}>
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            <Form.Item name="orientation" noStyle>
-              <Radio.Group
-                buttonStyle="solid"
-                onChange={e => handleOrientationChange(e.target.value)}
-                style={{ width: '100%' }}
-              >
-                <Radio.Button value="landscape" style={{ width: '50%', textAlign: 'center' }}>
-                  <DesktopOutlined /> 横屏 (Landscape)
-                </Radio.Button>
-                <Radio.Button value="portrait" style={{ width: '50%', textAlign: 'center' }}>
-                  <MobileOutlined /> 竖屏 (Portrait)
-                </Radio.Button>
-              </Radio.Group>
+        {mode === 'new' ? (
+          <Form.Item label={<strong>项目方向</strong>}>
+            <Space direction="vertical" style={{ width: '100%' }} size={10}>
+              <Form.Item name="orientation" noStyle>
+                <Radio.Group
+                  buttonStyle="solid"
+                  onChange={event => handleNewOrientationChange(event.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  <Radio.Button value="portrait" style={{ width: '50%', textAlign: 'center' }}>
+                    <MobileOutlined /> 竖屏 · 9:20
+                  </Radio.Button>
+                  <Radio.Button value="landscape" style={{ width: '50%', textAlign: 'center' }}>
+                    <DesktopOutlined /> 横屏 · 20:9
+                  </Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                message="方向在创建后锁定"
+                description="分辨率预览只显示同方向设备；9:16、9:19.5 等是竖屏项目的适配画像，不会改变项目画板。"
+              />
+              <Form.Item name="designWidth" hidden><Input /></Form.Item>
+              <Form.Item name="designHeight" hidden><Input /></Form.Item>
+            </Space>
+          </Form.Item>
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message={`项目方向已锁定：${config?.orientation === 'landscape' ? '横屏 · 20:9' : '竖屏 · 9:20'}（${config?.designWidth}×${config?.designHeight}）`}
+            description="若要制作另一方向的 UI，请新建对应方向项目；当前项目的设备预览不会显示反方向设备。"
+          />
+        )}
+
+        {mode !== 'new' && (
+          <>
+            <Form.Item name="canvasMode" label={<strong>Canvas 适配</strong>} initialValue={config?.canvasMode ?? 'Contain'}>
+              <Select options={[
+                { value: 'Contain', label: '完整容纳（推荐）' },
+                { value: 'MatchWidth', label: '宽度优先' },
+                { value: 'MatchHeight', label: '高度优先' },
+              ]} />
             </Form.Item>
-
-            {/* 预设比例选择 */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {presets.map(p => {
-                const isActive = !useCustomRes && activeRes === p.ratio
-                return (
-                  <div
-                    key={p.ratio}
-                    onClick={() => handlePresetClick(p)}
-                    style={{
-                      flex: '1 1 0', minWidth: 90, cursor: 'pointer', textAlign: 'center',
-                      padding: '10px 8px', borderRadius: 8, transition: 'all 0.15s',
-                      border: isActive ? '2px solid #5ab9ff' : '1px solid #2a3142',
-                      background: isActive ? '#15293d' : '#1d2230',
-                    }}
-                  >
-                    <div style={{ fontSize: 16, fontWeight: 600, color: isActive ? '#5ab9ff' : '#e8ecf4' }}>
-                      {p.ratio}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#9aa3b4', marginTop: 2 }}>{p.desc}</div>
-                    <div style={{ fontSize: 10, color: '#5b6378', marginTop: 2 }}>{p.w}×{p.h}</div>
-                  </div>
-                )
-              })}
-              {/* 自定义 */}
-              <div
-                onClick={handleCustomToggle}
-                style={{
-                  flex: '1 1 0', minWidth: 90, cursor: 'pointer', textAlign: 'center',
-                  padding: '10px 8px', borderRadius: 8, transition: 'all 0.15s',
-                  border: useCustomRes ? '2px solid #5ab9ff' : '1px dashed #3a4258',
-                  background: useCustomRes ? '#15293d' : 'transparent',
-                }}
-              >
-                <div style={{ fontSize: 16, fontWeight: 600, color: useCustomRes ? '#5ab9ff' : '#5b6378' }}>自定义</div>
-                <div style={{ fontSize: 11, color: '#5b6378', marginTop: 2 }}>手动输入</div>
-              </div>
-            </div>
-
-            {useCustomRes ? (
-              <Space style={{ marginTop: 4 }}>
-                <Form.Item name="designWidth" noStyle>
-                  <InputNumber min={1} max={99999} style={{ width: 120 }} prefix="宽" />
-                </Form.Item>
-                <span style={{ color: '#5b6378' }}>×</span>
-                <Form.Item name="designHeight" noStyle>
-                  <InputNumber min={1} max={99999} style={{ width: 120 }} prefix="高" />
-                </Form.Item>
-              </Space>
-            ) : (
-              <>
-                <Form.Item name="designWidth" hidden><Input /></Form.Item>
-                <Form.Item name="designHeight" hidden><Input /></Form.Item>
-              </>
-            )}
-
-            {!useCustomRes && activeRes && (
-              <div style={{ fontSize: 12, color: '#5ab9ff', padding: '4px 0' }}>{activeRes} 比例已选中</div>
-            )}
-          </Space>
-        </Form.Item>
-
-        <Form.Item name="canvasMode" label={<strong>Canvas 适配</strong>} initialValue={config?.canvasMode ?? 'Contain'}>
-          <Select options={[
-            { value: 'Contain', label: '完整容纳（推荐）' },
-            { value: 'MatchWidth', label: '宽度优先' },
-            { value: 'MatchHeight', label: '高度优先' },
-          ]} />
-        </Form.Item>
-        <Form.Item name="wideRatio" label={<strong>宽屏阈值</strong>} initialValue={config?.wideRatio ?? 1.25}>
-          <InputNumber min={1.01} max={4} step={0.05} style={{ width: '100%' }} addonAfter="物理宽高比" />
-        </Form.Item>
+            <Form.Item name="wideRatio" label={<strong>宽屏阈值</strong>} initialValue={config?.wideRatio ?? 1.25}>
+              <InputNumber min={1.01} max={4} step={0.05} style={{ width: '100%' }} addonAfter="物理宽高比" />
+            </Form.Item>
+          </>
+        )}
 
       </Form>
     </Modal>

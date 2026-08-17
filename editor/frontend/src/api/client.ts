@@ -148,9 +148,16 @@ export type { DjuiSoundConfig, DjuiSoundItem, SoundSetupStatus, ApplyPatchesResu
 export interface SliceEdges { left: number; top: number; right: number; bottom: number }
 export type SliceMeta = Record<string, SliceEdges>
 
-// ===== v6 项目配置（工程目录持久化） =====
+// ===== v6 UI 配置源（工作区持久化，发布时镜像到星火工程） =====
 
-const PROJECT_FILE_V6 = 'ui/djui/project.json'
+const UI_LAYOUT_DIR = '.djui/layout'
+const PROJECT_FILE_V6 = UI_LAYOUT_DIR + '/project.json'
+const PAGES_DIR = UI_LAYOUT_DIR + '/pages'
+const SOUNDS_FILE_V6 = UI_LAYOUT_DIR + '/sounds.json'
+const STAR_LAYOUT_DIR = 'ui/djui'
+const STAR_PROJECT_FILE_V6 = STAR_LAYOUT_DIR + '/project.json'
+const STAR_PAGES_DIR = STAR_LAYOUT_DIR + '/pages'
+const STAR_SOUNDS_FILE_V6 = STAR_LAYOUT_DIR + '/sounds.json'
 let activeProjectFileV6: ProjectFileV6 | null = null
 
 export type ProjectFileLoadResult =
@@ -190,11 +197,38 @@ export function projectConfigFromV6(project: ProjectFileV6): ProjectConfig {
   }
 }
 
-export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
+/**
+ * 一次性迁移：旧版把 UI 配置错误地留在星火工程内；只有工作区尚未建立布局源时，
+ * 才复制现有 v6 配置到工作区。复制完成后，工作区成为唯一可编辑源。
+ */
+async function migrateLegacyLayoutToWorkspace(): Promise<void> {
+  const ws = projectContext.ws
   const star = projectContext.star
-  if (!star) return { status: 'missing' }
-  if (!(await fs.fileExists(star, PROJECT_FILE_V6))) return { status: 'missing' }
-  const raw = await fs.readFileJson<unknown>(star, PROJECT_FILE_V6)
+  if (!ws || !star) return
+  if (await fs.fileExists(ws, PROJECT_FILE_V6)) return
+  if (!(await fs.fileExists(star, STAR_PROJECT_FILE_V6))) return
+
+  await fs.copyFile(star, STAR_PROJECT_FILE_V6, ws, PROJECT_FILE_V6)
+  const legacyPages = await fs.getDirHandle(star, STAR_PAGES_DIR, false)
+  if (legacyPages) {
+    const files = await fs.walkFiles(legacyPages, undefined, ['.json'])
+    for (const file of files) {
+      await fs.copyFile(legacyPages, file, ws, PAGES_DIR + '/' + file)
+    }
+  }
+  if (await fs.fileExists(star, STAR_SOUNDS_FILE_V6)) {
+    await fs.copyFile(star, STAR_SOUNDS_FILE_V6, ws, SOUNDS_FILE_V6)
+  }
+}
+
+export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
+  const ws = projectContext.ws
+  if (!ws) return { status: 'missing' }
+  if (!(await fs.fileExists(ws, PROJECT_FILE_V6))) {
+    await migrateLegacyLayoutToWorkspace()
+  }
+  if (!(await fs.fileExists(ws, PROJECT_FILE_V6))) return { status: 'missing' }
+  const raw = await fs.readFileJson<unknown>(ws, PROJECT_FILE_V6)
   const result = inspectProjectV6(raw)
   if (result.ok) {
     activeProjectFileV6 = result.value
@@ -205,11 +239,11 @@ export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
 }
 
 export async function scanMigrationReportV6(): Promise<MigrationReportV6> {
-  const star = projectContext.star
-  if (!star) return buildMigrationReportV6([])
-  const projectRaw = await fs.readFileJson<unknown>(star, PROJECT_FILE_V6)
+  const ws = projectContext.ws
+  if (!ws) return buildMigrationReportV6([])
+  const projectRaw = await fs.readFileJson<unknown>(ws, PROJECT_FILE_V6)
   const reports = [inspectMigrationFileV6(PROJECT_FILE_V6, projectRaw, 'project')]
-  const pagesDir = await fs.getDirHandle(star, PAGES_DIR, false)
+  const pagesDir = await fs.getDirHandle(ws, PAGES_DIR, false)
   if (pagesDir) {
     const files = await fs.walkFiles(pagesDir, undefined, ['.json'])
     for (const file of files) {
@@ -221,13 +255,13 @@ export async function scanMigrationReportV6(): Promise<MigrationReportV6> {
 }
 
 export async function saveProjectFileV6(project: ProjectFileV6): Promise<void> {
-  const star = projectContext.star
-  if (!star) throw new Error('未选择星火工程目录')
+  const ws = projectContext.ws
+  if (!ws) throw new Error('未选择 UI 工作区目录')
   const result = inspectProjectV6(project)
   if (!result.ok) {
     throw new Error(result.issues.map(issue => issue.path + ': ' + issue.message).join('；'))
   }
-  await fs.writeFileJson(star, PROJECT_FILE_V6, result.value)
+  await fs.writeFileJson(ws, PROJECT_FILE_V6, result.value)
   activeProjectFileV6 = result.value
 }
 
@@ -312,20 +346,18 @@ function pageFileV6FromUiPage(page: UiPage): PageFileV6 {
   } as PageFileV6
 }
 
-const PAGES_DIR = 'ui/djui/pages'
-
 export async function listPages(): Promise<string[]> {
-  const star = projectContext.star
-  if (!star) return []
-  const pagesDir = await fs.ensureDir(star, PAGES_DIR)
+  const ws = projectContext.ws
+  if (!ws) return []
+  const pagesDir = await fs.ensureDir(ws, PAGES_DIR)
   const allFiles = await fs.walkFiles(pagesDir, undefined, ['.json'])
   return allFiles.map(f => f.replace(/\.json$/i, ''))
 }
 
 export async function loadPage(pageId: string): Promise<UiPage | null> {
-  const star = projectContext.star
-  if (!star) return null
-  const raw = await fs.readFileJson<unknown>(star, `${PAGES_DIR}/${pageId}.json`)
+  const ws = projectContext.ws
+  if (!ws) return null
+  const raw = await fs.readFileJson<unknown>(ws, `${PAGES_DIR}/${pageId}.json`)
   const result = inspectPageV6(raw)
   if (!result.ok) {
     const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
@@ -336,21 +368,21 @@ export async function loadPage(pageId: string): Promise<UiPage | null> {
 }
 
 export async function savePage(page: UiPage): Promise<void> {
-  const star = projectContext.star
-  if (!star) throw new Error('未选择星火工程目录')
-  await fs.ensureDir(star, PAGES_DIR)
+  const ws = projectContext.ws
+  if (!ws) throw new Error('未选择 UI 工作区目录')
+  await fs.ensureDir(ws, PAGES_DIR)
   const result = inspectPageV6(pageFileV6FromUiPage(page))
   if (!result.ok) {
     const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
     throw new Error('拒绝保存非 v6 页面：' + detail)
   }
-  await fs.writeFileJson(star, `${PAGES_DIR}/${page.pageId}.json`, result.value)
+  await fs.writeFileJson(ws, `${PAGES_DIR}/${page.pageId}.json`, result.value)
 }
 
 export async function deletePage(pageId: string): Promise<void> {
-  const star = projectContext.star
-  if (!star) return
-  await fs.removeFile(star, `${PAGES_DIR}/${pageId}.json`)
+  const ws = projectContext.ws
+  if (!ws) return
+  await fs.removeFile(ws, `${PAGES_DIR}/${pageId}.json`)
 }
 
 // ===== 素材浏览 =====
@@ -446,31 +478,31 @@ export async function getGameDataSounds(_projectPath?: string): Promise<GameData
 }
 
 export async function getSoundConfig(_projectPath?: string): Promise<DjuiSoundConfig> {
-  const star = projectContext.star
-  if (!star) return getDefaultSoundConfig()
-  return await readSoundConfig(star)
+  const ws = projectContext.ws
+  if (!ws) return getDefaultSoundConfig()
+  return await readSoundConfig(ws)
 }
 
 export async function saveSoundConfig(_projectPath: string = '', config: unknown): Promise<DjuiSoundConfig> {
-  const star = projectContext.star
-  if (!star) throw new Error('未选择星火工程目录')
+  const ws = projectContext.ws
+  if (!ws) throw new Error('未选择 UI 工作区目录')
 
   const { config: cleanedConfig, error } = validateSoundConfigForSave(config)
   if (error) throw new Error(error)
 
-  await fs.writeFileJson(star, 'ui/djui/sounds.json', cleanedConfig)
+  await fs.writeFileJson(ws, SOUNDS_FILE_V6, cleanedConfig)
   return cleanedConfig
 }
 
 // ===== 补丁 =====
 
 export async function applyPatches(_projectPath: string): Promise<ApplyPatchesResult> {
-  const star = projectContext.star
-  if (!star) {
+  const ws = projectContext.ws
+  if (!ws) {
     return {
       ok: false,
       changed: false,
-      warnings: ['未选择星火工程目录'],
+      warnings: ['未选择 UI 工作区目录'],
       blockers: [],
       patches: [],
       soundSetup: {
@@ -482,7 +514,7 @@ export async function applyPatches(_projectPath: string): Promise<ApplyPatchesRe
     }
   }
 
-  const result = await applyProjectPatches(star)
+  const result = await applyProjectPatches(ws)
   return {
     ok: result.ok,
     changed: result.changed,
@@ -595,6 +627,8 @@ export async function initWorkspace(_workspacePath: string): Promise<InitWorkspa
     await fs.ensureDir(ws, d)
     created.push(d)
   }
+  // UI 配置源（页面、项目配置、音效）；只在发布时镜像到星火工程。
+  await fs.ensureDir(ws, PAGES_DIR)
 
   // 成品素材子目录
   for (const sub of FINISHED_SUBDIRS) {
@@ -637,7 +671,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   if (!ws || !star) return { ok: false, error: '未选择工程目录' }
 
   // 1. 应用补丁
-  const patchResult = await applyProjectPatches(star)
+  const patchResult = await applyProjectPatches(ws)
   if (!patchResult.ok || patchResult.blockers.length > 0) {
     return { ok: false, error: patchResult.blockers.join('\n') || '补丁应用失败' }
   }
@@ -645,7 +679,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   // 2. 检查源目录
   const finishedDir = await fs.getDirHandle(ws, '成品素材', false)
   if (!finishedDir) return { ok: false, error: '成品素材目录不存在' }
-  const pagesSourceDir = await fs.getDirHandle(star, PAGES_DIR, false)
+  const pagesSourceDir = await fs.getDirHandle(ws, PAGES_DIR, false)
   if (!pagesSourceDir) return { ok: false, error: '页面目录不存在' }
 
   // 3. 镜像成品素材 → ui/image/djui（增量：按发布清单跳过未变文件）
@@ -675,22 +709,24 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   await collectFingerprints(finishedDir, '')
   await fs.writeFileJson(star, manifestPath, nextManifest)
 
-  // 4. 镜像页面 → ui/AppBundle/user_files/djui/pages（唯一消费方：客户端进程，CWD=ui/）
-  // DJUI Runtime 全部 #if CLIENT，服务端不读页面 JSON——根 AppBundle 无需发布 djui 资源。
+  // 4. 工作区配置镜像到星火工程编辑源和 Runtime 消费目录。
   const warningsFromBundle: string[] = []
+  await mirrorPages(star, STAR_PAGES_DIR, pagesSourceDir, warningsFromBundle)
   const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
 
   // 5. 发布 v6 项目配置（Runtime 严格读取 project.json）
-  const projectData = await fs.readFileText(star, PROJECT_FILE_V6)
-  if (!projectData) return { ok: false, error: '缺少 ui/djui/project.json' }
+  const projectData = await fs.readFileText(ws, PROJECT_FILE_V6)
+  if (!projectData) return { ok: false, error: '缺少工作区 .djui/layout/project.json' }
+  await fs.writeFileText(star, STAR_PROJECT_FILE_V6, projectData)
   await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
   await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/project.json', projectData)
 
   // 6. 复制 sounds.json → 同一位置
   let copiedSoundsConfig = false
-  if (await fs.fileExists(star, 'ui/djui/sounds.json')) {
-    const soundData = await fs.readFileText(star, 'ui/djui/sounds.json')
+  if (await fs.fileExists(ws, SOUNDS_FILE_V6)) {
+    const soundData = await fs.readFileText(ws, SOUNDS_FILE_V6)
     if (soundData) {
+      await fs.writeFileText(star, STAR_SOUNDS_FILE_V6, soundData)
       await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
       await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/sounds.json', soundData)
       copiedSoundsConfig = true
@@ -698,7 +734,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   }
 
   // 6. 发布警告
-  const warnings = [...warningsFromBundle, ...await buildPublishWarnings(pagesSourceDir, star)]
+  const warnings = [...warningsFromBundle, ...await buildPublishWarnings(pagesSourceDir, ws)]
 
   return {
     ok: true,
@@ -736,11 +772,11 @@ async function mirrorPages(
   return stats.total
 }
 
-async function buildPublishWarnings(pagesDir: FileSystemDirectoryHandle, star: FileSystemDirectoryHandle): Promise<string[]> {
+async function buildPublishWarnings(pagesDir: FileSystemDirectoryHandle, workspace: FileSystemDirectoryHandle): Promise<string[]> {
   const warnings: string[] = []
   const soundIds = new Set<string>()
 
-  const soundConfig = await readSoundConfig(star)
+  const soundConfig = await readSoundConfig(workspace)
   for (const s of soundConfig.sounds) {
     soundIds.add(s.id)
   }

@@ -10,7 +10,8 @@ import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/ancho
 import { solveLayout, setCurrentImageFrame, getCurrentImageFrame, Rect as LayoutRect } from '@/utils/layoutSolver'
 import { computeImageFit } from '@/utils/imageFit'
 import { createCanvasPlanV6 } from '@/utils/viewportV6'
-import { DEVICE_PRESETS_V6, findDevicePresetV6 } from '@/lib/devicePresetsV6'
+import { devicePresetsForOrientationV6, findDevicePresetV6, type DevicePresetV6 } from '@/lib/devicePresetsV6'
+import { auditPageAdaptation, computeImageFrameForAudit } from '@/utils/adaptationAudit'
 import type Konva from 'konva'
 
 // === 自定义 useImage hook：从 URL 加载 HTMLImageElement ===
@@ -298,16 +299,21 @@ function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, c
   let rect: LayoutRect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
   if (!path) return rect
   for (let i = 1; i < path.length - 1; i++) {
-    rect = solveLayout(path[i], rect, canvasWidth, canvasHeight).rect
+    const solved = solveLayout(path[i], rect, canvasWidth, canvasHeight).rect
+    const artboard = path[i].sceneFrame?.artboard
+    // 场景画板的后代编辑的是 artboard 局部坐标，不是屏幕坐标。
+    rect = artboard && artboard.width > 0 && artboard.height > 0
+      ? { x: 0, y: 0, width: artboard.width, height: artboard.height }
+      : solved
   }
   return rect
 }
 
 function getLayoutRef(node: UiNode, parentRect: LayoutRect, canvasWidth: number, canvasHeight: number): LayoutRect {
   const target = node.anchor?.target ?? 'parent'
-  return target === 'screen'
-    ? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
-    : parentRect
+  if (target === 'screen') return { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  if (target === 'image') return getCurrentImageFrame() ?? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  return parentRect
 }
 
 function getStretchAxes(node: UiNode) {
@@ -337,11 +343,23 @@ function collectProxyEntries(
   inheritedDelta: Vec2,
   dragPreview: DragPreview | null,
   out: ProxyEntry[],
+  sceneSpace?: { frame: LayoutRect; scaleX: number; scaleY: number },
 ): void {
   if (node.editorHidden) return
-  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight)
+  const { rect: authored } = solveLayout(node, parentRect, canvasWidth, canvasHeight)
+  const solved = sceneSpace
+    ? {
+        x: sceneSpace.frame.x + authored.x * sceneSpace.scaleX,
+        y: sceneSpace.frame.y + authored.y * sceneSpace.scaleY,
+        width: authored.width * sceneSpace.scaleX,
+        height: authored.height * sceneSpace.scaleY,
+      }
+    : authored
   const ownDelta = dragPreview?.id === node.id ? { x: dragPreview.dx, y: dragPreview.dy } : { x: 0, y: 0 }
-  const renderDelta = { x: inheritedDelta.x + ownDelta.x, y: inheritedDelta.y + ownDelta.y }
+  const scaledOwnDelta = sceneSpace
+    ? { x: ownDelta.x * sceneSpace.scaleX, y: ownDelta.y * sceneSpace.scaleY }
+    : ownDelta
+  const renderDelta = { x: inheritedDelta.x + scaledOwnDelta.x, y: inheritedDelta.y + scaledOwnDelta.y }
   const rotation = node.transform?.rotation ?? 0
   out.push({
     id: node.id,
@@ -350,9 +368,28 @@ function collectProxyEntries(
     baseDragX: solved.x + inheritedDelta.x,
     baseDragY: solved.y + inheritedDelta.y,
   })
+  const artboard = node.sceneFrame?.artboard
+  if (artboard && artboard.width > 0 && artboard.height > 0) {
+    const displayedFrame = {
+      x: solved.x + renderDelta.x,
+      y: solved.y + renderDelta.y,
+      width: solved.width,
+      height: solved.height,
+    }
+    const nextSceneSpace = {
+      frame: displayedFrame,
+      scaleX: displayedFrame.width / artboard.width,
+      scaleY: displayedFrame.height / artboard.height,
+    }
+    const authoredRoot = { x: 0, y: 0, width: artboard.width, height: artboard.height }
+    for (const child of (node.children ?? [])) {
+      collectProxyEntries(child, authoredRoot, artboard.width, artboard.height, { x: 0, y: 0 }, dragPreview, out, nextSceneSpace)
+    }
+    return
+  }
   const nextInherited = renderDelta
   for (const child of (node.children ?? [])) {
-    collectProxyEntries(child, solved, canvasWidth, canvasHeight, nextInherited, dragPreview, out)
+    collectProxyEntries(child, authored, canvasWidth, canvasHeight, nextInherited, dragPreview, out, sceneSpace)
   }
 }
 
@@ -387,7 +424,7 @@ function computeLayoutPatchFromRect(
 
   if (!stretchAxes.horizontal) {
     if (sideId === 'None' || !side) {
-      patch['transform.x'] = Math.round(desiredRect.x)
+      patch['transform.x'] = Math.round(desiredRect.x - ref.x)
     } else {
       const anchorX = ref.x + side.nx * ref.width
       patch['transform.x'] = Math.round(desiredRect.x - anchorX + side.nx * desiredRect.width)
@@ -397,7 +434,7 @@ function computeLayoutPatchFromRect(
 
   if (!stretchAxes.vertical) {
     if (sideId === 'None' || !side) {
-      patch['transform.y'] = Math.round(desiredRect.y)
+      patch['transform.y'] = Math.round(desiredRect.y - ref.y)
     } else {
       const anchorY = ref.y + (1 - side.ny) * ref.height
       patch['transform.y'] = Math.round(desiredRect.y - anchorY + (1 - side.ny) * desiredRect.height)
@@ -541,7 +578,6 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
   const borderThickness = positiveNumber(app.borderThickness)
-
   return (
     <>
       <Rect
@@ -653,13 +689,14 @@ interface NodeShapeProps {
   canvasWidth: number          // 画布（设计/模拟）宽度
   canvasHeight: number
   safeRect: LayoutRect
+  imageFrame?: LayoutRect | null
   showEditorOverlay: boolean   // 编辑器辅助渲染开关
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
   dragPreview: DragPreview | null
   inheritedDragDelta: Vec2
 }
 
-function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
+function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
   const { config } = useProjectStore()
   const allPages = useEditorStore(s => s.allPages)
   const defaultFont = config?.defaultFont ?? null
@@ -683,7 +720,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const bgColor = app.background
 
   // ★ 用 solver 算出最终屏幕矩形（应用了 anchor + stretch + aspectRatio）
-  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight, { safeRect })
+  const { rect: solved } = solveLayout(node, parentRect, canvasWidth, canvasHeight, { safeRect, imageFrame: imageFrame ?? undefined })
   const x = solved.x
   const y = solved.y
   const width = solved.width
@@ -810,6 +847,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const sliceEdges = app.image ? sliceMeta[app.image] : undefined
   const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
   const borderThickness = positiveNumber(app.borderThickness)
+  const sceneFrame = node.sceneFrame
 
   return (
     <>
@@ -992,8 +1030,45 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           listening={false}
         />
       )}
-      {/* 子节点 */}
-      {(node.children ?? []).map(child => (
+      {/* 子节点：场景画板内的坐标以 artboard 为准，再整体映射到背景完整图帧。 */}
+      {sceneFrame?.artboard && sceneFrame.artboard.width > 0 && sceneFrame.artboard.height > 0 ? (
+        <Group
+          x={displayX}
+          y={displayY}
+          scaleX={width / sceneFrame.artboard.width}
+          scaleY={height / sceneFrame.artboard.height}
+          clipX={0}
+          clipY={0}
+          clipWidth={sceneFrame.artboard.width}
+          clipHeight={sceneFrame.artboard.height}
+        >
+          {(node.children ?? []).map(child => (
+            <NodeShape
+              key={child.id}
+              node={child}
+              isSelected={selectedIds.includes(child.id)}
+              selectedIds={selectedIds}
+              onSelect={onSelect}
+              onDragEnd={onDragEnd}
+              onDragPreviewChange={onDragPreviewChange}
+              onTransformEnd={onTransformEnd}
+              registerRef={registerRef}
+              workspacePath={workspacePath}
+              projectPath={projectPath}
+              parentRect={{ x: 0, y: 0, width: sceneFrame.artboard.width, height: sceneFrame.artboard.height }}
+              canvasWidth={sceneFrame.artboard.width}
+              canvasHeight={sceneFrame.artboard.height}
+              safeRect={{ x: 0, y: 0, width: sceneFrame.artboard.width, height: sceneFrame.artboard.height }}
+              imageFrame={imageFrame}
+              showEditorOverlay={showEditorOverlay}
+              sliceMeta={sliceMeta}
+              dragPreview={dragPreview}
+              inheritedDragDelta={{ x: 0, y: 0 }}
+            />
+          ))}
+        </Group>
+      ) : (
+        (node.children ?? []).map(child => (
           <NodeShape
             key={child.id}
             node={child}
@@ -1010,13 +1085,97 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             canvasWidth={canvasWidth}
             canvasHeight={canvasHeight}
             safeRect={safeRect}
+            imageFrame={imageFrame}
             showEditorOverlay={showEditorOverlay}
             sliceMeta={sliceMeta}
             dragPreview={dragPreview}
             inheritedDragDelta={renderDelta}
           />
-        ))}
+        ))
+      )}
     </>
+  )
+}
+
+/**
+ * 审计页的只读设备窗口。它复用主画布的 NodeShape、图片裁切和 sceneFrame 求解，
+ * 因而不是另一套缩略图算法；交互和编辑辅助线在这里被刻意关闭。
+ */
+export function StaticViewportPreview({
+  root, config, device, workspacePath, projectPath, width, height,
+}: {
+  root: UiNode
+  config: ProjectConfig
+  device: DevicePresetV6
+  workspacePath: string
+  projectPath: string
+  width: number
+  height: number
+}) {
+  const project = api.createProjectFileV6(config)
+  const plan = createCanvasPlanV6(device.widthPx, device.heightPx, device.safeInsetsPx, project)
+  const canvas = plan.canvasRect
+  const imageFrame = computeImageFrameForAudit(root, canvas, plan.safeRect)
+  const scale = Math.min(width / canvas.width, height / canvas.height)
+  const renderW = canvas.width * scale
+  const renderH = canvas.height * scale
+  const obstacleRects = [...(device.visualObstacles ?? []), ...(device.touchObstacles ?? [])].map(obstacle => ({
+    ...obstacle,
+    x: obstacle.x * canvas.width / device.widthPx,
+    y: obstacle.y * canvas.height / device.heightPx,
+    width: obstacle.width * canvas.width / device.widthPx,
+    height: obstacle.height * canvas.height / device.heightPx,
+  }))
+
+  return (
+    <Stage width={width} height={height} listening={false}>
+      <Layer listening={false}>
+        <Group x={(width - renderW) / 2} y={(height - renderH) / 2} scaleX={scale} scaleY={scale}
+          clipX={0} clipY={0} clipWidth={canvas.width} clipHeight={canvas.height}>
+          <Rect x={0} y={0} width={canvas.width} height={canvas.height} fill="#161a23" listening={false} />
+          {(root.children ?? []).map(child => (
+            <NodeShape
+              key={child.id}
+              node={child}
+              isSelected={false}
+              selectedIds={[]}
+              onSelect={() => {}}
+              onDragEnd={() => {}}
+              onDragPreviewChange={() => {}}
+              onTransformEnd={() => {}}
+              registerRef={() => {}}
+              workspacePath={workspacePath}
+              projectPath={projectPath}
+              parentRect={canvas}
+              canvasWidth={canvas.width}
+              canvasHeight={canvas.height}
+              safeRect={plan.safeRect}
+              imageFrame={imageFrame}
+              showEditorOverlay={false}
+              sliceMeta={{}}
+              dragPreview={null}
+              inheritedDragDelta={{ x: 0, y: 0 }}
+            />
+          ))}
+          <Rect
+            x={plan.safeRect.x} y={plan.safeRect.y}
+            width={plan.safeRect.width} height={plan.safeRect.height}
+            fill="rgba(42,190,150,0.05)" stroke="#2abe96" strokeWidth={Math.max(1 / scale, 1)} dash={[6 / scale, 4 / scale]}
+            listening={false}
+          />
+          {obstacleRects.map(obstacle => (
+            <Rect
+              key={obstacle.kind + obstacle.label}
+              x={obstacle.x} y={obstacle.y} width={obstacle.width} height={obstacle.height}
+              fill={obstacle.kind === 'gesture' || obstacle.kind === 'waterfall' ? 'rgba(245,158,11,0.18)' : 'rgba(244,63,94,0.28)'}
+              stroke={obstacle.kind === 'gesture' || obstacle.kind === 'waterfall' ? '#f59e0b' : '#f43f5e'}
+              strokeWidth={Math.max(1 / scale, 1)}
+              listening={false}
+            />
+          ))}
+        </Group>
+      </Layer>
+    </Stage>
   )
 }
 
@@ -1040,13 +1199,11 @@ export default function CanvasArea() {
 // zoomFit 与渲染共用，保证适配缩放按真实画布大小计算
 function computeRenderDims(
   page: { nodeKind?: string; designWidth: number; designHeight: number },
-  previewW: number | null,
-  previewH: number | null,
+  preset: DevicePresetV6 | null,
   config: ProjectConfig | null,
 ): { w: number; h: number } {
   const isTemplate = page.nodeKind === 'template'
   if (isTemplate) return { w: page.designWidth, h: page.designHeight }
-  const preset = findDevicePresetV6(previewW, previewH)
   const plan = preset && config
     ? createCanvasPlanV6(preset.widthPx, preset.heightPx, preset.safeInsetsPx, api.createProjectFileV6(config))
     : null
@@ -1057,8 +1214,8 @@ function computeRenderDims(
 }
 
 // 多分辨率预览：默认 = 设计分辨率
-  const [previewW, setPreviewW] = useState<number | null>(null)
-  const [previewH, setPreviewH] = useState<number | null>(null)
+  const [previewPresetId, setPreviewPresetId] = useState<string | null>(null)
+  const previewPreset = findDevicePresetV6(previewPresetId)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
   const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
   // 当前按下→弹起的指针会话（统一管理「点击选中」与「拖动」）
@@ -1123,12 +1280,12 @@ function computeRenderDims(
     const sw = stage.width()
     const sh = stage.height()
     // 与渲染处同源：预设物理像素需经 Canvas 模式换算成实际渲染画布尺寸，否则适配按错误大小计算导致画布溢出视口
-    const dims = computeRenderDims(page, previewW, previewH, config)
+    const dims = computeRenderDims(page, previewPreset, config)
     const dw = dims.w
     const dh = dims.h
     const scale = Math.max(0.05, Math.min(5, Math.min((sw - margin * 2) / dw, (sh - margin * 2) / dh)))
     setViewport({ scale, x: (sw - dw * scale) / 2, y: (sh - dh * scale) / 2 })
-  }, [page, previewW, previewH])
+  }, [page, previewPreset, config])
 
   const zoomReset = useCallback(() => {
     setViewport({ x: 40, y: 40, scale: 0.4 })
@@ -1151,6 +1308,19 @@ function computeRenderDims(
       window.removeEventListener('djui:zoomFit', onZoomFit)
     }
   }, [zoomBy, zoomFit, zoomReset])
+
+  // 审计页可把某个设备画像带回画布复核；审计结果本身不再覆盖目录或画布。
+  useEffect(() => {
+    const onSelectDevicePreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ presetId: string; variant?: 'base' | 'wide' }>).detail
+      if (!detail) return
+      setPreviewPresetId(detail.presetId)
+      if (detail.variant) setResponsiveVariant(detail.variant)
+      window.setTimeout(() => zoomFit(), 0)
+    }
+    window.addEventListener('djui:selectDevicePreview', onSelectDevicePreview)
+    return () => window.removeEventListener('djui:selectDevicePreview', onSelectDevicePreview)
+  }, [zoomFit])
 
   // F 键聚焦选中控件
   useEffect(() => {
@@ -1353,7 +1523,7 @@ function computeRenderDims(
   const designH = page.designHeight
   const isTemplate = page.nodeKind === 'template'
   // 设备预设保存物理像素；按项目 Canvas 模式换算为 Runtime 使用的逻辑可见区。
-  const devicePreset = isTemplate ? null : findDevicePresetV6(previewW, previewH)
+  const devicePreset = isTemplate ? null : previewPreset
   const previewPlan = devicePreset && config
     ? createCanvasPlanV6(
         devicePreset.widthPx,
@@ -1362,13 +1532,13 @@ function computeRenderDims(
         api.createProjectFileV6(config),
       )
     : null
-  const renderDims = computeRenderDims(page, previewW, previewH, config)
+  const renderDims = computeRenderDims(page, devicePreset, config)
   const actualW = renderDims.w
   const actualH = renderDims.h
   // 调试探针：暴露实际渲染画布尺寸（仅 dev，供 CDP 排查预览换算）
   if (import.meta.env.DEV) {
     ;(window as any).__DJUI_CANVAS_DEBUG__ = {
-      previewW, previewH, designW, designH, actualW, actualH,
+      previewPresetId, designW, designH, actualW, actualH,
       hasPlan: !!previewPlan,
       planCanvas: previewPlan ? { w: previewPlan.canvasRect.width, h: previewPlan.canvasRect.height } : null,
       config: config ? { mode: config.canvasMode, dw: config.designWidth, dh: config.designHeight } : null,
@@ -1377,10 +1547,16 @@ function computeRenderDims(
   }
   const referenceRect = previewPlan?.referenceRect ?? { x: 0, y: 0, width: designW, height: designH }
   const safeRect = previewPlan?.safeRect ?? { x: 0, y: 0, width: actualW, height: actualH }
-  // 页面级背景图帧:根下第一个 stretch Both + image 的节点,按 cover 数学算完整缩放图矩形。
-  // 供 anchor.target='image' 的节点(场景建筑等)钉在背景图上 — 图被裁切时内容随图同步移动。
-  const imageFrameHost = (page.root.children ?? []).find(n =>
-    (n.stretch?.style ?? 'None') === 'Both' && !!(n.appearance?.image) && n.basic?.visible !== false)
+  const effectiveRoot = responsiveVariant === 'wide'
+    ? cloneTreeWithResponsiveOverrides(page.root, page.responsive?.wide.overrides)
+    : page.root
+  // 场景画板显式声明 backgroundId；旧页面才回退到第一个全屏图片节点。
+  const sceneBackgroundId = (effectiveRoot.children ?? []).find(node => !!node.sceneFrame?.backgroundId)?.sceneFrame?.backgroundId
+  const imageFrameHost = (effectiveRoot.children ?? []).find(n =>
+    (n.stretch?.style ?? 'None') === 'Both' &&
+    !!n.appearance?.image &&
+    n.basic?.visible !== false &&
+    (!sceneBackgroundId || n.id === sceneBackgroundId))
   let pageImageFrame: LayoutRect | null = null
   if (imageFrameHost) {
     const ap = imageFrameHost.appearance!
@@ -1392,9 +1568,16 @@ function computeRenderDims(
     }
   }
   setCurrentImageFrame(pageImageFrame)
-  const effectiveRoot = responsiveVariant === 'wide'
-    ? cloneTreeWithResponsiveOverrides(page.root, page.responsive?.wide.overrides)
-    : page.root
+  // 适配审计与实际预览使用同一份画布、安全区和布局求解结果；只在选择设备画像时启用。
+  const adaptationAudit = !isTemplate && devicePreset
+    ? auditPageAdaptation(
+        effectiveRoot,
+        { x: 0, y: 0, width: actualW, height: actualH },
+        safeRect,
+        devicePreset,
+        pageImageFrame ?? undefined,
+      )
+    : null
   const stageW = window.innerWidth - 280 - 340
   const stageH = window.innerHeight - 32
 
@@ -1725,7 +1908,7 @@ function computeRenderDims(
           {/* 背景（不拦截事件，让点击穿透到 Stage 触发取消选中） */}
           <Rect x={0} y={0} width={stageW} height={stageH} fill="#0d0f15" listening={false} />
 
-          <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale}>
+          <Group x={viewport.x} y={viewport.y} scaleX={viewport.scale} scaleY={viewport.scale} clipX={0} clipY={0} clipWidth={actualW} clipHeight={actualH}>
             {/* 实际预览分辨率区域 */}
             <Rect
               x={0} y={0} width={actualW} height={actualH}
@@ -1735,7 +1918,7 @@ function computeRenderDims(
               dash={[10 * invScale, 5 * invScale]}
               listening={false}
             />
-            {!isTemplate && previewW !== null && (
+            {!isTemplate && devicePreset && (
               <Rect
                 x={referenceRect.x} y={referenceRect.y}
                 width={referenceRect.width} height={referenceRect.height}
@@ -1746,10 +1929,10 @@ function computeRenderDims(
               />
             )}
             <Text
-              text={`${actualW} x ${actualH}${isTemplate ? ' (模板)' : (previewW !== null ? ' (预览)' : ' (设计)')}`}
+              text={`${actualW} x ${actualH}${isTemplate ? ' (模板)' : (devicePreset ? ' (预览)' : ' (设计)')}`}
               x={4} y={-20 * invScale}
               fontSize={12 * invScale}
-              fill={isTemplate ? '#b37feb' : (previewW !== null ? '#ffaa44' : '#5b6378')}
+              fill={isTemplate ? '#b37feb' : (devicePreset ? '#ffaa44' : '#5b6378')}
               listening={false}
             />
             {previewPlan && (
@@ -1794,6 +1977,7 @@ function computeRenderDims(
                 canvasWidth={actualW}
                 canvasHeight={actualH}
                 safeRect={safeRect}
+                imageFrame={pageImageFrame}
                 showEditorOverlay={showEditorOverlay}
                 sliceMeta={sliceMeta}
                 dragPreview={dragPreview}
@@ -1817,11 +2001,32 @@ function computeRenderDims(
               width={actualW}
               height={actualH}
             />
+            {/* 设备画像的局部障碍：背景可穿过；文字、交互控件由适配审计单独报告。 */}
+            {adaptationAudit?.visualObstacles.map((obstacle, index) => (
+              <Rect
+                key={'visual-obstacle-' + index}
+                x={obstacle.x} y={obstacle.y} width={obstacle.width} height={obstacle.height}
+                fill="rgba(244, 180, 0, 0.34)" stroke="#f4b400"
+                strokeWidth={2 * invScale} listening={false}
+              />
+            ))}
+            {adaptationAudit?.touchObstacles.map((obstacle, index) => (
+              <Rect
+                key={'touch-obstacle-' + index}
+                x={obstacle.x} y={obstacle.y} width={obstacle.width} height={obstacle.height}
+                fill="rgba(255, 77, 79, 0.16)" stroke="#ff7875"
+                strokeWidth={1 * invScale} dash={[5 * invScale, 3 * invScale]} listening={false}
+              />
+            ))}
 
             {/* 锚点/Pivot 可视化（仅选中单个控件 + overlay 开启时显示） */}
             {showEditorOverlay && selectedIds.length === 1 && (() => {
               const selNode = findNode(page.root, selectedIds[0])
               if (!selNode) return null
+              // 场景画板内使用局部坐标后再整体缩放；普通锚点辅助线没有该映射语义，
+              // 为避免画出错误参考线，此处暂不显示（节点本体仍可直接编辑）。
+              const selectedPath = findNodePath(page.root, selectedIds[0])
+              if (selectedPath?.slice(0, -1).some(item => !!item.sceneFrame)) return null
               // 父节点矩形（root 的子节点 → 实际预览分辨率；深层 → 用 solver 算父节点矩形）
               const parent = findParent(page.root, selectedIds[0])
               let parentRect
@@ -1853,6 +2058,9 @@ function computeRenderDims(
                 放在 viewport Group 内，坐标随画布缩放/平移，与节点一致。 */}
             {(() => {
               if (!page || selectedIds.length < 2) return null
+              // 场景画板内的移动量是 artboard 局部坐标；多选 Gizmo 当前只处理画布坐标，
+              // 先不对场景子项显示，避免把屏幕像素误写成素材坐标。
+              if (selectedIds.some(id => findNodePath(page.root, id)?.slice(0, -1).some(item => !!item.sceneFrame))) return null
               // 算选中组的包围盒中心（画布坐标）
               let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
               let count = 0
@@ -1954,26 +2162,22 @@ function computeRenderDims(
           <span style={{ color: '#b37feb', fontSize: 11 }}>模板 ({designW}×{designH})</span>
         ) : (
           <select
-            value={previewW ? `${previewW}x${previewH}` : 'design'}
+            value={previewPresetId ?? 'design'}
             onChange={e => {
               const v = e.target.value
-              if (v === 'design') { setPreviewW(null); setPreviewH(null) }
-              else {
-                const [w, h] = v.split('x').map(Number)
-                setPreviewW(w); setPreviewH(h)
-              }
+              setPreviewPresetId(v === 'design' ? null : v)
               setTimeout(() => zoomFit(), 0)
             }}
             style={{
-              background: '#0f1117', color: previewW ? '#ffaa44' : '#9aa3b4',
+              background: '#0f1117', color: previewPresetId ? '#ffaa44' : '#9aa3b4',
               border: '1px solid #2a3142', borderRadius: 4, padding: '2px 6px', fontSize: 11,
               cursor: 'pointer',
             }}
             title="切换预览分辨率"
           >
             <option value="design">设计 ({designW}×{designH})</option>
-            {DEVICE_PRESETS_V6.map(device => (
-              <option key={device.id} value={`${device.widthPx}x${device.heightPx}`}>{device.label} ({device.widthPx}×{device.heightPx})</option>
+            {config && devicePresetsForOrientationV6(config.orientation).map(device => (
+              <option key={device.id} value={device.id}>{device.label}</option>
             ))}
           </select>
         )}

@@ -7,6 +7,7 @@ import CanvasArea from './components/CanvasArea'
 import RightPanel from './components/RightPanel'
 import ConfigModal from './components/ConfigModal'
 import WhatsNewModal from './components/WhatsNewModal'
+import AdaptationAuditPage from './components/AdaptationAuditPage'
 import { useProjectStore } from './store/projectStore'
 import { setDefaultButtonSoundId, setDefaultFontForNew, useEditorStore } from './store/editorStore'
 import { projectContext } from './fs/projectContext'
@@ -52,6 +53,7 @@ export default function App() {
   const [configOpen, setConfigOpen] = useState(false)
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  const [adaptationAuditOpen, setAdaptationAuditOpen] = useState(false)
   const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
   const initialized = useRef(false)
@@ -406,43 +408,48 @@ export default function App() {
           onOpenProject={() => {
             setConfigMode('open'); setConfigOpen(true)
           }}
+          onOpenAdaptationAudit={() => setAdaptationAuditOpen(true)}
         />
       </Header>
-      <Layout>
-        <Sider width={280} style={{ overflow: 'auto', background: '#1a1d28' }}>
-          <LeftPanel
-            pages={pages}
-            onNewPage={(pageId, nodeKind) => {
-              const cfg = useProjectStore.getState().config!
-              const newPage: UiPage = {
-                version: 4,
-                pageId,
-                designWidth: nodeKind === 'template' ? DEFAULT_TEMPLATE_WIDTH : (cfg.designWidth ?? 1080),
-                designHeight: nodeKind === 'template' ? DEFAULT_TEMPLATE_HEIGHT : (cfg.designHeight ?? 1920),
-                referenceImage: null,
-                root: { id: 'root', starType: 'Panel', name: pageId, children: [] },
-                nodeKind,
-                ...(nodeKind === 'window'
-                  ? { windowMode: 'fullscreen' as const, transition: { open: null, close: null } }
-                  : {}),
-              }
-              upsertPage(newPage)
-              setActivePage(pageId)
-              setLastPage(pageId)
-              setPages(prev => prev.includes(pageId) ? prev : [...prev, pageId])
-              api.savePage(newPage)
-            }}
-            onSwitchPage={switchPage}
-            onDeletePage={deletePage}
-          />
-        </Sider>
-        <Content style={{ overflow: 'hidden', background: '#0f1117' }}>
-          <CanvasArea />
-        </Content>
-        <Sider width={340} style={{ overflow: 'auto', background: '#1a1d28' }}>
-          <RightPanel />
-        </Sider>
-      </Layout>
+      {adaptationAuditOpen ? (
+        <AdaptationAuditPage onBack={() => setAdaptationAuditOpen(false)} />
+      ) : (
+        <Layout>
+          <Sider width={280} style={{ overflow: 'auto', background: '#1a1d28' }}>
+            <LeftPanel
+              pages={pages}
+              onNewPage={(pageId, nodeKind) => {
+                const cfg = useProjectStore.getState().config!
+                const newPage: UiPage = {
+                  version: 4,
+                  pageId,
+                  designWidth: nodeKind === 'template' ? DEFAULT_TEMPLATE_WIDTH : (cfg.designWidth ?? 1080),
+                  designHeight: nodeKind === 'template' ? DEFAULT_TEMPLATE_HEIGHT : (cfg.designHeight ?? 1920),
+                  referenceImage: null,
+                  root: { id: 'root', starType: 'Panel', name: pageId, children: [] },
+                  nodeKind,
+                  ...(nodeKind === 'window'
+                    ? { windowMode: 'fullscreen' as const, transition: { open: null, close: null } }
+                    : {}),
+                }
+                upsertPage(newPage)
+                setActivePage(pageId)
+                setLastPage(pageId)
+                setPages(prev => prev.includes(pageId) ? prev : [...prev, pageId])
+                api.savePage(newPage)
+              }}
+              onSwitchPage={switchPage}
+              onDeletePage={deletePage}
+            />
+          </Sider>
+          <Content style={{ overflow: 'hidden', background: '#0f1117' }}>
+            <CanvasArea />
+          </Content>
+          <Sider width={340} style={{ overflow: 'auto', background: '#1a1d28' }}>
+            <RightPanel />
+          </Sider>
+        </Layout>
+      )}
       <ConfigModal
         open={configOpen}
         mode={configMode}

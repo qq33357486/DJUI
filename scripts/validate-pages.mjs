@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // DJUI 页面本地校验 CLI — 与编辑器 strict 校验(schemaV6.ts)、发布警告同规则。
-// 用法: node scripts/validate-pages.mjs <星火工程根目录>
-//   校验 ui/djui/pages/*.json 与 ui/djui/project.json:
+// 用法: node scripts/validate-pages.mjs <UI工作区或兼容的星火工程根目录>
+//   优先校验 .djui/layout/pages/*.json 与 .djui/layout/project.json；
+//   未迁移的旧工程回退校验 ui/djui 下的镜像：
 //   协议版本/节点结构/锚点(含 safeEdges)/imageFit+sourceSize/响应式覆盖(ID 引用+封闭字段表)/音效引用
 //   任何问题以非零码退出,可直接接 CI 或提交前钩子。
 
@@ -9,9 +10,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const root = path.resolve(process.argv[2] ?? process.cwd())
-const pagesDir = path.join(root, 'ui', 'djui', 'pages')
-const projectFile = path.join(root, 'ui', 'djui', 'project.json')
-const soundsFile = path.join(root, 'ui', 'djui', 'sounds.json')
+const workspaceLayout = path.join(root, '.djui', 'layout')
+const usesWorkspaceSource = fs.existsSync(workspaceLayout)
+const sourceRoot = usesWorkspaceSource ? workspaceLayout : path.join(root, 'ui', 'djui')
+const sourceLabel = usesWorkspaceSource ? '.djui/layout' : 'ui/djui'
+const pagesDir = path.join(sourceRoot, 'pages')
+const projectFile = path.join(sourceRoot, 'project.json')
+const soundsFile = path.join(sourceRoot, 'sounds.json')
 
 const PROTOCOL = 6
 const SCHEMA = 1
@@ -41,9 +46,9 @@ function fail(file, p, msg) {
 
 // ===== project.json =====
 function validateProject() {
-  if (!fs.existsSync(projectFile)) { console.error(`  ✗ 缺少 ui/djui/project.json`); totalIssues++; return }
+  if (!fs.existsSync(projectFile)) { console.error('  ✗ 缺少 ' + sourceLabel + '/project.json'); totalIssues++; return }
   const raw = JSON.parse(fs.readFileSync(projectFile, 'utf8'))
-  const f = 'ui/djui/project.json'
+  const f = sourceLabel + '/project.json'
   if (raw.protocolVersion !== PROTOCOL || raw.schemaVersion !== SCHEMA) fail(f, '$.protocolVersion', `必须是 ${PROTOCOL}/${SCHEMA}(当前 ${raw.protocolVersion}/${raw.schemaVersion})`)
   if (raw.orientation !== 'portrait' && raw.orientation !== 'landscape') fail(f, '$.orientation', '必须是 portrait 或 landscape')
   if (!isRecord(raw.canvas)) fail(f, '$.canvas', '缺少 Canvas 配置')
@@ -92,6 +97,17 @@ function validateNode(node, p, file, ids) {
       if (n !== undefined && (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1)) fail(file, p + '.appearance.' + k, '必须是 0 到 1 的有限数字')
     }
   }
+  if (node.sceneFrame !== undefined && node.sceneFrame !== null) {
+    if (!isRecord(node.sceneFrame)) fail(file, p + '.sceneFrame', '场景画板必须是对象')
+    else {
+      if (typeof node.sceneFrame.backgroundId !== 'string' || !node.sceneFrame.backgroundId.trim()) fail(file, p + '.sceneFrame.backgroundId', '必须引用背景节点 ID')
+      if (!isRecord(node.sceneFrame.artboard)) fail(file, p + '.sceneFrame.artboard', '缺少场景画板尺寸')
+      else {
+        if (!isPos(node.sceneFrame.artboard.width)) fail(file, p + '.sceneFrame.artboard.width', '必须大于 0')
+        if (!isPos(node.sceneFrame.artboard.height)) fail(file, p + '.sceneFrame.artboard.height', '必须大于 0')
+      }
+    }
+  }
   if (!Array.isArray(node.children)) fail(file, p + '.children', 'children 必须是数组')
   else node.children.forEach((c, i) => {
     if (!isRecord(c)) fail(file, p + `.children[${i}]`, '节点必须是对象')
@@ -107,7 +123,7 @@ function collectSoundRefs(node, refs) {
 
 // ===== 页面 =====
 function validatePage(file, soundIds) {
-  const rel = 'ui/djui/pages/' + file
+  const rel = sourceLabel + '/pages/' + file
   let raw
   try { raw = JSON.parse(fs.readFileSync(path.join(pagesDir, file), 'utf8')) }
   catch (e) { fail(rel, '$', `JSON 解析失败: ${e.message}`); return }
@@ -120,7 +136,10 @@ function validatePage(file, soundIds) {
   if (raw.kind === 'window' && !isRecord(raw.window)) fail(rel, '$.window', 'Window 页面缺少 window 配置')
   const ids = new Set()
   if (!isRecord(raw.root) || !Array.isArray(raw.root.children)) fail(rel, '$.root', '缺少结构根或 root.children')
-  else validateNode(raw.root, '$.root', rel, ids)
+  else {
+    validateNode(raw.root, '$.root', rel, ids)
+    validateSceneFrames(raw.root, '$.root', rel)
+  }
   // 响应式覆盖
   if (raw.responsive !== undefined) {
     if (!isRecord(raw.responsive) || !isRecord(raw.responsive.wide) || !isRecord(raw.responsive.wide.overrides)) {
@@ -139,6 +158,35 @@ function validatePage(file, soundIds) {
   const refs = new Set()
   if (isRecord(raw.root)) collectSoundRefs(raw.root, refs)
   for (const ref of refs) if (!soundIds.has(ref)) fail(rel, '$', `音效引用 ${ref} 在 sounds.json 中不存在`)
+}
+
+function validateSceneFrames(root, rootPath, file) {
+  const rootChildren = Array.isArray(root.children) ? root.children : []
+  const rootById = new Map()
+  rootChildren.forEach(child => {
+    if (isRecord(child) && typeof child.id === 'string') rootById.set(child.id, child)
+  })
+  const walk = (node, p, insideScene, isRootChild) => {
+    const frame = isRecord(node.sceneFrame) ? node.sceneFrame : null
+    const nowInsideScene = insideScene || !!frame
+    if (frame) {
+      if (!isRootChild) fail(file, p + '.sceneFrame', '场景画板只能放在页面根节点下')
+      const backgroundId = typeof frame.backgroundId === 'string' ? frame.backgroundId : ''
+      const background = rootById.get(backgroundId)
+      if (!background) fail(file, p + '.sceneFrame.backgroundId', '引用的背景必须是页面根下节点')
+      else if (!isRecord(background.appearance) || typeof background.appearance.image !== 'string' || !background.appearance.image) fail(file, p + '.sceneFrame.backgroundId', '引用节点必须是带图片的背景')
+      if (!isRecord(node.anchor) || node.anchor.target !== 'image') fail(file, p + '.anchor.target', '场景画板容器必须锚定 image 图帧')
+      if (!isRecord(node.stretch) || node.stretch.style !== 'Both') fail(file, p + '.stretch.style', '场景画板容器必须使用 Both 拉伸填满图帧')
+    } else if (insideScene && isRecord(node.anchor) && node.anchor.target !== undefined && node.anchor.target !== 'parent') {
+      fail(file, p + '.anchor.target', '场景画板内节点只能锚定 parent')
+    }
+    if (Array.isArray(node.children)) node.children.forEach((child, index) => {
+      if (isRecord(child)) walk(child, p + '.children[' + index + ']', nowInsideScene, false)
+    })
+  }
+  rootChildren.forEach((child, index) => {
+    if (isRecord(child)) walk(child, rootPath + '.children[' + index + ']', false, true)
+  })
 }
 
 // ===== main =====

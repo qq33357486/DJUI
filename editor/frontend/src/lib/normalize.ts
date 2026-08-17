@@ -75,6 +75,7 @@ export function normalizeNode(raw: unknown): UiNode {
   if (raw.anchor !== undefined && raw.anchor !== null) node.anchor = raw.anchor as UiNode['anchor']
   if (raw.stretch !== undefined && raw.stretch !== null) node.stretch = raw.stretch as UiNode['stretch']
   if (raw.aspectRatio !== undefined && raw.aspectRatio !== null) node.aspectRatio = raw.aspectRatio as UiNode['aspectRatio']
+  if (isRecord(raw.sceneFrame)) node.sceneFrame = raw.sceneFrame as unknown as UiNode['sceneFrame']
   if (typeof raw.templateRef === 'string' || raw.templateRef === null) node.templateRef = raw.templateRef as string | null
   if (raw.templateOverrides !== undefined) node.templateOverrides = raw.templateOverrides as UiNode['templateOverrides']
   if (typeof raw.widthStretchRatio === 'number' || raw.widthStretchRatio === null) node.widthStretchRatio = raw.widthStretchRatio as number | null

@@ -8,7 +8,7 @@
 | 资源 | 唯一写入方（DJUI「发布」） | Runtime 读取路径 | 说明 |
 |---|---|---|---|
 | 项目配置 | `ui/AppBundle/user_files/djui/project.json` | `user_files/djui/project.json` | v6 Canvas、宽屏阈值和默认字体的唯一运行配置 |
-| 页面 JSON | `ui/AppBundle/user_files/djui/pages/` | 相对路径 `user_files/djui/pages`（客户端进程 CWD=`ui/`） | **服务端不消费页面 JSON**（Runtime 全部 `#if CLIENT`），根 AppBundle 无需发布 djui 资源。源文件在 `ui/djui/pages/`，仅供编辑器编辑，运行不读 |
+| 页面 JSON | `ui/AppBundle/user_files/djui/pages/` | 相对路径 `user_files/djui/pages`（客户端进程 CWD=`ui/`） | **服务端不消费页面 JSON**（Runtime 全部 `#if CLIENT`），根 AppBundle 无需发布 djui 资源。编辑源在 UI 工作区 `.djui/layout/pages/`，星火工程的 `ui/djui` 是发布镜像，运行不读 |
 | 音效配置 | `ui/AppBundle/user_files/djui/sounds.json` | `user_files/djui/sounds.json` | 同上，仅客户端 |
 | 图片素材 | `ui/image/djui/` | 引擎直读（`image/djui/...` 相对 `ui/` 根），不进 AppBundle | 控件 `appearance.image` 写 `image/djui/...` |
 
@@ -80,14 +80,28 @@ DjuiBindingSystem.Set("coin_count", 999);
 
 每个节点各自携带正确的 `sourceSize`（cover/contain 的裁切依据），运行时按层切换可见性即可。
 
-### 背景图帧锚定（target="image"）
+### 场景画板（背景与素材坐标同缩放）
 
-需要「钉在背景图上」的内容（场景建筑、地图标记等）使用 `anchor.target: "image"`：
+需要「钉在背景图上」的内容（场景建筑、地图标记等）使用 sceneFrame，而不是只依赖 target: image：
 
-- 参考系 = 页面根下第一个 stretch Both 且带 image 的背景节点，其图片（contain 时为完整显示框，cover 时为缩放后全图框）矩形
-- 配合 `stretch: Both` 可让内容容器与图框同尺寸，内容与背景的相对位置在任何屏幕比例下恒定
-- 典型组合：背景 `contain`（完整显示）+ 内容组 `target=image + stretch Both` —— 非基准比例屏幕在上下/左右出现补边（页面 root 背景色兜底），构图关系严格稳定
-- 业务前提：关键内容设计在图的安全区内（参考工作区规范 §3.4）
+- 背景和场景画板必须都是页面根下节点；画板以 sceneFrame.backgroundId 显式指向背景，避免依赖节点顺序。
+- 画板本身必须 anchor.target: image + stretch.style: Both；它先铺满背景的完整 contain/cover 图帧。
+- sceneFrame.artboard 是素材原始画幅。画板内的子树使用这套局部坐标，运行时与编辑器一起按图帧横、纵比例映射，**位置和尺寸都会随背景缩放**。
+- 画板内子节点只能用 anchor.target: parent；屏幕 UI（返回、货币、设置等）必须留在画板外，使用 safe / screen 锚点。
+
+~~~json
+{
+  "id": "building_group",
+  "anchor": { "target": "image", "side": "TopLeft" },
+  "stretch": { "style": "Both", "margins": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
+  "sceneFrame": {
+    "backgroundId": "scene_background",
+    "artboard": { "width": 1080, "height": 2400 }
+  }
+}
+~~~
+
+旧的 target: image 仍可用于“只跟随图帧位置/边界”的普通容器，但它**不会**把绝对定位的子元素缩放；素材坐标场景必须升级为 sceneFrame。
 
 ## 字体
 

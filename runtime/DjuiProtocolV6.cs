@@ -64,6 +64,7 @@ public sealed class DjuiNodeV6
     [JsonPropertyName("anchor")] public DjuiAnchorV6? Anchor { get; set; }
     [JsonPropertyName("stretch")] public DjuiStretchV6? Stretch { get; set; }
     [JsonPropertyName("aspectRatio")] public DjuiAspectRatioV6? AspectRatio { get; set; }
+    [JsonPropertyName("sceneFrame")] public DjuiSceneFrameV6? SceneFrame { get; set; }
     [JsonPropertyName("appearance")] public DjuiAppearanceV6? Appearance { get; set; }
     [JsonPropertyName("text")] public DjuiTextV6? Text { get; set; }
     [JsonPropertyName("button")] public DjuiButtonV6? Button { get; set; }
@@ -101,6 +102,7 @@ public sealed class DjuiAnchorV6
 }
 public sealed class DjuiStretchV6 { [JsonPropertyName("style")] public string Style { get; set; } = "None"; [JsonPropertyName("margins")] public DjuiInsetsV6? Margins { get; set; } }
 public sealed class DjuiAspectRatioV6 { [JsonPropertyName("mode")] public string Mode { get; set; } = "None"; [JsonPropertyName("ratio")] public float Ratio { get; set; } = 1; }
+public sealed class DjuiSceneFrameV6 { [JsonPropertyName("backgroundId")] public string BackgroundId { get; set; } = ""; [JsonPropertyName("artboard")] public DjuiSizeV6 Artboard { get; set; } = new(); }
 
 public sealed class DjuiBasicV6
 {

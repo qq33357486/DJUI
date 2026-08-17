@@ -154,6 +154,15 @@ export interface DjuiAspectRatio {
   ratio?: number
 }
 
+/**
+ * 场景画板：容器自身先锚定到指定背景的完整 cover 图帧，子树再按 artboard
+ * 坐标等比映射。它与普通 screen/safe UI 坐标系严格分离。
+ */
+export interface DjuiSceneFrame {
+  backgroundId: string
+  artboard: { width: number; height: number }
+}
+
 export interface UiNode {
   id: string
   starType: StarType
@@ -170,6 +179,7 @@ export interface UiNode {
   anchor?: DjuiAnchor | null
   stretch?: DjuiStretch | null
   aspectRatio?: DjuiAspectRatio | null
+  sceneFrame?: DjuiSceneFrame | null
   /** 模板引用，仅 starType === 'TemplateInstance' 生效 */
   templateRef?: string | null
   /** 模板实例覆盖：按模板子节点 name 定位，字段路径到覆盖值 */

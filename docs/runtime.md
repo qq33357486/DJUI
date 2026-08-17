@@ -116,7 +116,7 @@ buy_item
 
 ## 点击音效
 
-编辑器中的「声音配置」会生成 `ui/djui/sounds.json`。每条配置引用一个已存在的 `GameDataSound`，并保存该数编项的 `Asset` 快照。
+编辑器中的「声音配置」会保存到 UI 工作区的 `.djui/layout/sounds.json`，发布时镜像为运行端的 `ui/AppBundle/user_files/djui/sounds.json`。每条配置引用一个已存在的 `GameDataSound`，并保存该数编项的 `Asset` 快照。
 
 控件节点的 `djui.clickSoundId` 会在 Runtime 构建控件时绑定到点击事件。未找到音效配置、资源路径为空或加载失败时，Runtime 只记录 warning，不会阻断 UI 或 action。
 

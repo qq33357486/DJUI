@@ -5,7 +5,7 @@ import {
   FileAddOutlined, CloudUploadOutlined, FolderOpenOutlined,
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
   InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
-  SoundOutlined, BellOutlined,
+  SoundOutlined, BellOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
@@ -23,6 +23,7 @@ interface TopBarProps {
   onOpenConfig: () => void
   onNewProject: () => void   // 新建工程（清配置重开）
   onOpenProject: () => void  // 打开工程（选目录）
+  onOpenAdaptationAudit: () => void
 }
 
 // VS Code 风格菜单栏的单项样式
@@ -46,7 +47,7 @@ function menuLabel(text: string, shortcut?: string) {
 }
 
 export default function TopBar(props: TopBarProps) {
-  const { soundSetup, onOpenConfig, onNewProject, onOpenProject } = props
+  const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit } = props
   const { page, undo, redo, undoStack, redoStack } = useEditorStore()
   const { config, agents, scripts, refreshAgents, refreshScripts } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
@@ -445,6 +446,13 @@ export default function TopBar(props: TopBarProps) {
       label: menuLabel('适配到窗口', 'Ctrl+Shift+F'),
       icon: <ExpandOutlined />,
       onClick: () => window.dispatchEvent(new CustomEvent('djui:zoomFit')),
+    },
+    { type: 'divider' },
+    {
+      key: 'adaptation-audit',
+      label: '适配审计',
+      icon: <SafetyCertificateOutlined />,
+      onClick: onOpenAdaptationAudit,
     },
   ]
 

@@ -1,6 +1,7 @@
 // DJUI Runtime - pure protocol v6 canvas and top-down layout math
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.Json.Serialization;
 
 namespace DjuiRuntime;
@@ -95,17 +96,19 @@ public static class DjuiLayoutSolverV6
     {
         var solved = new Dictionary<string, DjuiRectV6>();
         solved[page.Root.Id] = new DjuiRectV6(0, 0, plan.CanvasRect.Width, plan.CanvasRect.Height); // root is local to the window host
-        // 图帧锚定:页面级寻找背景宿主(根下第一个 stretch Both 且带 image 的节点),
-        // 计算 cover 后图片的可见帧,供 anchor.target="image" 的节点作参考系。
-        // 用途:场景建筑等需要「钉在背景图上」的内容 — 图被裁切时内容随图同步移动,相对位置恒定。
+        // 图帧锚定:场景画板优先显式声明 backgroundId；旧页面才兼容回退到
+        // 根下第一个 stretch Both + image 节点。不要再让新页面依赖节点顺序。
         DjuiRectV6? imageFrame = null;
+        string? backgroundId = null;
+        foreach (var child in page.Root.Children)
+            if (!string.IsNullOrWhiteSpace(child.SceneFrame?.BackgroundId)) { backgroundId = child.SceneFrame.BackgroundId; break; }
         foreach (var child in page.Root.Children)
         {
             var ap = child.Appearance;
             var st = child.Stretch;
             bool both = st?.Style == "Both";
             bool hasImage = !string.IsNullOrEmpty(ap?.Image);
-            if (both && hasImage) { imageFrame = ComputeImageFrame(solved: default, child, plan); break; }
+            if (both && hasImage && (backgroundId == null || child.Id == backgroundId)) { imageFrame = ComputeImageFrame(solved: default, child, plan); break; }
         }
         foreach (var child in page.Root.Children) SolveTree(child, plan.CanvasRect, plan, solved, imageFrame);
         return solved;
@@ -157,11 +160,57 @@ public static class DjuiLayoutSolverV6
         return new DjuiRectV6(x, y, w, h);
     }
 
-    private static void SolveTree(DjuiNodeV6 node, DjuiRectV6 parent, DjuiCanvasPlanV6 plan, Dictionary<string, DjuiRectV6> output, DjuiRectV6? imageFrame = null)
+    private readonly struct SceneSpace
     {
-        var rect = SolveV6(node, parent, plan, imageFrame);
+        public readonly DjuiRectV6 Frame;
+        public readonly float ScaleX, ScaleY;
+        public SceneSpace(DjuiRectV6 frame, DjuiSizeV6 artboard)
+        {
+            Frame = frame;
+            ScaleX = frame.Width / artboard.Width;
+            ScaleY = frame.Height / artboard.Height;
+        }
+        public DjuiRectV6 Map(DjuiRectV6 authored) => new(
+            Frame.X + authored.X * ScaleX,
+            Frame.Y + authored.Y * ScaleY,
+            authored.Width * ScaleX,
+            authored.Height * ScaleY);
+    }
+
+    private static void SolveTree(
+        DjuiNodeV6 node,
+        DjuiRectV6 parent,
+        DjuiCanvasPlanV6 plan,
+        Dictionary<string, DjuiRectV6> output,
+        DjuiRectV6? imageFrame = null,
+        SceneSpace? sceneSpace = null,
+        DjuiRectV6? sceneParent = null)
+    {
+        DjuiRectV6 rect;
+        DjuiRectV6 authoredRect = default;
+        if (sceneSpace != null)
+        {
+            string target = node.Anchor?.Target ?? "parent";
+            if (target != "parent")
+                throw new InvalidDataException($"DJUI v6: 场景画板内节点 {node.Id} 只能使用 parent 锚点");
+            authoredRect = SolveV6(node, sceneParent ?? default, plan);
+            rect = sceneSpace.Value.Map(authoredRect);
+        }
+        else
+        {
+            rect = SolveV6(node, parent, plan, imageFrame);
+        }
         output[node.Id] = rect;
-        foreach (var child in node.Children) SolveTree(child, rect, plan, output, imageFrame);
+        var frame = node.SceneFrame;
+        if (frame?.Artboard is { Width: > 0, Height: > 0 })
+        {
+            var nextSpace = new SceneSpace(rect, frame.Artboard);
+            var authoredRoot = new DjuiRectV6(0, 0, frame.Artboard.Width, frame.Artboard.Height);
+            foreach (var child in node.Children) SolveTree(child, rect, plan, output, imageFrame, nextSpace, authoredRoot);
+            return;
+        }
+        foreach (var child in node.Children)
+            SolveTree(child, rect, plan, output, imageFrame, sceneSpace, sceneSpace != null ? authoredRect : null);
     }
 
 

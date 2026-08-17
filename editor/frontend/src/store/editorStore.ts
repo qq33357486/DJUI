@@ -33,6 +33,8 @@ interface EditorState {
   // 撤销重做
   undoStack: HistoryEntry[]
   redoStack: HistoryEntry[]
+  // 连续输入中的暂存快照；只有操作停下后才进入撤销栈。
+  pendingHistory: HistoryEntry | null
   historyLock: boolean
 
   // 操作
@@ -60,6 +62,8 @@ interface EditorState {
   batchUpdateNodes: (updatesById: Record<string, Record<string, unknown>>) => void
 
   pushHistory: () => void
+  queueHistory: () => void
+  commitHistory: () => void
   undo: () => void
   redo: () => void
 }
@@ -80,6 +84,26 @@ function setNodeFieldValue(node: UiNode, path: string, value: unknown) {
     target = target[parts[i]]
   }
   target[parts[parts.length - 1]] = value
+}
+
+const HISTORY_LIMIT = 100
+const HISTORY_IDLE_COMMIT_MS = 450
+let historyCommitTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearHistoryCommitTimer() {
+  if (historyCommitTimer !== null) {
+    clearTimeout(historyCommitTimer)
+    historyCommitTimer = null
+  }
+}
+
+function createHistoryEntry(state: Pick<EditorState, 'allPages' | 'activePageId' | 'selectedIds' | 'selectionAnchor'>): HistoryEntry {
+  return {
+    allPages: clonePages(state.allPages),
+    activePageId: state.activePageId,
+    selectedIds: [...state.selectedIds],
+    selectionAnchor: state.selectionAnchor,
+  }
 }
 
 // 全局 id 去重：保证 allPages 内所有节点 id 跨页面唯一。
@@ -209,9 +233,11 @@ export const useEditorStore = create<EditorState>()(
     selectionAnchor: null,
     undoStack: [],
     redoStack: [],
+    pendingHistory: null,
     historyLock: false,
 
     setAllPages: (pages) => {
+      clearHistoryCommitTimer()
       set((s) => {
         // 数据卫生：保证加载进内存的节点 id 跨页面唯一（修复跨页面同 id 误选中）
         dedupeNodeIdsAcrossPages(pages)
@@ -228,6 +254,7 @@ export const useEditorStore = create<EditorState>()(
         s.selectedIds = []
         s.undoStack = []
         s.redoStack = []
+        s.pendingHistory = null
       })
     },
 
@@ -261,6 +288,7 @@ export const useEditorStore = create<EditorState>()(
     },
 
     setPage: (page) => {
+      clearHistoryCommitTimer()
       set((s) => {
         if (page) {
           s.allPages[page.pageId] = page
@@ -272,12 +300,13 @@ export const useEditorStore = create<EditorState>()(
         s.selectedIds = []
         s.undoStack = []
         s.redoStack = []
+        s.pendingHistory = null
       })
     },
 
     updatePageMeta: (pageId, updates) => {
       if (!get().allPages[pageId]) return
-      get().pushHistory()
+      get().queueHistory()
       set((s) => {
         const p = s.allPages[pageId]
         if (p) Object.assign(p, updates)
@@ -377,17 +406,40 @@ export const useEditorStore = create<EditorState>()(
     },
 
     pushHistory: () => {
+      // 离散操作（拖放、删除等）开始前，先结算正在进行的连续编辑。
+      get().commitHistory()
       const state = get()
       if (state.historyLock || !state.page) return
       set((s) => {
-        s.undoStack.push({
-          allPages: clonePages(state.allPages),
-          activePageId: state.activePageId,
-          selectedIds: [...state.selectedIds],
-          selectionAnchor: state.selectionAnchor,
-        })
-        if (s.undoStack.length > 100) s.undoStack.shift()
+        s.undoStack.push(createHistoryEntry(state))
+        if (s.undoStack.length > HISTORY_LIMIT) s.undoStack.shift()
         s.redoStack = []
+      })
+    },
+
+    // 属性输入/滑条等会在一次人工操作中连续触发 onChange：只保留开始前的快照，
+    // 停止输入一小段时间后再作为一个撤销步骤提交。
+    queueHistory: () => {
+      const state = get()
+      if (state.historyLock || !state.page) return
+      if (!state.pendingHistory) {
+        set((s) => { s.pendingHistory = createHistoryEntry(state) })
+      }
+      clearHistoryCommitTimer()
+      historyCommitTimer = setTimeout(() => {
+        historyCommitTimer = null
+        get().commitHistory()
+      }, HISTORY_IDLE_COMMIT_MS)
+    },
+
+    commitHistory: () => {
+      clearHistoryCommitTimer()
+      set((s) => {
+        if (!s.pendingHistory) return
+        s.undoStack.push(s.pendingHistory)
+        if (s.undoStack.length > HISTORY_LIMIT) s.undoStack.shift()
+        s.redoStack = []
+        s.pendingHistory = null
       })
     },
 
@@ -506,7 +558,7 @@ export const useEditorStore = create<EditorState>()(
     },
 
     updateNodeField: (id, path, value) => {
-      get().pushHistory()
+      get().queueHistory()
       set((s) => {
         if (!s.page) return
         const node = findNode(s.page.root, id)
@@ -528,8 +580,14 @@ export const useEditorStore = create<EditorState>()(
         if (!s.page) return
         const node = findNode(s.page.root, id)
         if (!node) return
-        for (const [path, value] of Object.entries(updates)) {
-          setNodeFieldValue(node, path, value)
+        if (s.responsiveVariant === 'wide' && s.page.nodeKind === 'window') {
+          const responsive = s.page.responsive ??= { wide: { overrides: {} } }
+          const map = responsive.wide.overrides[id] ??= {}
+          for (const [path, value] of Object.entries(updates)) map[path] = value
+        } else {
+          for (const [path, value] of Object.entries(updates)) {
+            setNodeFieldValue(node, path, value)
+          }
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
       })
@@ -543,8 +601,14 @@ export const useEditorStore = create<EditorState>()(
         for (const [id, updates] of Object.entries(updatesById)) {
           const node = findNode(s.page.root, id)
           if (!node) continue
-          for (const [path, value] of Object.entries(updates)) {
-            setNodeFieldValue(node, path, value)
+          if (s.responsiveVariant === 'wide' && s.page.nodeKind === 'window') {
+            const responsive = s.page.responsive ??= { wide: { overrides: {} } }
+            const map = responsive.wide.overrides[id] ??= {}
+            for (const [path, value] of Object.entries(updates)) map[path] = value
+          } else {
+            for (const [path, value] of Object.entries(updates)) {
+              setNodeFieldValue(node, path, value)
+            }
           }
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
@@ -673,6 +737,7 @@ export const useEditorStore = create<EditorState>()(
     },
 
     undo: () => {
+      get().commitHistory()
       set((s) => {
         if (s.undoStack.length === 0 || !s.page) return
         const entry = s.undoStack.pop()!
@@ -691,6 +756,7 @@ export const useEditorStore = create<EditorState>()(
     },
 
     redo: () => {
+      get().commitHistory()
       set((s) => {
         if (s.redoStack.length === 0 || !s.page) return
         const entry = s.redoStack.pop()!

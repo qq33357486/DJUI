@@ -3,7 +3,7 @@ import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KIm
 import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { engineFontToCss } from '@/lib/fontLoader'
-import { UiNode, ProjectConfig } from '@/types/layout'
+import { UiNode, ProjectConfig, DjuiAnchor } from '@/types/layout'
 import * as api from '@/api/client'
 import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
 import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/anchorPresets'
@@ -295,12 +295,12 @@ function pickDragTarget(chain: UiNode[] | null, _selectedIds: string[]): string 
   return (!hit.editorLocked && !hit.editorHidden) ? hit.id : null
 }
 
-function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number): LayoutRect {
+function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number, safeRect?: LayoutRect, imageFrame?: LayoutRect | null): LayoutRect {
   const path = findNodePath(root, id)
   let rect: LayoutRect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
   if (!path) return rect
   for (let i = 1; i < path.length - 1; i++) {
-    const solved = solveLayout(path[i], rect, canvasWidth, canvasHeight).rect
+    const solved = solveLayout(path[i], rect, canvasWidth, canvasHeight, { safeRect, imageFrame: imageFrame ?? undefined }).rect
     const artboard = path[i].sceneFrame?.artboard
     // 场景画板的后代编辑的是 artboard 局部坐标，不是屏幕坐标。
     rect = artboard && artboard.width > 0 && artboard.height > 0
@@ -310,10 +310,21 @@ function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, c
   return rect
 }
 
-function getLayoutRef(node: UiNode, parentRect: LayoutRect, canvasWidth: number, canvasHeight: number): LayoutRect {
+function getSafeLayoutRef(canvas: LayoutRect, safe: LayoutRect, edges?: Array<'left' | 'top' | 'right' | 'bottom'>): LayoutRect {
+  const selected = edges ?? ['left', 'top', 'right', 'bottom']
+  const left = selected.includes('left') ? safe.x - canvas.x : 0
+  const top = selected.includes('top') ? safe.y - canvas.y : 0
+  const right = selected.includes('right') ? canvas.x + canvas.width - safe.x - safe.width : 0
+  const bottom = selected.includes('bottom') ? canvas.y + canvas.height - safe.y - safe.height : 0
+  return { x: canvas.x + left, y: canvas.y + top, width: Math.max(0, canvas.width - left - right), height: Math.max(0, canvas.height - top - bottom) }
+}
+
+function getLayoutRef(node: UiNode, parentRect: LayoutRect, canvasWidth: number, canvasHeight: number, safeRect?: LayoutRect, imageFrame?: LayoutRect | null): LayoutRect {
   const target = node.anchor?.target ?? 'parent'
-  if (target === 'screen') return { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
-  if (target === 'image') return getCurrentImageFrame() ?? { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  const canvas = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  if (target === 'screen') return canvas
+  if (target === 'safe') return getSafeLayoutRef(canvas, safeRect ?? canvas, node.anchor?.safeEdges)
+  if (target === 'image') return imageFrame ?? getCurrentImageFrame() ?? canvas
   return parentRect
 }
 
@@ -406,13 +417,15 @@ function computeLayoutPatchFromRect(
   canvasWidth: number,
   canvasHeight: number,
   desiredRect: LayoutRect,
+  safeRect?: LayoutRect,
+  imageFrame?: LayoutRect | null,
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   const anchor = node.anchor ?? {}
   const target = anchor.target ?? 'parent'
   const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
   const side = getAnchorSide(sideId)
-  const ref = getLayoutRef(node, parentRect, canvasWidth, canvasHeight)
+  const ref = getLayoutRef(node, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame)
   const stretchAxes = getStretchAxes(node)
 
   if (stretchAxes.horizontal || stretchAxes.vertical) {
@@ -1834,8 +1847,8 @@ function computeRenderDims(
     if (!currentPage) return
     const node = findNode(currentPage.root, id)
     if (!node) return
-    const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH)
-    const patch = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, desiredRect)
+    const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH, safeRect, pageImageFrame)
+    const patch = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, desiredRect, safeRect, pageImageFrame)
     store.batchUpdateNode(id, patch)
   }
 
@@ -1851,13 +1864,13 @@ function computeRenderDims(
       const node = findNode(currentPage.root, id)
       const entry = proxyEntriesRef.current.find(item => item.id === id)
       if (!node || !entry || node.editorLocked || node.editorHidden) continue
-      const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH)
+      const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH, safeRect, pageImageFrame)
       updatesById[id] = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, {
         x: entry.baseLayoutRect.x + dx / entry.layoutScaleX,
         y: entry.baseLayoutRect.y + dy / entry.layoutScaleY,
         width: entry.baseLayoutRect.width,
         height: entry.baseLayoutRect.height,
-      })
+      }, safeRect, pageImageFrame)
     }
     store.batchUpdateNodes(updatesById)
   }
@@ -1882,14 +1895,14 @@ function computeRenderDims(
     const page = useEditorStore.getState().page
     const currentNode = page ? (findNode(page.root, node.id) ?? node) : node
     const parentRect = page
-      ? solveParentRectForNode(page.root, node.id, actualW, actualH)
+      ? solveParentRectForNode(page.root, node.id, actualW, actualH, safeRect, pageImageFrame)
       : { x: 0, y: 0, width: actualW, height: actualH }
     const layoutPatch = computeLayoutPatchFromRect(currentNode, parentRect, actualW, actualH, {
       x: konvaX,
       y: konvaY,
       width: newWidth,
       height: newHeight,
-    })
+    }, safeRect, pageImageFrame)
 
     // 先重置 Konva scale（已烘焙到 width/height）
     konvaNode.scaleX(1)
@@ -1901,6 +1914,49 @@ function computeRenderDims(
       'transform.rotation': rotation,
     })
   }
+
+  // 属性面板请求切换锚点时，先在当前画布求出旧的视觉矩形；再用新锚点反算偏移/边距。
+  // 这样不论是单选、多选后的单个编辑，还是 parent/screen/safe/image 之间切换，控件都不会跳位。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        ids: string[]
+        side?: DjuiAnchor['side']
+        target?: 'parent' | 'screen' | 'safe' | 'image'
+        safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
+      }>).detail
+      if (!detail?.ids?.length) return
+      const store = useEditorStore.getState()
+      const currentPage = store.page
+      if (!currentPage) return
+      const displayRoot = store.responsiveVariant === 'wide'
+        ? cloneTreeWithResponsiveOverrides(currentPage.root, currentPage.responsive?.wide.overrides)
+        : currentPage.root
+      const updatesById: Record<string, Record<string, unknown>> = {}
+      for (const id of detail.ids) {
+        const currentNode = findNode(displayRoot, id)
+        if (!currentNode) continue
+        const nextNode: UiNode = JSON.parse(JSON.stringify(currentNode))
+        nextNode.anchor = {
+          ...nextNode.anchor,
+          ...(detail.side !== undefined ? { side: detail.side } : {}),
+          ...(detail.target !== undefined ? { target: detail.target } : {}),
+          ...(detail.safeEdges !== undefined ? { safeEdges: detail.safeEdges } : {}),
+        }
+        const parentRect = solveParentRectForNode(displayRoot, id, actualW, actualH, safeRect, pageImageFrame)
+        const oldRect = solveLayout(currentNode, parentRect, actualW, actualH, { safeRect, imageFrame: pageImageFrame ?? undefined }).rect
+        const layoutPatch = computeLayoutPatchFromRect(nextNode, parentRect, actualW, actualH, oldRect, safeRect, pageImageFrame)
+        const anchorPatch: Record<string, unknown> = { ...layoutPatch }
+        if (detail.side !== undefined) anchorPatch['anchor.side'] = detail.side
+        if (detail.target !== undefined) anchorPatch['anchor.target'] = detail.target
+        if (detail.safeEdges !== undefined) anchorPatch['anchor.safeEdges'] = detail.safeEdges
+        updatesById[id] = anchorPatch
+      }
+      store.batchUpdateNodes(updatesById)
+    }
+    window.addEventListener('djui:reanchor', handler)
+    return () => window.removeEventListener('djui:reanchor', handler)
+  }, [actualH, actualW, page, pageImageFrame, responsiveVariant, safeRect])
 
   // 选中回调
   const handleSelect = (id: string, modifier: 'none' | 'ctrl' | 'shift') => {

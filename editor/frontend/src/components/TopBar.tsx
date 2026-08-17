@@ -48,7 +48,7 @@ function menuLabel(text: string, shortcut?: string) {
 
 export default function TopBar(props: TopBarProps) {
   const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit } = props
-  const { page, undo, redo, undoStack, redoStack } = useEditorStore()
+  const { page, undo, redo, undoStack, redoStack, pendingHistory } = useEditorStore()
   const { config, agents, scripts, refreshAgents, refreshScripts } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
   const [updatingAgents, setUpdatingAgents] = useState(false)
@@ -393,7 +393,7 @@ export default function TopBar(props: TopBarProps) {
     {
       key: 'undo',
       label: menuLabel('撤销', 'Ctrl+Z'),
-      disabled: undoStack.length === 0,
+      disabled: undoStack.length === 0 && !pendingHistory,
       onClick: undo,
     },
     {
@@ -548,6 +548,20 @@ export default function TopBar(props: TopBarProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [handleSave, redo, undo])
 
+  // 滑条、颜色选择和拖拽数值控件会连续触发 onChange；指针松开或输入框失焦就是一次人工操作的终点。
+  useEffect(() => {
+    const commit = () => useEditorStore.getState().commitHistory()
+    const commitAfterFocusChange = () => window.setTimeout(commit, 0)
+    window.addEventListener('mouseup', commit)
+    window.addEventListener('blur', commit)
+    document.addEventListener('focusout', commitAfterFocusChange)
+    return () => {
+      window.removeEventListener('mouseup', commit)
+      window.removeEventListener('blur', commit)
+      document.removeEventListener('focusout', commitAfterFocusChange)
+    }
+  }, [])
+
   return (
     <>
       <div style={{
@@ -634,7 +648,7 @@ export default function TopBar(props: TopBarProps) {
           )}
           <span style={{ color: '#3a4258', margin: '0 2px' }}>|</span>
           <Tooltip title="撤销 (Ctrl+Z)">
-            <Button icon={<UndoOutlined />} disabled={undoStack.length === 0} onClick={undo} type="text" size="small" />
+            <Button icon={<UndoOutlined />} disabled={undoStack.length === 0 && !pendingHistory} onClick={undo} type="text" size="small" />
           </Tooltip>
           <Tooltip title="重做 (Ctrl+Y)">
             <Button icon={<RedoOutlined />} disabled={redoStack.length === 0} onClick={redo} type="text" size="small" />

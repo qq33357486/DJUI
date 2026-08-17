@@ -2,7 +2,7 @@ import { Collapse, Empty, Input, InputNumber, Select, Switch, Button, Space, Col
 import { DeleteOutlined, ColumnHeightOutlined, PictureOutlined } from '@ant-design/icons'
 import { useEditorStore, findNode } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
-import { DEFAULT_EFFECT_PRESETS, COMPONENT_LIBRARY, UiPage } from '@/types/layout'
+import { DEFAULT_EFFECT_PRESETS, COMPONENT_LIBRARY, UiPage, DjuiAnchor } from '@/types/layout'
 import { useState, useEffect, useRef } from 'react'
 import AssetPickerModal from './AssetPickerModal'
 import SliceEditorModal from './SliceEditorModal'
@@ -201,6 +201,7 @@ export default function RightPanel() {
             soundConfig={soundConfig}
             responsiveVariant={responsiveVariant}
             clearResponsiveOverrides={clearResponsiveOverrides}
+            selectedIds={selectedIds}
           />
         )}
       </div>
@@ -231,7 +232,7 @@ export default function RightPanel() {
 }
 
 // === 属性面板内容 ===
-function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig, responsiveVariant, clearResponsiveOverrides }: {
+function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig, responsiveVariant, clearResponsiveOverrides, selectedIds }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
@@ -247,6 +248,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
   soundConfig: api.DjuiSoundConfig
   responsiveVariant: 'base' | 'wide'
   clearResponsiveOverrides: (nodeId: string) => void
+  selectedIds: string[]
 }) {
   const t = node.transform ?? {}
   const app = node.appearance ?? {}
@@ -698,7 +700,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             key: 'anchor', label: '锚点与拉伸',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <AnchorEditor node={node} updateNodeField={updateNodeField} />
+                <AnchorEditor node={node} selectedIds={selectedIds} />
                 <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
                 <StretchEditor node={node} updateNodeField={updateNodeField} />
               </Space>
@@ -770,29 +772,37 @@ function TemplateOverridesEditor({ nodeId, overrides, updateNodeField }: {
 }
 
 // === NGUI 风格锚点编辑器（9-way 位置选择器 + 无锚点）===
-function AnchorEditor({ node, updateNodeField }: {
+function AnchorEditor({ node, selectedIds }: {
   node: any
-  updateNodeField: (id: string, path: string, value: unknown) => void
+  selectedIds: string[]
 }) {
   const anchor = node.anchor ?? {}
   const target = anchor.target ?? 'parent'
   const currentSide = anchor.side ?? DEFAULT_ANCHOR_SIDE
   const isNone = currentSide === 'None'
 
-  // 选择具体锚点：重置偏移为 0（让控件跳到锚点位置）
-  const applySide = (sideId: string) => {
-    updateNodeField(node.id, 'anchor.side', sideId)
-    if (sideId !== 'None') {
-      updateNodeField(node.id, 'transform.x', 0)
-      updateNodeField(node.id, 'transform.y', 0)
-    }
+  // 锚点更改由画布按当前视觉矩形反算；多选时对所有选中节点原子提交。
+  const reanchor = (changes: {
+    side?: DjuiAnchor['side']
+    target?: 'parent' | 'screen' | 'safe' | 'image'
+    safeEdges?: Array<'left' | 'top' | 'right' | 'bottom'>
+  }) => {
+    window.dispatchEvent(new CustomEvent('djui:reanchor', {
+      detail: { ids: selectedIds.length > 0 ? selectedIds : [node.id], ...changes },
+    }))
+  }
+
+  const applySide = (sideId: DjuiAnchor['side']) => {
+    reanchor({ side: sideId })
   }
 
   const handleTargetChange = (v: string) => {
-    updateNodeField(node.id, 'anchor.target', v)
-    if (v === 'safe' && !anchor.safeEdges?.length) {
-      updateNodeField(node.id, 'anchor.safeEdges', ['left', 'top', 'right', 'bottom'])
-    }
+    reanchor({
+      target: v as 'parent' | 'screen' | 'safe' | 'image',
+      ...(v === 'safe' && !anchor.safeEdges?.length
+        ? { safeEdges: ['left', 'top', 'right', 'bottom'] as Array<'left' | 'top' | 'right' | 'bottom'> }
+        : {}),
+    })
   }
 
   return (
@@ -807,6 +817,7 @@ function AnchorEditor({ node, updateNodeField }: {
             { value: 'parent', label: '父节点' },
             { value: 'screen', label: '屏幕（全屏）' },
             { value: 'safe', label: '安全区' },
+            { value: 'image', label: '背景图帧' },
           ]}
         />
       </FieldRow>
@@ -824,7 +835,7 @@ function AnchorEditor({ node, updateNodeField }: {
                   onClick={() => {
                     const current = anchor.safeEdges ?? ['left', 'top', 'right', 'bottom']
                     const next = selected ? current.filter((item: string) => item !== edge) : [...current, edge]
-                    updateNodeField(node.id, 'anchor.safeEdges', next)
+                    reanchor({ safeEdges: next as Array<'left' | 'top' | 'right' | 'bottom'> })
                   }}
                 >{label}</Button>
               )
@@ -842,7 +853,7 @@ function AnchorEditor({ node, updateNodeField }: {
         borderRadius: 6,
       }}>
         <div style={{ fontSize: 10, color: '#5b6378', marginBottom: 8, textAlign: 'center' }}>
-          锚点只管位置 · {target === 'screen' ? '屏幕' : target === 'safe' ? '安全区' : '父节点'}内
+          锚点只管位置 · {target === 'screen' ? '屏幕' : target === 'safe' ? '安全区' : target === 'image' ? '背景图帧' : '父节点'}内
         </div>
         <div style={{
           display: 'grid',

@@ -82,11 +82,11 @@ export function solveLayout(
         ? (context.imageFrame ?? currentImageFrame ?? canvasRect)
         : parent
 
-  // === 无锚点：纯绝对定位 ===
+  // === 无锚点：父容器局部绝对定位（与 Runtime SolveV6 对齐：ref.X + t.x）===
   if (sideId === 'None') {
     let rect: Rect = {
-      x: t.x ?? 0,
-      y: t.y ?? 0,
+      x: ref.x + (t.x ?? 0),
+      y: ref.y + (t.y ?? 0),
       width: t.width ?? 100,
       height: t.height ?? 100,
     }

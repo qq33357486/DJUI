@@ -108,7 +108,9 @@ public static class DjuiLayoutSolverV6
         bool hs = s?.Style == "Horizontal" || s?.Style == "Both", vs = s?.Style == "Vertical" || s?.Style == "Both";
         var m = s?.Margins; float ml = m?.Left ?? 0, mt = m?.Top ?? 0, mr = m?.Right ?? 0, mb = m?.Bottom ?? 0;
         Side(side, out float nx, out float ny);
-        if (side == "None") { x = t?.X ?? 0; y = t?.Y ?? 0; }
+        // side=None 语义:父容器局部坐标(与编辑器 layoutSolver 一致)。
+        // 曾经直接用 t.X 当参考系绝对值,父容器被 Center 等锚定位后子节点整体偏移。
+        if (side == "None") { x = reference.X + (t?.X ?? 0); y = reference.Y + (t?.Y ?? 0); }
         else { x = reference.X + nx * reference.Width + (t?.X ?? 0) - nx * w; y = reference.Y + ny * reference.Height + (t?.Y ?? 0) - ny * h; }
         if (hs) { x = reference.X + ml; w = Math.Max(0, reference.Width - ml - mr); }
         if (vs) { y = reference.Y + mt; h = Math.Max(0, reference.Height - mt - mb); }

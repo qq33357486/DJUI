@@ -109,6 +109,17 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     {
         var size = _viewport.Size;
         var safe = _viewport.SafeZonePadding;
+        Game.Logger.LogInformation($"DJUI v6 layout: viewport.Size={size.Width}x{size.Height} px={_viewport.WidthPx}x{_viewport.HeightPx} safe={safe.Left},{safe.Top},{safe.Right},{safe.Bottom} canvas={CurrentPlan?.CanvasRect.Width ?? -1}x{CurrentPlan?.CanvasRect.Height ?? -1}");
+        // 布局对齐诊断:输出关键节点解算矩形(设计坐标系),配合 viewport 日志可人工核算对齐
+        try
+        {
+            var solved = DjuiLayoutSolverV6.SolveV6(CurrentPage, DjuiCanvasV6.CreateLogicalPlan(size.Width, size.Height, new DjuiInsetsV6(safe.Left, safe.Top, safe.Right, safe.Bottom), _viewport.WidthPx, _viewport.HeightPx, _project));
+            var pick = new[] { "scene_background", "building_group", "scene02_background", "scene02_building_group", "scene03_hangzhou_background", "scene03_hangzhou_building_group" };
+            foreach (var id in pick)
+                if (solved.TryGetValue(id, out var r))
+                    Game.Logger.LogInformation($"DJUI v6 rect {id}: ({r.X:F1},{r.Y:F1}) {r.Width:F1}x{r.Height:F1}");
+        }
+        catch { /* 诊断失败不影响布局 */ }
         // Size 与 SafeZonePadding 均已经是引擎当前设计坐标；不再做第二次 DPR 或 Canvas 缩放。
         return DjuiCanvasV6.CreateLogicalPlan(
             size.Width,

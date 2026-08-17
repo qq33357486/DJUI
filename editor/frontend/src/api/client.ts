@@ -633,9 +633,32 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const pagesSourceDir = await fs.getDirHandle(star, PAGES_DIR, false)
   if (!pagesSourceDir) return { ok: false, error: '页面目录不存在' }
 
-  // 3. 镜像成品素材 → ui/image/djui
+  // 3. 镜像成品素材 → ui/image/djui（增量：按发布清单跳过未变文件）
+  //    清单记录「源侧 size+mtime」;不能用目标 mtime 比对(原子替换会改写 mtime,永不相等)
   const imageTarget = await fs.ensureDir(star, 'ui/image/djui')
-  const assetCount = await fs.mirrorDir(finishedDir, imageTarget)
+  const manifestPath = 'ui/.djui-publish-manifest.json'
+  const prevManifest = await fs.readFileJson<{ files: Record<string, [number, number]> }>(star, manifestPath) ?? { files: {} }
+  const nextManifest: { files: Record<string, [number, number]> } = { files: {} }
+  const assetStats = await fs.mirrorDir(finishedDir, imageTarget, (rel, size, mtime) => {
+    const prev = prevManifest.files[rel]
+    const unchanged = !!prev && prev[0] === size && prev[1] === mtime
+    if (unchanged) nextManifest.files[rel] = [size, mtime] // 保留指纹
+    return unchanged
+  })
+  // 记录本次全部源指纹(含刚复制的)
+  const collectFingerprints = async (dir: FileSystemDirectoryHandle, prefix: string) => {
+    for await (const entry of dir.values()) {
+      const rel = prefix ? prefix + '/' + entry.name : entry.name
+      if (entry.kind === 'file') {
+        const f = await (await dir.getFileHandle(entry.name)).getFile()
+        nextManifest.files[rel] = [f.size, f.lastModified]
+      } else {
+        await collectFingerprints(await dir.getDirectoryHandle(entry.name), rel)
+      }
+    }
+  }
+  await collectFingerprints(finishedDir, '')
+  await fs.writeFileJson(star, manifestPath, nextManifest)
 
   // 4. 镜像页面 → ui/AppBundle/user_files/djui/pages（唯一消费方：客户端进程，CWD=ui/）
   // DJUI Runtime 全部 #if CLIENT，服务端不读页面 JSON——根 AppBundle 无需发布 djui 资源。
@@ -664,7 +687,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
 
   return {
     ok: true,
-    copiedAssets: new Array(assetCount).fill(''),
+    copiedAssets: new Array(assetStats.total).fill(''),
     copiedPages: new Array(pageCount).fill(''),
     copiedClientPages: new Array(pageCount).fill(''),
     copiedSoundsConfig,
@@ -676,7 +699,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
       clientPages: 'ui/AppBundle/user_files/djui/pages',
       clientSounds: copiedSoundsConfig ? 'ui/AppBundle/user_files/djui/sounds.json' : undefined,
     },
-    message: '发布完成',
+    message: `发布完成：素材 ${assetStats.copied} 复制 / ${assetStats.skipped} 未变跳过 / ${assetStats.removed} 清理`,
   }
 }
 
@@ -693,9 +716,9 @@ async function mirrorPages(
   if (!existed) {
     warnings.push(`目录 ${targetPath} 原本不存在，已自动创建（若这不是星火工程结构请检查）`)
   }
-  await fs.removeDir(star, targetPath)
   const targetDir = await fs.ensureDir(star, targetPath)
-  return await fs.mirrorDir(pagesSourceDir, targetDir)
+  const stats = await fs.mirrorDir(pagesSourceDir, targetDir)
+  return stats.total
 }
 
 async function buildPublishWarnings(pagesDir: FileSystemDirectoryHandle, star: FileSystemDirectoryHandle): Promise<string[]> {

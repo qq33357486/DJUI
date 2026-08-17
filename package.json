@@ -7,6 +7,7 @@
     "typecheck": "npm --prefix editor/backend run typecheck && npm --prefix editor/frontend run typecheck",
     "build": "npm --prefix editor/frontend run build && npm --prefix editor/backend run build",
     "dev:backend": "npm --prefix editor/backend run dev",
-    "dev:frontend": "npm --prefix editor/frontend run dev"
+    "dev:frontend": "npm --prefix editor/frontend run dev",
+    "validate:pages": "node scripts/validate-pages.mjs"
   }
 }

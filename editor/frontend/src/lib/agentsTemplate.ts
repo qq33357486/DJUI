@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.5.0'
+export const AGENTS_VERSION = '0.5.1'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -315,8 +315,21 @@ python trim_compress.py \\
 3. 第 2 步输出到 \`临时文件/待审核/<分类>/\`，第 3 步在编辑器中审批后移入 \`成品素材/<分类>/\`
 4. 在 DJUI 编辑器中编辑 UI 布局
 5. 全屏背景按 §3.4 出竖版 / 宽版两套，页面里基础层挂竖版、宽屏层挂宽版
-6. 点击「发布」，\`成品素材/\` 全部内容（含子目录）原样同步到星火工程的 \`ui/image/djui/\`
-7. 引擎中通过 \`image/djui/<分类>/<文件名>\` 引用
+6. **直接改页面 JSON 的，改完必须跑本地校验（见 §6.1），通过才算改完**
+7. 点击「发布」，\`成品素材/\` 全部内容（含子目录）原样同步到星火工程的 \`ui/image/djui/\`（发布前编辑器会自动跑同一套校验，有问题会拒绝并提示）
+8. 引擎中通过 \`image/djui/<分类>/<文件名>\` 引用
+
+### 6.1 本地校验（改完 JSON 必跑）
+
+无论人改还是脚本/AI 改 \`ui/djui/pages/*.json\` 或 \`project.json\`，保存后执行：
+
+\`\`\`bash
+# 在 DJUI 仓库根目录(需 Node.js,无其他依赖)
+node scripts/validate-pages.mjs <星火工程根目录>
+# 或等价: cd <星火工程根目录> && node D:/git/DJUI/scripts/validate-pages.mjs
+\`\`\`
+
+输出「全部通过 ✓」(退出码 0)才算改完；列出任何 ✗ 都必须先修复。校验规则与编辑器完全一致：协议版本、节点结构、safe 锚点声明、cover/contain 的 sourceSize、响应式覆盖的节点 ID 引用与字段封闭列表、音效引用存在性。
 
 ---
 

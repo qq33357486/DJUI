@@ -347,42 +347,70 @@ export async function copyFileBinary(
   await writable.close()
 }
 
-// 镜像目录：先清空目标，再递归复制源目录所有内容到目标
-// 返回复制的文件数
-export async function mirrorDir(
-  src: FileSystemDirectoryHandle,
-  dst: FileSystemDirectoryHandle
-): Promise<number> {
-  // 清空目标目录现有内容
-  for await (const entry of dst.values()) {
-    await dst.removeEntry(entry.name, { recursive: true })
-  }
-  // 递归复制
-  return await copyDirRecursive(src, dst)
+// 镜像统计
+export interface MirrorStats {
+  copied: number   // 实际复制的文件数
+  skipped: number  // 内容未变跳过的文件数
+  removed: number  // 目标侧多余被删除的条目数
+  total: number    // 源侧文件总数
 }
 
-async function copyDirRecursive(
+// 镜像目录（增量）：调用方提供 shouldSkip(相对路径, size, mtime) 判定「源文件未变」;
+// 未变的完全跳过磁盘操作;目标多余条目删除;目录递归对齐。
+// 注:不能用目标文件 mtime 做比对——createWritable 原子替换会写新 mtime,永不相等;
+// 应由调用方持久化「源侧指纹」(manifest),据其判定。
+export async function mirrorDir(
   src: FileSystemDirectoryHandle,
-  dst: FileSystemDirectoryHandle
-): Promise<number> {
-  let count = 0
+  dst: FileSystemDirectoryHandle,
+  shouldSkip?: (relPath: string, size: number, mtime: number) => boolean,
+  relPathPrefix: string = ''
+): Promise<MirrorStats> {
+  const stats: MirrorStats = { copied: 0, skipped: 0, removed: 0, total: 0 }
+  const dstEntries = new Map<string, FileSystemHandle>()
+  for await (const entry of dst.values()) dstEntries.set(entry.name, entry)
+
   for await (const entry of src.values()) {
+    dstEntries.delete(entry.name)
+    const relPath = relPathPrefix ? relPathPrefix + '/' + entry.name : entry.name
     if (entry.kind === 'file') {
+      stats.total++
       const srcFile = await src.getFileHandle(entry.name)
+      const info = await srcFile.getFile()
+      if (shouldSkip && shouldSkip(relPath, info.size, info.lastModified)) {
+        stats.skipped++
+        continue
+      }
       const dstFile = await dst.getFileHandle(entry.name, { create: true })
-      const file = await srcFile.getFile()
       const writable = await dstFile.createWritable()
-      const buffer = await file.arrayBuffer()
+      const buffer = await info.arrayBuffer()
       await writable.write(buffer)
       await writable.close()
-      count++
+      stats.copied++
     } else if (entry.kind === 'directory') {
       const srcDir = await src.getDirectoryHandle(entry.name)
       const dstDir = await dst.getDirectoryHandle(entry.name, { create: true })
-      count += await copyDirRecursive(srcDir, dstDir)
+      const sub = await mirrorDirIncrementalEntry(srcDir, dstDir, shouldSkip, relPath)
+      stats.copied += sub.copied
+      stats.skipped += sub.skipped
+      stats.removed += sub.removed
+      stats.total += sub.total
     }
   }
-  return count
+  for (const name of dstEntries.keys()) {
+    await dst.removeEntry(name, { recursive: true })
+    stats.removed++
+  }
+  return stats
+}
+
+// 目录递归辅助(与 mirrorDir 同逻辑,携带相对路径前缀)
+async function mirrorDirIncrementalEntry(
+  src: FileSystemDirectoryHandle,
+  dst: FileSystemDirectoryHandle,
+  shouldSkip: ((relPath: string, size: number, mtime: number) => boolean) | undefined,
+  relPathPrefix: string
+): Promise<MirrorStats> {
+  return await mirrorDir(src, dst, shouldSkip, relPathPrefix)
 }
 
 // 写入 .gitkeep 文件到目录

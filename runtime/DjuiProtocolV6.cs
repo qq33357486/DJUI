@@ -53,6 +53,7 @@ public sealed class DjuiTransitionV6 { [JsonPropertyName("open")] public string?
 public sealed class DjuiPageResponsiveV6 { [JsonPropertyName("wide")] public DjuiWideOverridesV6 Wide { get; set; } = new(); }
 public sealed class DjuiWideOverridesV6 { [JsonPropertyName("overrides")] public Dictionary<string, Dictionary<string, JsonElement>> Overrides { get; set; } = new(); }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Skip)]
 public sealed class DjuiNodeV6
 {
     [JsonPropertyName("id")] public string Id { get; set; } = "";

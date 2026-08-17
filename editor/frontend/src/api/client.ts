@@ -278,13 +278,28 @@ function uiPageFromV6(page: PageFileV6): UiPage {
   }
 }
 
+// 剥离编辑器私有字段(editor* 前缀,如 editorLockAspect/editorHidden):
+// 它们只存活在编辑器内存,进协议 JSON 会被 Runtime 严格反序列化拒绝(UnmappedJsonProperty)。
+function stripEditorFields(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(stripEditorFields)
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k.startsWith('editor')) continue
+      out[k] = v
+    }
+    return out
+  }
+  return node
+}
+
 function pageFileV6FromUiPage(page: UiPage): PageFileV6 {
   const base = {
     protocolVersion: DJUI_PROTOCOL_VERSION,
     schemaVersion: DJUI_SCHEMA_VERSION,
     pageId: page.pageId,
     kind: page.nodeKind,
-    root: page.root,
+    root: stripEditorFields(page.root),
   }
   if (page.nodeKind === 'template') {
     return { ...base, kind: 'template', localSize: { width: page.designWidth, height: page.designHeight } } as PageFileV6

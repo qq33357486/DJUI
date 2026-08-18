@@ -9,8 +9,29 @@
 |---|---|---|
 | `green_key_to_png.py` | 去绿幕 | 从绿幕背景的 AI 生图/截图抠出前景 |
 | `trim_compress.py` | 裁边 + 压缩 | 按分类最大边压缩 PNG，并保留原始比例 |
+| `djui-publish.mjs` | 发布到星火工程 | 供 AI 或命令行在不打开网页时检查 Runtime、发布资源或升级 Runtime |
 
-两个脚本都是纯 Python + Pillow，无第三方依赖（除 PIL）。
+图片加工脚本均为纯 Python + Pillow（除 PIL 外无依赖）；发布器是内置的单文件 Node CLI，无需另行安装 npm 包。
+
+## AI / 命令行发布
+
+在 UI 工作区根目录执行。第一次先记录星火工程目录：
+
+```powershell
+node .\脚本区\djui-publish.mjs configure --star-project "D:\\git\\MyStarProject" --json
+```
+
+之后 AI 可直接读取 JSON 结果并按退出码处理：
+
+```powershell
+node .\脚本区\djui-publish.mjs status --json
+node .\脚本区\djui-publish.mjs publish --json
+node .\脚本区\djui-publish.mjs upgrade-runtime --json
+```
+
+- `publish` 会严格镜像成品素材和页面，目标中已经从 UI 工程删除的文件也会清理。
+- Runtime 缺失或过期时，`publish` 会以退出码 `20` 阻止发布，并返回可转述给用户的更新提示；必须先征得用户同意，再单独执行 `upgrade-runtime`。
+- 发布规则与 DJUI 网页发布共用同一核心；请勿手改本脚本，编辑器的「检查工作区更新」会同步新版。
 
 ## 安装
 

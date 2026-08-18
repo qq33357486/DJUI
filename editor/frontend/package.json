@@ -1,13 +1,17 @@
 {
   "name": "djui-editor-frontend",
   "private": true,
-  "version": "0.15.6",
+  "version": "0.16.0",
   "type": "module",
   "scripts": {
+    "predev": "npm run build:publisher",
     "dev": "vite --host --port 7321 --strictPort",
+    "pretypecheck": "npm run build:publisher",
     "typecheck": "tsc --noEmit",
+    "prebuild": "npm run build:publisher",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:publisher": "node scripts/build-publisher.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
@@ -20,9 +24,11 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "esbuild": "^0.28.0",
     "typescript": "^5.6.2",
     "vite": "^8.1.2"
   }

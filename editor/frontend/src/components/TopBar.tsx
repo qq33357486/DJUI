@@ -148,7 +148,7 @@ export default function TopBar(props: TopBarProps) {
             </div>
           ),
         })
-      } else { message.error(result.error || '发布失败') }
+      } else { message.error([result.error, result.userAction].filter(Boolean).join(' ') || '发布失败') }
     } catch { message.error('发布失败') }
     finally { setPublishing(false) }
   }, [config, page])

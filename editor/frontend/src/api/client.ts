@@ -22,8 +22,6 @@ import {
   type PatchReport,
   sanitizeSoundConfig,
   validateSoundConfigForSave,
-  applyProjectPatches,
-  createRuntimePageSnapshot,
   readSoundConfig,
   getDefaultSoundConfig,
   SOUND_CONFIG_VERSION,
@@ -34,11 +32,11 @@ import { AGENTS_VERSION, readAgentsVersion, buildAgentsMd } from '@/lib/agentsTe
 import { EFFECT_PRESETS } from '@/lib/effectsPresets'
 import { SYSTEM_FONT_FAMILIES } from '@/lib/fontLoader'
 import {
-  RUNTIME_FILES,
-  RUNTIME_VERSION,
   SCRIPT_FILES,
   SCRIPTS_VERSION,
 } from '@/lib/bundledAssets'
+import { createBrowserPublishStore } from '@/lib/browserPublishStore'
+import { applyProjectPatchesCore, checkRuntimeCore, publishCore, upgradeRuntimeCore } from '@/lib/publishCore'
 
 // ===== API 类型定义 =====
 export interface GameDataSoundEntry {
@@ -90,7 +88,9 @@ export interface InitWorkspaceResult {
 
 export interface PublishResult {
   ok: boolean
+  code?: string
   error?: string
+  userAction?: string
   copiedAssets?: string[]
   copiedPages?: string[]
   copiedClientPages?: string[]
@@ -544,7 +544,7 @@ export async function applyPatches(_projectPath: string): Promise<ApplyPatchesRe
     }
   }
 
-  const result = await applyProjectPatches(ws)
+  const result = await applyProjectPatchesCore(createBrowserPublishStore(ws))
   return {
     ok: result.ok,
     changed: result.changed,
@@ -560,66 +560,13 @@ export async function applyPatches(_projectPath: string): Promise<ApplyPatchesRe
 export async function checkRuntime(_projectPath: string): Promise<RuntimeStatus> {
   const star = projectContext.star
   if (!star) return { status: 'invalid', message: '未选择星火工程目录' }
-
-  const runtimeDir = await fs.getDirHandle(star, 'src/DjuiRuntime', false)
-  if (!runtimeDir) return { status: 'missing', message: '未安装 Runtime' }
-
-  // 读版本
-  const versionText = await fs.readFileText(star, 'src/DjuiRuntime/djui_version.txt')
-  const installedVersion = versionText?.trim() ?? 'unknown'
-
-  // 检查文件差异（AGENTS.md 随 .cs 一起分发）
-  const installedFileNames: string[] = []
-  for await (const entry of runtimeDir.values()) {
-    if (entry.kind === 'file' && (entry.name.endsWith('.cs') || entry.name === 'AGENTS.md')) {
-      installedFileNames.push(entry.name)
-    }
-  }
-
-  const sourceFileNames = RUNTIME_FILES.map(f => f.name)
-  const missingFiles = sourceFileNames.filter(n => !installedFileNames.includes(n))
-  const extraFiles = installedFileNames.filter(n => !sourceFileNames.includes(n))
-
-  if (installedVersion === RUNTIME_VERSION && missingFiles.length === 0 && extraFiles.length === 0) {
-    return { status: 'ok', message: 'Runtime 已就绪', installedVersion, expectedVersion: RUNTIME_VERSION }
-  }
-
-  return {
-    status: 'outdated',
-    message: 'Runtime 可升级',
-    installedVersion,
-    expectedVersion: RUNTIME_VERSION,
-    installedFiles: installedFileNames,
-    sourceFiles: sourceFileNames,
-    missingFiles,
-    extraFiles,
-  }
+  return checkRuntimeCore(createBrowserPublishStore(star))
 }
 
 export async function initRuntime(_projectPath: string): Promise<InitRuntimeResult> {
   const star = projectContext.star
   if (!star) return { ok: false, error: '未选择星火工程目录' }
-
-  const targetDir = await fs.ensureDir(star, 'src/DjuiRuntime')
-
-  // 清理旧 .cs 文件
-  for await (const entry of targetDir.values()) {
-    if (entry.kind === 'file' && entry.name.endsWith('.cs')) {
-      await targetDir.removeEntry(entry.name)
-    }
-  }
-  // 写入新文件
-  const copied: string[] = []
-  for (const file of RUNTIME_FILES) {
-    await fs.writeFileText(star, `src/DjuiRuntime/${file.name}`, file.content)
-    copied.push(file.name)
-  }
-
-  await fs.writeFileText(star, 'src/DjuiRuntime/djui_version.txt', RUNTIME_VERSION)
-  await fs.writeFileText(star, 'src/DjuiRuntime/README.md',
-    `# DJUI Runtime\n\nVersion: ${RUNTIME_VERSION}\n\nThis directory was auto-created by DJUI Editor.\nDo not edit manually - use DJUI Editor to update.\n`)
-
-  return { ok: true, version: RUNTIME_VERSION, targetDir: 'src/DjuiRuntime', copiedFiles: copied }
+  return upgradeRuntimeCore(createBrowserPublishStore(star))
 }
 
 // ===== 工作区 =====
@@ -692,6 +639,12 @@ export async function initWorkspace(_workspacePath: string): Promise<InitWorkspa
     await fs.writeFileText(ws, 'AGENTS.md', buildAgentsMd())
   }
 
+  // 新工作区直接获得当前脚本集；后续版本由「检查工作区更新」统一同步。
+  for (const file of SCRIPT_FILES) {
+    await fs.writeFileText(ws, `脚本区/${file.path}`, file.content)
+  }
+  await fs.writeFileText(ws, '脚本区/version.txt', SCRIPTS_VERSION)
+
   return { ok: true, workspacePath: ws.name, dirs: WORKSPACE_DIRS, created, message: '工作区初始化完成' }
 }
 
@@ -699,153 +652,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const ws = projectContext.ws
   const star = projectContext.star
   if (!ws || !star) return { ok: false, error: '未选择工程目录' }
-
-  // 1. 应用补丁
-  const patchResult = await applyProjectPatches(ws)
-  if (!patchResult.ok || patchResult.blockers.length > 0) {
-    return { ok: false, error: patchResult.blockers.join('\n') || '补丁应用失败' }
-  }
-
-  // 2. 检查源目录
-  const finishedDir = await fs.getDirHandle(ws, '成品素材', false)
-  if (!finishedDir) return { ok: false, error: '成品素材目录不存在' }
-  const pagesSourceDir = await fs.getDirHandle(ws, PAGES_DIR, false)
-  if (!pagesSourceDir) return { ok: false, error: '页面目录不存在' }
-  const sliceMeta = await getSliceMetaData()
-
-  // 3. 镜像成品素材 → ui/image/djui（增量：按发布清单跳过未变文件）
-  //    清单记录「源侧 size+mtime」;不能用目标 mtime 比对(原子替换会改写 mtime,永不相等)
-  const imageTarget = await fs.ensureDir(star, 'ui/image/djui')
-  const manifestPath = 'ui/.djui-publish-manifest.json'
-  const prevManifest = await fs.readFileJson<{ files: Record<string, [number, number]> }>(star, manifestPath) ?? { files: {} }
-  const nextManifest: { files: Record<string, [number, number]> } = { files: {} }
-  const assetStats = await fs.mirrorDir(finishedDir, imageTarget, (rel, size, mtime) => {
-    const prev = prevManifest.files[rel]
-    const unchanged = !!prev && prev[0] === size && prev[1] === mtime
-    if (unchanged) nextManifest.files[rel] = [size, mtime] // 保留指纹
-    return unchanged
-  })
-  // 记录本次全部源指纹(含刚复制的)
-  const collectFingerprints = async (dir: FileSystemDirectoryHandle, prefix: string) => {
-    for await (const entry of dir.values()) {
-      const rel = prefix ? prefix + '/' + entry.name : entry.name
-      if (entry.kind === 'file') {
-        const f = await (await dir.getFileHandle(entry.name)).getFile()
-        nextManifest.files[rel] = [f.size, f.lastModified]
-      } else {
-        await collectFingerprints(await dir.getDirectoryHandle(entry.name), rel)
-      }
-    }
-  }
-  await collectFingerprints(finishedDir, '')
-  await fs.writeFileJson(star, manifestPath, nextManifest)
-
-  // 4. 工作区配置镜像到星火工程编辑源和 Runtime 消费目录。
-  const warningsFromBundle: string[] = []
-  await mirrorPages(star, STAR_PAGES_DIR, pagesSourceDir, warningsFromBundle)
-  const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle, sliceMeta)
-
-  // 5. 发布 v6 项目配置（Runtime 严格读取 project.json）
-  const projectData = await fs.readFileText(ws, PROJECT_FILE_V6)
-  if (!projectData) return { ok: false, error: '缺少工作区 .djui/layout/project.json' }
-  await fs.writeFileText(star, STAR_PROJECT_FILE_V6, projectData)
-  await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
-  await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/project.json', projectData)
-
-  // 6. 复制 sounds.json → 同一位置
-  let copiedSoundsConfig = false
-  if (await fs.fileExists(ws, SOUNDS_FILE_V6)) {
-    const soundData = await fs.readFileText(ws, SOUNDS_FILE_V6)
-    if (soundData) {
-      await fs.writeFileText(star, STAR_SOUNDS_FILE_V6, soundData)
-      await fs.ensureDir(star, 'ui/AppBundle/user_files/djui')
-      await fs.writeFileText(star, 'ui/AppBundle/user_files/djui/sounds.json', soundData)
-      copiedSoundsConfig = true
-    }
-  }
-
-  // 6. 发布警告
-  const warnings = [...warningsFromBundle, ...await buildPublishWarnings(pagesSourceDir, ws)]
-
-  return {
-    ok: true,
-    copiedAssets: new Array(assetStats.total).fill(''),
-    copiedPages: new Array(pageCount).fill(''),
-    copiedClientPages: new Array(pageCount).fill(''),
-    copiedSoundsConfig,
-    copiedConfig: true,
-    warnings,
-    targetDir: 'ui/image/djui',
-    targetDirs: {
-      images: 'ui/image/djui',
-      clientPages: 'ui/AppBundle/user_files/djui/pages',
-      clientSounds: copiedSoundsConfig ? 'ui/AppBundle/user_files/djui/sounds.json' : undefined,
-    },
-    message: `发布完成：素材 ${assetStats.copied} 复制 / ${assetStats.skipped} 未变跳过 / ${assetStats.removed} 清理`,
-  }
-}
-
-// 镜像页面目录到指定目标（清空再复制）；目标在 ui/ 下不存在时创建并提示
-async function mirrorPages(
-  star: FileSystemDirectoryHandle,
-  targetPath: string,
-  pagesSourceDir: FileSystemDirectoryHandle,
-  warnings: string[],
-  sliceMeta?: SliceMeta
-): Promise<number> {
-  const parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
-  await fs.ensureDir(star, parentPath)
-  const existed = await fs.getDirHandle(star, targetPath, false)
-  if (!existed) {
-    warnings.push(`目录 ${targetPath} 原本不存在，已自动创建（若这不是星火工程结构请检查）`)
-  }
-  const targetDir = await fs.ensureDir(star, targetPath)
-  const stats = await fs.mirrorDir(pagesSourceDir, targetDir)
-  if (sliceMeta) {
-    for (const relativePath of await fs.walkJsonFiles(pagesSourceDir)) {
-      const page = await fs.readFileJson<unknown>(pagesSourceDir, relativePath)
-      if (page === null) throw new Error(`页面 JSON 无法读取: ${relativePath}`)
-      await fs.writeFileJson(targetDir, relativePath, createRuntimePageSnapshot(page, sliceMeta))
-    }
-  }
-  return stats.total
-}
-
-async function buildPublishWarnings(pagesDir: FileSystemDirectoryHandle, workspace: FileSystemDirectoryHandle): Promise<string[]> {
-  const warnings: string[] = []
-  const soundIds = new Set<string>()
-
-  const soundConfig = await readSoundConfig(workspace)
-  for (const s of soundConfig.sounds) {
-    soundIds.add(s.id)
-  }
-
-  const jsonFiles = await fs.walkJsonFiles(pagesDir)
-  const refs = new Set<string>()
-
-  function collectRefs(node: unknown) {
-    if (!node || typeof node !== 'object') return
-    const n = node as any
-    if (n.djui && typeof n.djui.clickSoundId === 'string' && n.djui.clickSoundId.trim()) {
-      refs.add(n.djui.clickSoundId.trim())
-    }
-    if (Array.isArray(n.children)) {
-      for (const child of n.children) collectRefs(child)
-    }
-  }
-
-  for (const file of jsonFiles) {
-    const page = await fs.readFileJson<any>(pagesDir, file)
-    if (page?.root) collectRefs(page.root)
-  }
-
-  for (const ref of refs) {
-    if (!soundIds.has(ref)) {
-      warnings.push(`音效引用 ${ref} 在 sounds.json 中不存在`)
-    }
-  }
-
-  return warnings
+  return publishCore(createBrowserPublishStore(ws), createBrowserPublishStore(star))
 }
 
 // ===== AGENTS.md =====

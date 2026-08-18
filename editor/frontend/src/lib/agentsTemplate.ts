@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.6.0'
+export const AGENTS_VERSION = '0.7.0'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -331,6 +331,28 @@ node scripts/validate-pages.mjs <星火工程根目录>
 \`\`\`
 
 输出「全部通过 ✓」(退出码 0)才算改完；列出任何 ✗ 都必须先修复。校验规则与编辑器完全一致：协议版本、节点结构、safe 锚点声明、cover/contain 的 sourceSize、响应式覆盖的节点 ID 引用与字段封闭列表、音效引用存在性。
+
+### 6.2 AI / 命令行发布
+
+AI 在工作区完成素材或页面修改后，可以不打开网页，直接调用 \`脚本区/djui-publish.mjs\`。发布规则与网页发布共用同一核心，**不要**手工复制文件或另写发布脚本。
+
+首次由 AI 向用户确认星火工程目录后执行：
+
+\`\`\`powershell
+node .\\脚本区\\djui-publish.mjs configure --star-project "D:\\git\\MyStarProject" --json
+\`\`\`
+
+后续发布：
+
+\`\`\`powershell
+node .\\脚本区\\djui-publish.mjs publish --json
+\`\`\`
+
+- 目标路径保存在 \`.djui/publish.json\`；若 CLI 返回 \`MISSING_TARGET_CONFIG\`，AI 必须停止并向用户索取路径，再执行 \`configure\`
+- CLI 返回 JSON 和退出码，AI 应根据 \`ok\`、\`code\`、\`userAction\` 处理；不得忽略失败继续声称已发布
+- \`publish\` 会严格镜像资源和页面，目标侧已不在工作区的旧文件会被删除
+- Runtime 缺失或过期时，\`publish\` 会返回 \`RUNTIME_NOT_READY\` 并阻止发布；AI 必须询问用户「是否允许更新 Runtime」，得到明确同意后才可执行 \`node .\\脚本区\\djui-publish.mjs upgrade-runtime --json\`，再重新发布
+- \`upgrade-runtime\` 与 \`publish\` 必须分开调用；不得自动覆盖星火工程的 Runtime
 
 ---
 

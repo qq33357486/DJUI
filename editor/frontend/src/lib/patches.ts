@@ -313,6 +313,29 @@ function stripEditorFields(node: any) {
   }
 }
 
+function applyRuntimeOnlyFields(
+  data: any,
+  sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
+) {
+  if (!data?.root) return
+  injectSliceEdges(data.root, sliceMeta)
+  stripEditorFields(data.root)
+}
+
+/**
+ * 生成供 Runtime 消费的页面快照。
+ * 编辑源继续把九宫格配置保存在 .djui/slice-meta.json；发布时才内联到页面，
+ * 因此旧页面也会在下一次发布时完成迁移，无需逐页重新保存。
+ */
+export function createRuntimePageSnapshot(
+  pageData: any,
+  sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
+): any {
+  const data = JSON.parse(JSON.stringify(pageData))
+  applyRuntimeOnlyFields(data, sliceMeta)
+  return data
+}
+
 // 从工程目录读声音配置
 export async function readSoundConfig(projectRoot: FileSystemDirectoryHandle): Promise<DjuiSoundConfig> {
   const data = await fs.readFileJson<unknown>(projectRoot, SOUNDS_FILE)
@@ -424,10 +447,7 @@ export async function patchAndSavePage(
   //   内 delete 属性时抛 "Cannot delete property" 错误
   const data = JSON.parse(JSON.stringify(pageData))
   patchPageData(data, defaultButtonSoundId)
-  if (data.root) {
-    injectSliceEdges(data.root, sliceMeta)
-    stripEditorFields(data.root)
-  }
+  applyRuntimeOnlyFields(data, sliceMeta)
   const pageId = data.pageId
   if (!pageId) throw new Error('页面数据缺少 pageId')
   await fs.writeFileJson(projectRoot, `${PAGES_DIR}/${pageId}.json`, data)

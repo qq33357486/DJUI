@@ -38,6 +38,11 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
         visual.Desaturated = appearance?.Desaturated ?? false;
         visual.ImageFlipX = appearance?.ImageFlipX ?? false;
         visual.ImageFlipY = appearance?.ImageFlipY ?? false;
+        // 图片实际绘制在 visual 子节点；九宫格边距也必须落在该节点，
+        // 不能只设置宿主 authored（宿主自身 Image 已被清空）。
+        visual.SlicedEdges = appearance?.SlicedEdges is { Length: 4 } edges
+            ? new Thickness(edges[0], edges[1], edges[2], edges[3])
+            : new Thickness(0, 0, 0, 0);
 
         var fit = appearance?.ImageFit ?? "stretch";
         var cover = string.Equals(fit, "cover", StringComparison.Ordinal);

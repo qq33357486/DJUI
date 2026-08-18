@@ -23,7 +23,7 @@ import {
   sanitizeSoundConfig,
   validateSoundConfigForSave,
   applyProjectPatches,
-  patchAndSavePage,
+  createRuntimePageSnapshot,
   readSoundConfig,
   getDefaultSoundConfig,
   SOUND_CONFIG_VERSION,
@@ -711,6 +711,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   if (!finishedDir) return { ok: false, error: '成品素材目录不存在' }
   const pagesSourceDir = await fs.getDirHandle(ws, PAGES_DIR, false)
   if (!pagesSourceDir) return { ok: false, error: '页面目录不存在' }
+  const sliceMeta = await getSliceMetaData()
 
   // 3. 镜像成品素材 → ui/image/djui（增量：按发布清单跳过未变文件）
   //    清单记录「源侧 size+mtime」;不能用目标 mtime 比对(原子替换会改写 mtime,永不相等)
@@ -742,7 +743,7 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   // 4. 工作区配置镜像到星火工程编辑源和 Runtime 消费目录。
   const warningsFromBundle: string[] = []
   await mirrorPages(star, STAR_PAGES_DIR, pagesSourceDir, warningsFromBundle)
-  const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle)
+  const pageCount = await mirrorPages(star, 'ui/AppBundle/user_files/djui/pages', pagesSourceDir, warningsFromBundle, sliceMeta)
 
   // 5. 发布 v6 项目配置（Runtime 严格读取 project.json）
   const projectData = await fs.readFileText(ws, PROJECT_FILE_V6)
@@ -789,7 +790,8 @@ async function mirrorPages(
   star: FileSystemDirectoryHandle,
   targetPath: string,
   pagesSourceDir: FileSystemDirectoryHandle,
-  warnings: string[]
+  warnings: string[],
+  sliceMeta?: SliceMeta
 ): Promise<number> {
   const parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
   await fs.ensureDir(star, parentPath)
@@ -799,6 +801,13 @@ async function mirrorPages(
   }
   const targetDir = await fs.ensureDir(star, targetPath)
   const stats = await fs.mirrorDir(pagesSourceDir, targetDir)
+  if (sliceMeta) {
+    for (const relativePath of await fs.walkJsonFiles(pagesSourceDir)) {
+      const page = await fs.readFileJson<unknown>(pagesSourceDir, relativePath)
+      if (page === null) throw new Error(`页面 JSON 无法读取: ${relativePath}`)
+      await fs.writeFileJson(targetDir, relativePath, createRuntimePageSnapshot(page, sliceMeta))
+    }
+  }
   return stats.total
 }
 

@@ -16,6 +16,7 @@ import * as api from './api/client'
 import { APP_VERSION } from './lib/changelog'
 import type { DevicePresetV6 } from './lib/devicePresetsV6'
 import { UiPage } from './types/layout'
+import { prunePageUnderlays } from './lib/pageUnderlays'
 
 const { Header, Sider, Content } = Layout
 const DEFAULT_TEMPLATE_WIDTH = 200
@@ -49,7 +50,7 @@ function markSoundSetupNoticeSeen() {
 
 export default function App() {
   const { config, handlesReady, setLastPage, lastPageId } = useProjectStore()
-  const { setAllPages, upsertPage, removePage, setActivePage, updatePageMeta } = useEditorStore()
+  const { setAllPages, upsertPage, removePage, setActivePage, updatePageMeta, setPageUnderlays } = useEditorStore()
   const [loading, setLoading] = useState(true)
   const [configOpen, setConfigOpen] = useState(false)
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
@@ -275,6 +276,13 @@ export default function App() {
         }
       }
       setAllPages(allPagesMap)
+      const savedUnderlays = await api.getPageUnderlays()
+      const validUnderlays = prunePageUnderlays(savedUnderlays, allPagesMap)
+      setPageUnderlays(validUnderlays)
+      if (JSON.stringify(savedUnderlays) !== JSON.stringify(validUnderlays)) {
+        // 清理失效编辑器关联失败不能阻断页面本身的加载和编辑。
+        try { await api.savePageUnderlays(validUnderlays) } catch { /* 下次可再次自动清理 */ }
+      }
       const target = (lastPageId && list.includes(lastPageId)) ? lastPageId : list[0]
       if (target) {
         setActivePage(target)
@@ -302,6 +310,8 @@ export default function App() {
   const deletePage = async (pageId: string) => {
     await api.deletePage(pageId)
     removePage(pageId)
+    const state = useEditorStore.getState()
+    await api.savePageUnderlays(state.pageUnderlays)
     const list = await api.listPages()
     setPages(list)
   }

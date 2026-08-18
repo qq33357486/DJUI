@@ -3,6 +3,7 @@ import { immer } from 'zustand/middleware/immer'
 import { UiNode, UiPage, COMPONENT_LIBRARY } from '@/types/layout'
 import { solveLayout, Rect as LayoutRect, solveChildrenFlex } from '@/utils/layoutSolver'
 import { getAnchorSide, DEFAULT_ANCHOR_SIDE } from '@/utils/anchorPresets'
+import type { PageUnderlayMap } from '@/lib/pageUnderlays'
 
 // 撤销/重做栈：整个 UI 工程共用一条历史，而不是按页面各自分段。
 interface HistoryEntry {
@@ -19,6 +20,10 @@ interface EditorState {
   activePageId: string | null
   // 当前编辑的页面（allPages[activePageId] 的引用，为兼容保留）
   page: UiPage | null
+
+  /** 编辑器专用：前景页面 → 直接后景页面，不进入 Runtime 页面协议。 */
+  pageUnderlays: PageUnderlayMap
+  setPageUnderlays: (links: PageUnderlayMap) => void
 
   // 响应式编辑层
   responsiveVariant: 'base' | 'wide'
@@ -219,6 +224,8 @@ export const useEditorStore = create<EditorState>()(
     allPages: {},
     activePageId: null,
     page: null,
+    pageUnderlays: {},
+    setPageUnderlays: (links) => set((s) => { s.pageUnderlays = { ...links } }),
     responsiveVariant: 'base',
     setResponsiveVariant: (variant) => set((s) => { s.responsiveVariant = variant }),
     clearResponsiveOverrides: (nodeId) => {
@@ -252,6 +259,8 @@ export const useEditorStore = create<EditorState>()(
           s.page = null
         }
         s.selectedIds = []
+        // 切换/重载工程时先清掉旧工程的编辑器侧车数据，随后 App 会载入新工程的关联。
+        s.pageUnderlays = {}
         s.undoStack = []
         s.redoStack = []
         s.pendingHistory = null
@@ -270,6 +279,10 @@ export const useEditorStore = create<EditorState>()(
     removePage: (pageId) => {
       set((s) => {
         delete s.allPages[pageId]
+        delete s.pageUnderlays[pageId]
+        for (const [foregroundId, backgroundId] of Object.entries(s.pageUnderlays)) {
+          if (backgroundId === pageId) delete s.pageUnderlays[foregroundId]
+        }
         if (s.activePageId === pageId) {
           const ids = Object.keys(s.allPages)
           s.activePageId = ids.length > 0 ? ids[0] : null

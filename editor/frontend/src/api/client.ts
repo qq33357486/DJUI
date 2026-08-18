@@ -29,6 +29,7 @@ import {
   SOUND_CONFIG_VERSION,
 } from '@/lib/patches'
 import { normalizePage, normalizeDetectChanges } from '@/lib/normalize'
+import { type PageUnderlayMap } from '@/lib/pageUnderlays'
 import { AGENTS_VERSION, readAgentsVersion, buildAgentsMd } from '@/lib/agentsTemplate'
 import { EFFECT_PRESETS } from '@/lib/effectsPresets'
 import { SYSTEM_FONT_FAMILIES } from '@/lib/fontLoader'
@@ -154,6 +155,9 @@ const UI_LAYOUT_DIR = '.djui/layout'
 const PROJECT_FILE_V6 = UI_LAYOUT_DIR + '/project.json'
 const PAGES_DIR = UI_LAYOUT_DIR + '/pages'
 const SOUNDS_FILE_V6 = UI_LAYOUT_DIR + '/sounds.json'
+// 编辑器专用的画布后景关联，刻意位于 layout/ 之外，发布时不会镜像给 Runtime。
+const PAGE_UNDERLAYS_FILE = '.djui/editor/page-underlays.json'
+let pageUnderlaySaveQueue: Promise<void> = Promise.resolve()
 const STAR_LAYOUT_DIR = 'ui/djui'
 const STAR_PROJECT_FILE_V6 = STAR_LAYOUT_DIR + '/project.json'
 const STAR_PAGES_DIR = STAR_LAYOUT_DIR + '/pages'
@@ -383,6 +387,32 @@ export async function deletePage(pageId: string): Promise<void> {
   const ws = projectContext.ws
   if (!ws) return
   await fs.removeFile(ws, `${PAGES_DIR}/${pageId}.json`)
+}
+
+export async function getPageUnderlays(): Promise<PageUnderlayMap> {
+  const ws = projectContext.ws
+  if (!ws) return {}
+  const raw = await fs.readFileJson<unknown>(ws, PAGE_UNDERLAYS_FILE)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const source = (raw as Record<string, unknown>).links
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {}
+  const links: PageUnderlayMap = {}
+  for (const [foregroundId, backgroundId] of Object.entries(source as Record<string, unknown>)) {
+    if (typeof backgroundId === 'string' && backgroundId) links[foregroundId] = backgroundId
+  }
+  return links
+}
+
+export async function savePageUnderlays(links: PageUnderlayMap): Promise<void> {
+  const ws = projectContext.ws
+  if (!ws) throw new Error('未选择 UI 工作区目录')
+  // 下拉选择可能连续变化；串行写入保证最后一次选择最终落盘，而非被较早的异步写回覆盖。
+  const snapshot = { ...links }
+  const write = async () => {
+    await fs.writeFileJson(ws, PAGE_UNDERLAYS_FILE, { version: 1, links: snapshot })
+  }
+  pageUnderlaySaveQueue = pageUnderlaySaveQueue.catch(() => {}).then(write)
+  await pageUnderlaySaveQueue
 }
 
 // ===== 素材浏览 =====

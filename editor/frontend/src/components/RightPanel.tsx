@@ -9,6 +9,7 @@ import SliceEditorModal from './SliceEditorModal'
 import * as api from '@/api/client'
 import { ANCHOR_SIDES, getAnchorSide, DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, STRETCH_STYLES } from '@/utils/anchorPresets'
 import { collectAutoSizeConflicts } from '@/utils/layoutSolver'
+import { findUnderlayCycle } from '@/lib/pageUnderlays'
 
 const TEXT_OVERFLOW_OPTIONS = [
   { value: 'None', label: '无（溢出显示）' },
@@ -1151,6 +1152,8 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
   updatePageMeta: (pageId: string, updates: Partial<UiPage>) => void
   openAssetPicker: (fieldPath: string) => void
 }) {
+  const { allPages, pageUnderlays, setPageUnderlays } = useEditorStore()
+  const underlaySaveRevision = useRef(0)
   if (!page) {
     return <div style={{ padding: '16px' }}><Empty description="请选择窗口" image={Empty.PRESENTED_IMAGE_SIMPLE} /></div>
   }
@@ -1160,6 +1163,44 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
   const refVisible = page.referenceVisible ?? true
   const isTemplate = page.nodeKind === 'template'
   const isWindow = page.nodeKind === 'window'
+  const underlayPageId = pageUnderlays[page.pageId]
+  const underlayOptions = Object.values(allPages)
+    .filter(candidate => candidate.nodeKind === 'window' && candidate.pageId !== page.pageId)
+    .map(candidate => {
+      const proposed = { ...pageUnderlays, [page.pageId]: candidate.pageId }
+      const cycle = findUnderlayCycle(proposed, page.pageId, candidate.pageId)
+      return {
+        value: candidate.pageId,
+        label: cycle ? `${candidate.pageId}（会形成循环关联）` : candidate.pageId,
+        disabled: !!cycle,
+      }
+    })
+
+  const updateUnderlay = async (value: string | undefined) => {
+    const previous = pageUnderlays
+    const revision = ++underlaySaveRevision.current
+    const next = { ...pageUnderlays }
+    if (value) {
+      next[page.pageId] = value
+      const cycle = findUnderlayCycle(next, page.pageId, value)
+      if (cycle) {
+        message.error(`不能形成循环后景：${cycle.join(' → ')}`)
+        return
+      }
+    } else {
+      delete next[page.pageId]
+    }
+    setPageUnderlays(next)
+    try {
+      await api.savePageUnderlays(next)
+    } catch (error) {
+      // 连续选择后旧请求失败不能回滚用户较新的选择。
+      if (revision === underlaySaveRevision.current) {
+        setPageUnderlays(previous)
+        message.error(error instanceof Error ? `保存后景关联失败：${error.message}` : '保存后景关联失败')
+      }
+    }
+  }
 
   const updateTransition = (field: 'open' | 'close', value: string | null) => {
     updatePageMeta(page.pageId, {
@@ -1235,6 +1276,20 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
                     options={WINDOW_MODE_OPTIONS}
                   />
                 </FieldRow>
+                <FieldRow label="后景页面">
+                  <Select
+                    size="small"
+                    style={{ width: '100%' }}
+                    allowClear
+                    placeholder="不叠加后景页面"
+                    value={underlayPageId}
+                    onChange={value => { void updateUnderlay(value) }}
+                    options={underlayOptions}
+                  />
+                </FieldRow>
+                <div style={{ fontSize: 10, color: '#5b6378' }}>
+                  编辑此页时，后景页会以只读方式完整置于画布底层；该设置不发布到 Runtime。
+                </div>
               </Space>
             ),
           } : null,

@@ -3,7 +3,7 @@ import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KIm
 import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { engineFontToCss } from '@/lib/fontLoader'
-import { UiNode, ProjectConfig, DjuiAnchor } from '@/types/layout'
+import { UiNode, UiPage, ProjectConfig, DjuiAnchor } from '@/types/layout'
 import * as api from '@/api/client'
 import { useEngineImage, useWorkspaceImage } from '@/hooks/useImageUrl'
 import { DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, getAnchorSide } from '@/utils/anchorPresets'
@@ -196,6 +196,33 @@ function cloneTreeWithResponsiveOverrides(root: UiNode, overrides?: Record<strin
   }
   apply(cloned)
   return cloned
+}
+
+// 场景画板与锚定 image 的控件需要使用页面自身的背景图帧。后景页也必须独立计算，
+// 不能复用当前编辑页的帧，否则不同背景素材的 cover 裁切会错位。
+function computePageImageFrame(root: UiNode, canvasWidth: number, canvasHeight: number): LayoutRect | null {
+  const sceneBackgroundId = (root.children ?? []).find(node => !!node.sceneFrame?.backgroundId)?.sceneFrame?.backgroundId
+  const imageFrameHost = (root.children ?? []).find(node =>
+    (node.stretch?.style ?? 'None') === 'Both' &&
+    !!node.appearance?.image &&
+    node.basic?.visible !== false &&
+    (!sceneBackgroundId || node.id === sceneBackgroundId))
+  if (!imageFrameHost) return null
+
+  const appearance = imageFrameHost.appearance!
+  const sourceWidth = appearance.sourceSize?.width ?? 0
+  const sourceHeight = appearance.sourceSize?.height ?? 0
+  if (sourceWidth <= 0 || sourceHeight <= 0 || (appearance.imageFit ?? 'cover') !== 'cover') return null
+
+  const scale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight)
+  const focalX = Math.max(0, Math.min(1, appearance.focalX ?? 0.5))
+  const focalY = Math.max(0, Math.min(1, appearance.focalY ?? 0.5))
+  return {
+    x: (canvasWidth - sourceWidth * scale) * focalX,
+    y: (canvasHeight - sourceHeight * scale) * focalY,
+    width: sourceWidth * scale,
+    height: sourceHeight * scale,
+  }
 }
 
 function solvePreviewRect(node: UiNode, parentRect: LayoutRect, canvasWidth: number, canvasHeight: number, screenOrigin: { x: number; y: number }) {
@@ -714,9 +741,11 @@ interface NodeShapeProps {
   sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>
   dragPreview: DragPreview | null
   inheritedDragDelta: Vec2
+  /** 后景/审计等只读预览：保留渲染，但不参与画布命中、选中和变形。 */
+  readOnly?: boolean
 }
 
-function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta }: NodeShapeProps) {
+function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta, readOnly = false }: NodeShapeProps) {
   const { config } = useProjectStore()
   const allPages = useEditorStore(s => s.allPages)
   const defaultFont = config?.defaultFont ?? null
@@ -803,8 +832,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           stroke={isSelected ? '#b37feb' : (showEditorOverlay ? '#8a6fc0' : undefined)}
           strokeWidth={isSelected ? 2.5 : 1.5}
           dash={[6, 4]}
-          draggable={isSelected && !node.editorLocked}
-          listening={!node.editorLocked}
+          draggable={isSelected && !node.editorLocked && !readOnly}
+          listening={!node.editorLocked && !readOnly}
           // 选中/拖动统一交给上层：选中已选节点的「捕获层(Proxy)」在最上层优先命中；
           // 未被 proxy 覆盖时（节点本身未选中），命中落到这里。
           // 这里不再立即改选中状态——选中延迟到 Stage 的 mouseUp（按下→未拖→弹起才算选中），
@@ -885,8 +914,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         strokeWidth={isSelected ? 2.5 : 1.5}
         cornerRadius={app.cornerRadius ?? 0}
         dash={node.basic?.isStatic ? [5, 5] : undefined}
-        draggable={isSelected && !node.editorLocked}
-        listening={!node.editorLocked}
+        draggable={isSelected && !node.editorLocked && !readOnly}
+        listening={!node.editorLocked && !readOnly}
         onMouseDown={(e) => {
           const evt = e.evt as MouseEvent
           // 仅左键参与选中/拖动会话；右键和中键用于平移
@@ -1084,6 +1113,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
               sliceMeta={sliceMeta}
               dragPreview={dragPreview}
               inheritedDragDelta={{ x: 0, y: 0 }}
+              readOnly={readOnly}
             />
           ))}
         </Group>
@@ -1110,6 +1140,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             sliceMeta={sliceMeta}
             dragPreview={dragPreview}
             inheritedDragDelta={renderDelta}
+            readOnly={readOnly}
           />
         ))
       )}
@@ -1201,7 +1232,7 @@ export function StaticViewportPreview({
 
 // === 主画布组件 ===
 export default function CanvasArea() {
-  const { page, selectedIds, selectNode, clearSelection, addNode, responsiveVariant, setResponsiveVariant } = useEditorStore()
+  const { page, allPages, pageUnderlays, selectedIds, selectNode, clearSelection, addNode, responsiveVariant, setResponsiveVariant } = useEditorStore()
   const { config } = useProjectStore()
   // 订阅 fontVersion：字体注册完成后 bump，触发画布用真实字体重渲染
   const fontVersion = useProjectStore(s => s.fontVersion)
@@ -1616,25 +1647,23 @@ function computeRenderDims(
   const effectiveRoot = responsiveVariant === 'wide'
     ? cloneTreeWithResponsiveOverrides(page.root, page.responsive?.wide.overrides)
     : page.root
-  // 场景画板显式声明 backgroundId；旧页面才回退到第一个全屏图片节点。
-  const sceneBackgroundId = (effectiveRoot.children ?? []).find(node => !!node.sceneFrame?.backgroundId)?.sceneFrame?.backgroundId
-  const imageFrameHost = (effectiveRoot.children ?? []).find(n =>
-    (n.stretch?.style ?? 'None') === 'Both' &&
-    !!n.appearance?.image &&
-    n.basic?.visible !== false &&
-    (!sceneBackgroundId || n.id === sceneBackgroundId))
-  let pageImageFrame: LayoutRect | null = null
-  if (imageFrameHost) {
-    const ap = imageFrameHost.appearance!
-    const sw = ap.sourceSize?.width ?? 0, sh = ap.sourceSize?.height ?? 0
-    if (sw > 0 && sh > 0 && (ap.imageFit ?? 'cover') === 'cover') {
-      const scale = Math.max(actualW / sw, actualH / sh)
-      const fx = Math.max(0, Math.min(1, ap.focalX ?? 0.5)), fy = Math.max(0, Math.min(1, ap.focalY ?? 0.5))
-      pageImageFrame = { x: (actualW - sw * scale) * fx, y: (actualH - sh * scale) * fy, width: sw * scale, height: sh * scale }
-    }
-  }
+  const pageImageFrame = computePageImageFrame(effectiveRoot, actualW, actualH)
   setCurrentImageFrame(pageImageFrame)
   reanchorContextRef.current = { actualW, actualH, safeRect, imageFrame: pageImageFrame }
+
+  // 后景页由深到浅排列：A → B → C 时先绘制 C，再绘制 B，最后才绘制 A。
+  // 运行时不认识这项编辑器专用关联；这里仅用已加载的窗口页做递归合成预览。
+  const underlayPages: UiPage[] = []
+  const visitedUnderlays = new Set<string>([page.pageId])
+  const collectUnderlays = (foregroundId: string) => {
+    const backgroundId = pageUnderlays[foregroundId]
+    const background = backgroundId ? allPages[backgroundId] : null
+    if (!background || background.nodeKind !== 'window' || visitedUnderlays.has(background.pageId)) return
+    visitedUnderlays.add(background.pageId)
+    collectUnderlays(background.pageId)
+    underlayPages.push(background)
+  }
+  collectUnderlays(page.pageId)
   // 适配审计与实际预览使用同一份画布、安全区和布局求解结果；只在选择设备画像时启用。
   const adaptationAudit = !isTemplate && devicePreset
     ? auditPageAdaptation(
@@ -2056,6 +2085,39 @@ function computeRenderDims(
                 />
               </>
             )}
+
+            {/* 后景关联：递归页已按由深到浅排序，只读且不接收任何命中事件。 */}
+            {underlayPages.map(underlay => {
+              const underlayRoot = responsiveVariant === 'wide'
+                ? cloneTreeWithResponsiveOverrides(underlay.root, underlay.responsive?.wide.overrides)
+                : underlay.root
+              const underlayImageFrame = computePageImageFrame(underlayRoot, actualW, actualH)
+              return underlayRoot.children.map(child => (
+                <NodeShape
+                  key={`underlay-${underlay.pageId}-${child.id}`}
+                  node={child}
+                  isSelected={false}
+                  selectedIds={[]}
+                  onSelect={() => {}}
+                  onDragEnd={() => {}}
+                  onDragPreviewChange={() => {}}
+                  onTransformEnd={() => {}}
+                  registerRef={() => {}}
+                  workspacePath={workspacePath}
+                  projectPath={projectPath}
+                  parentRect={{ x: 0, y: 0, width: actualW, height: actualH }}
+                  canvasWidth={actualW}
+                  canvasHeight={actualH}
+                  safeRect={safeRect}
+                  imageFrame={underlayImageFrame}
+                  showEditorOverlay={false}
+                  sliceMeta={sliceMeta}
+                  dragPreview={null}
+                  inheritedDragDelta={{ x: 0, y: 0 }}
+                  readOnly
+                />
+              ))
+            })}
 
             {/* 所有控件（root 的子节点，父矩形=实际预览分辨率） */}
             {effectiveRoot.children.map(child => (

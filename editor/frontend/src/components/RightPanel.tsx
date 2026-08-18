@@ -10,6 +10,7 @@ import * as api from '@/api/client'
 import { ANCHOR_SIDES, getAnchorSide, DEFAULT_ANCHOR_SIDE, DEFAULT_PIVOT, STRETCH_STYLES } from '@/utils/anchorPresets'
 import { collectAutoSizeConflicts } from '@/utils/layoutSolver'
 import { findUnderlayCycle } from '@/lib/pageUnderlays'
+import { getReferenceImageVisible, setReferenceImageVisible } from '@/lib/editorPreferences'
 
 const TEXT_OVERFLOW_OPTIONS = [
   { value: 'None', label: '无（溢出显示）' },
@@ -1153,6 +1154,7 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
   openAssetPicker: (fieldPath: string) => void
 }) {
   const { allPages, pageUnderlays, setPageUnderlays } = useEditorStore()
+  const { config } = useProjectStore()
   const underlaySaveRevision = useRef(0)
   if (!page) {
     return <div style={{ padding: '16px' }}><Empty description="请选择窗口" image={Empty.PRESENTED_IMAGE_SIMPLE} /></div>
@@ -1160,7 +1162,7 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
 
   const refImg = page.referenceImage ?? null
   const refOpacity = page.referenceOpacity ?? 0.5
-  const refVisible = page.referenceVisible ?? true
+  const refVisible = page.referenceVisible ?? getReferenceImageVisible(config?.workspacePath, page.pageId)
   const isTemplate = page.nodeKind === 'template'
   const isWindow = page.nodeKind === 'window'
   const underlayPageId = pageUnderlays[page.pageId]
@@ -1369,7 +1371,10 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
                       <Switch
                         size="small"
                         checked={refVisible}
-                        onChange={v => updatePageMeta(page.pageId, { referenceVisible: v })}
+                        onChange={v => {
+                          updatePageMeta(page.pageId, { referenceVisible: v })
+                          setReferenceImageVisible(config?.workspacePath, page.pageId, v)
+                        }}
                       />
                     </FieldRow>
                   </>

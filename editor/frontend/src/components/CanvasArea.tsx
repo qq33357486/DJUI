@@ -12,6 +12,7 @@ import { computeImageFit } from '@/utils/imageFit'
 import { createCanvasPlanV6 } from '@/utils/viewportV6'
 import { devicePresetsForOrientationV6, findDevicePresetV6, type DevicePresetV6 } from '@/lib/devicePresetsV6'
 import { auditPageAdaptation, computeImageFrameForAudit } from '@/utils/adaptationAudit'
+import { getEditorOverlayVisible, getReferenceImageVisible, setEditorOverlayVisible, setReferenceImageVisible } from '@/lib/editorPreferences'
 import type Konva from 'konva'
 
 // === 自定义 useImage hook：从 URL 加载 HTMLImageElement ===
@@ -1535,7 +1536,7 @@ function computeRenderDims(
   }, [selectedIds])
 
   // 编辑器辅助渲染开关
-  const [showEditorOverlay, setShowEditorOverlay] = useState(true)
+  const [showEditorOverlay, setShowEditorOverlay] = useState(getEditorOverlayVisible)
   const [sliceMeta, setSliceMeta] = useState<Record<string, { left: number; top: number; right: number; bottom: number }>>({})
   const reloadSliceMeta = useCallback(() => {
     if (config?.workspacePath) {
@@ -1618,6 +1619,7 @@ function computeRenderDims(
 
   const designW = page.designWidth
   const designH = page.designHeight
+  const referenceVisible = page.referenceVisible ?? getReferenceImageVisible(config?.workspacePath, page.pageId)
   const isTemplate = page.nodeKind === 'template'
   // 设备预设保存物理像素；按项目 Canvas 模式换算为 Runtime 使用的逻辑可见区。
   const devicePreset = isTemplate ? null : previewPreset
@@ -2156,7 +2158,7 @@ function computeRenderDims(
             {/* ★ 参考效果图（半透明、穿透、铺满设计区，渲染在最上层） */}
             <RefImageLayer
               refPath={page.referenceImage ?? null}
-              visible={page.referenceVisible ?? true}
+              visible={referenceVisible}
               opacity={page.referenceOpacity ?? 0.5}
               width={actualW}
               height={actualH}
@@ -2355,17 +2357,25 @@ function computeRenderDims(
         <span style={{ color: '#3a4258' }}>|</span>
         <span
           style={{ fontSize: 10, cursor: 'pointer', color: showEditorOverlay ? '#5ab9ff' : '#5b6378' }}
-          onClick={() => setShowEditorOverlay(v => !v)}
+          onClick={() => {
+            const next = !showEditorOverlay
+            setEditorOverlayVisible(next)
+            setShowEditorOverlay(next)
+          }}
           title="Ctrl+Shift+H 切换辅助渲染"
         >
           {showEditorOverlay ? '◉ 辅助线' : '○ 辅助线'}
         </span>
         <span
-          style={{ fontSize: 10, cursor: 'pointer', color: (page.referenceVisible ?? true) ? '#5ab9ff' : '#5b6378' }}
-          onClick={() => useEditorStore.getState().updatePageMeta(page.pageId, { referenceVisible: !(page.referenceVisible ?? true) })}
+          style={{ fontSize: 10, cursor: 'pointer', color: referenceVisible ? '#5ab9ff' : '#5b6378' }}
+          onClick={() => {
+            const next = !referenceVisible
+            useEditorStore.getState().updatePageMeta(page.pageId, { referenceVisible: next })
+            setReferenceImageVisible(config?.workspacePath, page.pageId, next)
+          }}
           title="切换效果图显示"
         >
-          {(page.referenceVisible ?? true) ? '◉ 效果图' : '○ 效果图'}
+          {referenceVisible ? '◉ 效果图' : '○ 效果图'}
         </span>
       </div>
     </div>

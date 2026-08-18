@@ -184,6 +184,6 @@ CHANGELOG 是**给用户看的更新公告**，会在 WhatsNewModal 里直接展
 - [ ] `CHANGELOG.md` 有对应版本的条目，分类和条目完整
 - [ ] `npx tsc --noEmit` 通过
 - [ ] `npm run build` 通过
-- [ ] 推送后等待 Docker 打包成功，再登录论坛服务器更新容器
+- [ ] 推送后等待 Docker 打包成功，再用 `C:\Users\limen\OneDrive\文档\服务器登录凭证\论坛.bat` 的论坛服务器凭证更新容器
 
 > 此文件由人工维护，描述工具仓库本身。请随架构演进同步更新。

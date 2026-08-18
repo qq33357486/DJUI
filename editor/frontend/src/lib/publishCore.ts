@@ -216,6 +216,34 @@ async function buildPublishWarnings(store: PublishStore): Promise<string[]> {
   return warnings
 }
 
+/**
+ * 旧版项目把 layout 留在星火工程；一旦用户触发脚本更新或发布，立即迁回工作区。
+ * 这是幂等操作：工作区已有 project.json 时绝不覆盖编辑源。
+ */
+export async function migrateLegacyLayoutCore(workspace: PublishStore, star: PublishStore): Promise<{ migrated: boolean; pages: number; sounds: boolean }> {
+  if (await workspace.fileExists(PROJECT_FILE) || !(await star.fileExists(STAR_PROJECT_FILE))) {
+    return { migrated: false, pages: 0, sounds: false }
+  }
+  const project = await star.readBytes(STAR_PROJECT_FILE)
+  if (project === null) throw new Error('旧版项目配置无法读取，无法迁移')
+  await workspace.writeBytes(PROJECT_FILE, project)
+  let pages = 0
+  for (const file of await walkFiles(star, STAR_PAGES_DIR)) {
+    if (!file.toLowerCase().endsWith('.json')) continue
+    const data = await star.readBytes(file)
+    if (data === null) throw new Error(`旧版页面无法读取：${file}`)
+    await workspace.writeBytes(joinPath(PAGES_DIR, file.slice(STAR_PAGES_DIR.length).replace(/^\//, '')), data)
+    pages++
+  }
+  let sounds = false
+  const soundData = await star.readBytes(STAR_SOUNDS_FILE)
+  if (soundData !== null) {
+    await workspace.writeBytes(SOUNDS_FILE, soundData)
+    sounds = true
+  }
+  return { migrated: true, pages, sounds }
+}
+
 export async function checkRuntimeCore(star: PublishStore): Promise<RuntimeStatusCore> {
   const runtimeDir = 'src/DjuiRuntime'
   if (!(await star.dirExists(runtimeDir))) return { status: 'missing', message: '未安装 Runtime' }
@@ -243,6 +271,7 @@ export async function upgradeRuntimeCore(star: PublishStore, files: BundledRunti
 }
 
 export async function publishCore(workspace: PublishStore, star: PublishStore): Promise<PublishCoreResult> {
+  await migrateLegacyLayoutCore(workspace, star)
   const runtime = await checkRuntimeCore(star)
   if (runtime.status !== 'ok') return {
     ok: false, code: 'RUNTIME_NOT_READY', error: runtime.message,

@@ -36,7 +36,7 @@ import {
   SCRIPTS_VERSION,
 } from '@/lib/bundledAssets'
 import { createBrowserPublishStore } from '@/lib/browserPublishStore'
-import { applyProjectPatchesCore, checkRuntimeCore, publishCore, upgradeRuntimeCore } from '@/lib/publishCore'
+import { applyProjectPatchesCore, checkRuntimeCore, migrateLegacyLayoutCore, publishCore, upgradeRuntimeCore } from '@/lib/publishCore'
 
 // ===== API 类型定义 =====
 export interface GameDataSoundEntry {
@@ -209,20 +209,7 @@ async function migrateLegacyLayoutToWorkspace(): Promise<void> {
   const ws = projectContext.ws
   const star = projectContext.star
   if (!ws || !star) return
-  if (await fs.fileExists(ws, PROJECT_FILE_V6)) return
-  if (!(await fs.fileExists(star, STAR_PROJECT_FILE_V6))) return
-
-  await fs.copyFile(star, STAR_PROJECT_FILE_V6, ws, PROJECT_FILE_V6)
-  const legacyPages = await fs.getDirHandle(star, STAR_PAGES_DIR, false)
-  if (legacyPages) {
-    const files = await fs.walkFiles(legacyPages, undefined, ['.json'])
-    for (const file of files) {
-      await fs.copyFile(legacyPages, file, ws, PAGES_DIR + '/' + file)
-    }
-  }
-  if (await fs.fileExists(star, STAR_SOUNDS_FILE_V6)) {
-    await fs.copyFile(star, STAR_SOUNDS_FILE_V6, ws, SOUNDS_FILE_V6)
-  }
+  await migrateLegacyLayoutCore(createBrowserPublishStore(ws), createBrowserPublishStore(star))
 }
 
 export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
@@ -705,9 +692,13 @@ export async function checkScriptsUpdate(_workspacePath: string): Promise<Script
   return { status: 'ok', latestVersion: SCRIPTS_VERSION, installedVersion, message: '脚本区已是最新' }
 }
 
-export async function updateScripts(_workspacePath: string = ''): Promise<{ ok: boolean; version?: string; copiedFiles?: string[]; targetDir?: string; message?: string; error?: string }> {
+export async function updateScripts(_workspacePath: string = ''): Promise<{ ok: boolean; version?: string; copiedFiles?: string[]; targetDir?: string; migratedLayout?: boolean; message?: string; error?: string }> {
   const ws = projectContext.ws
   if (!ws) return { ok: false, message: '未选择工作区目录' }
+  const star = projectContext.star
+  const migration = star
+    ? await migrateLegacyLayoutCore(createBrowserPublishStore(ws), createBrowserPublishStore(star))
+    : { migrated: false, pages: 0, sounds: false }
 
   // 备份旧的 脚本区（如果有）
   if (await fs.dirExists(ws, '脚本区')) {
@@ -728,7 +719,10 @@ export async function updateScripts(_workspacePath: string = ''): Promise<{ ok: 
   }
   await fs.writeFileText(ws, '脚本区/version.txt', SCRIPTS_VERSION)
 
-  return { ok: true, version: SCRIPTS_VERSION, copiedFiles: copied, targetDir: '脚本区', message: '脚本区已更新' }
+  return {
+    ok: true, version: SCRIPTS_VERSION, copiedFiles: copied, targetDir: '脚本区', migratedLayout: migration.migrated,
+    message: migration.migrated ? `脚本区已更新，并已迁移旧版布局源（${migration.pages} 个页面）` : '脚本区已更新',
+  }
 }
 
 // ===== 字体 =====

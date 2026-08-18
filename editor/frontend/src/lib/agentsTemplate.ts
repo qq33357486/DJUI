@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.7.0'
+export const AGENTS_VERSION = '0.7.1'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -353,6 +353,7 @@ node .\\脚本区\\djui-publish.mjs publish --json
 - \`publish\` 会严格镜像资源和页面，目标侧已不在工作区的旧文件会被删除
 - Runtime 缺失或过期时，\`publish\` 会返回 \`RUNTIME_NOT_READY\` 并阻止发布；AI 必须询问用户「是否允许更新 Runtime」，得到明确同意后才可执行 \`node .\\脚本区\\djui-publish.mjs upgrade-runtime --json\`，再重新发布
 - \`upgrade-runtime\` 与 \`publish\` 必须分开调用；不得自动覆盖星火工程的 Runtime
+- 当编辑器提示更新脚本区并执行同步时，会自动把旧星火工程内的布局源迁入工作区；迁移只在工作区尚无 \`.djui/layout/project.json\` 时执行，绝不会覆盖现有编辑源
 
 ---
 

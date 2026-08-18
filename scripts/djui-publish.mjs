@@ -1777,6 +1777,29 @@ async function buildPublishWarnings(store) {
   for (const ref of refs) if (!soundIds.has(ref)) warnings.push(`\u97F3\u6548\u5F15\u7528 ${ref} \u5728 sounds.json \u4E2D\u4E0D\u5B58\u5728`);
   return warnings;
 }
+async function migrateLegacyLayoutCore(workspace, star) {
+  if (await workspace.fileExists(PROJECT_FILE) || !await star.fileExists(STAR_PROJECT_FILE)) {
+    return { migrated: false, pages: 0, sounds: false };
+  }
+  const project = await star.readBytes(STAR_PROJECT_FILE);
+  if (project === null) throw new Error("\u65E7\u7248\u9879\u76EE\u914D\u7F6E\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u65E0\u6CD5\u8FC1\u79FB");
+  await workspace.writeBytes(PROJECT_FILE, project);
+  let pages = 0;
+  for (const file of await walkFiles(star, STAR_PAGES_DIR)) {
+    if (!file.toLowerCase().endsWith(".json")) continue;
+    const data = await star.readBytes(file);
+    if (data === null) throw new Error(`\u65E7\u7248\u9875\u9762\u65E0\u6CD5\u8BFB\u53D6\uFF1A${file}`);
+    await workspace.writeBytes(joinPath(PAGES_DIR, file.slice(STAR_PAGES_DIR.length).replace(/^\//, "")), data);
+    pages++;
+  }
+  let sounds = false;
+  const soundData = await star.readBytes(STAR_SOUNDS_FILE);
+  if (soundData !== null) {
+    await workspace.writeBytes(SOUNDS_FILE, soundData);
+    sounds = true;
+  }
+  return { migrated: true, pages, sounds };
+}
 async function checkRuntimeCore(star) {
   const runtimeDir = "src/DjuiRuntime";
   if (!await star.dirExists(runtimeDir)) return { status: "missing", message: "\u672A\u5B89\u88C5 Runtime" };
@@ -1806,6 +1829,7 @@ Do not edit manually - use DJUI Editor to update.
   return { ok: true, version: RUNTIME_VERSION, targetDir: dir, copiedFiles: files.map((file) => file.name) };
 }
 async function publishCore(workspace, star) {
+  await migrateLegacyLayoutCore(workspace, star);
   const runtime = await checkRuntimeCore(star);
   if (runtime.status !== "ok") return {
     ok: false,

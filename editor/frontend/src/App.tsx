@@ -14,6 +14,7 @@ import { projectContext } from './fs/projectContext'
 import { loadEngineFonts } from './lib/fontLoader'
 import * as api from './api/client'
 import { APP_VERSION } from './lib/changelog'
+import type { DevicePresetV6 } from './lib/devicePresetsV6'
 import { UiPage } from './types/layout'
 
 const { Header, Sider, Content } = Layout
@@ -54,9 +55,21 @@ export default function App() {
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const [adaptationAuditOpen, setAdaptationAuditOpen] = useState(false)
+  const [auditDeviceReturn, setAuditDeviceReturn] = useState<{ presetId: string; variant: 'base' | 'wide' } | null>(null)
   const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
   const initialized = useRef(false)
+
+  // 审计页退出后等画布重新挂载，再带入用户刚刚复核的设备画像。
+  useEffect(() => {
+    if (adaptationAuditOpen || !auditDeviceReturn) return
+    const returnTarget = auditDeviceReturn
+    const frame = window.requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('djui:selectDevicePreview', { detail: returnTarget }))
+      setAuditDeviceReturn(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [adaptationAuditOpen, auditDeviceReturn])
 
   // 启动：从 IndexedDB 恢复 DirectoryHandle，验证权限
   useEffect(() => {
@@ -413,7 +426,15 @@ export default function App() {
         />
       </Header>
       {adaptationAuditOpen ? (
-        <AdaptationAuditPage onBack={() => setAdaptationAuditOpen(false)} />
+        <AdaptationAuditPage
+          onBack={() => setAdaptationAuditOpen(false)}
+          onViewOnCanvas={(device: DevicePresetV6, wide) => {
+            setAuditDeviceReturn({ presetId: device.id, variant: wide ? 'wide' : 'base' })
+            setAdaptationAuditOpen(false)
+          }}
+          pages={pages}
+          onSwitchPage={switchPage}
+        />
       ) : (
         <Layout>
           <Sider width={280} style={{ overflow: 'auto', background: '#1a1d28' }}>

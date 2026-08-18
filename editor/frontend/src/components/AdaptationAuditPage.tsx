@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, Empty, Tag } from 'antd'
-import { ArrowLeftOutlined, EyeOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, ArrowLeftOutlined, BlockOutlined, EyeOutlined } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { devicePresetsForOrientationV6, type DevicePresetV6 } from '@/lib/devicePresetsV6'
@@ -12,6 +12,9 @@ import type { UiNode } from '@/types/layout'
 
 interface AdaptationAuditPageProps {
   onBack: () => void
+  onViewOnCanvas: (device: DevicePresetV6, wide: boolean) => void
+  pages: string[]
+  onSwitchPage: (pageId: string) => void | Promise<void>
 }
 
 function applyFieldPath(target: Record<string, unknown>, fieldPath: string, value: unknown) {
@@ -50,8 +53,10 @@ function issueColor(result: AdaptationAuditResult) {
   return counts.errors > 0 ? '#ff7875' : counts.warnings > 0 ? '#f4b400' : '#52c41a'
 }
 
-export default function AdaptationAuditPage({ onBack }: AdaptationAuditPageProps) {
+export default function AdaptationAuditPage({ onBack, onViewOnCanvas, pages, onSwitchPage }: AdaptationAuditPageProps) {
   const page = useEditorStore(state => state.page)
+  const activePageId = useEditorStore(state => state.activePageId)
+  const allPages = useEditorStore(state => state.allPages)
   const config = useProjectStore(state => state.config)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
@@ -71,10 +76,7 @@ export default function AdaptationAuditPage({ onBack }: AdaptationAuditPageProps
   const selected = rows.find(row => row.device.id === selectedId) ?? rows[0]
 
   const viewOnCanvas = (device: DevicePresetV6, wide: boolean) => {
-    window.dispatchEvent(new CustomEvent('djui:selectDevicePreview', {
-      detail: { presetId: device.id, variant: wide ? 'wide' : 'base' },
-    }))
-    onBack()
+    onViewOnCanvas(device, wide)
   }
 
   if (!page || !config) {
@@ -93,49 +95,32 @@ export default function AdaptationAuditPage({ onBack }: AdaptationAuditPageProps
         </div>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '280px minmax(360px, 1fr) 300px' }}>
         <aside style={{ minHeight: 0, overflow: 'auto', padding: 14, borderRight: '1px solid #2a3142', background: '#121621' }}>
-          <div style={{ color: '#9aa3b4', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
-            同一比例只保留一个布局画像；只有安全区或硬件遮挡不同，才单列设备。
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <strong style={{ fontSize: 14 }}>页面</strong>
+            <span style={{ color: '#9aa3b4', fontSize: 12 }}>{pages.length}</span>
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
-            {rows.map(row => {
-              const counts = issueCounts(row.result)
-              const active = row.device.id === selected?.device.id
+            {pages.map(pageId => {
+              const pageItem = allPages[pageId]
+              const active = pageId === activePageId
+              const isTemplate = pageItem?.nodeKind === 'template'
               return (
                 <button
-                  key={row.device.id}
-                  onClick={() => setSelectedId(row.device.id)}
+                  key={pageId}
+                  onClick={() => { void onSwitchPage(pageId) }}
                   style={{ textAlign: 'left', cursor: 'pointer', color: '#dfe7f5', background: active ? '#1e3048' : '#151924', border: '1px solid ' + (active ? '#5ab9ff' : '#2a3142'), borderRadius: 8, padding: '10px 11px' }}
                 >
-                  <strong style={{ display: 'block', fontSize: 12, lineHeight: 1.45 }}>{row.device.label}</strong>
-                  <span style={{ display: 'block', marginTop: 5, fontSize: 11, color: issueColor(row.result) }}>
-                    {counts.errors} 错误 / {counts.warnings} 警告
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    {isTemplate ? <BlockOutlined /> : <AppstoreOutlined />}
+                    <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, lineHeight: 1.45 }}>{pageId}</strong>
                   </span>
+                  <span style={{ display: 'block', marginTop: 5, fontSize: 11, color: '#9aa3b4' }}>{isTemplate ? '模板' : '窗口'}</span>
                 </button>
               )
             })}
           </div>
-
-          {selected && (
-            <section style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #2a3142' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 8 }}>
-                <strong style={{ fontSize: 13 }}>{selected.device.label}</strong>
-                <Button size="small" icon={<EyeOutlined />} onClick={() => viewOnCanvas(selected.device, selected.wide)}>画布</Button>
-              </div>
-              <div style={{ marginTop: 8 }}><Tag color={selected.wide ? 'orange' : 'blue'}>{selected.wide ? '宽屏层' : '基础层'}</Tag></div>
-              <div style={{ display: 'grid', gap: 7, marginTop: 10 }}>
-                {selected.result.issues.length === 0 ? (
-                  <span style={{ color: '#83d9b4', fontSize: 12 }}>未发现确定的几何风险。</span>
-                ) : selected.result.issues.map((issue, index) => (
-                  <div key={issue.nodeId + '-' + index} style={{ borderLeft: '3px solid ' + (issue.level === 'error' ? '#ff7875' : '#f4b400'), background: '#10141d', padding: '7px 8px', borderRadius: 3, fontSize: 12 }}>
-                    <strong style={{ color: issue.level === 'error' ? '#ff9c9c' : '#ffd36a' }}>{issue.nodeName}</strong><br />
-                    <span style={{ color: '#c4ccda' }}>{issue.message}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </aside>
 
         <main style={{ minWidth: 0, minHeight: 0, overflow: 'auto', padding: 18 }}>
@@ -165,6 +150,31 @@ export default function AdaptationAuditPage({ onBack }: AdaptationAuditPageProps
             })}
           </div>
         </main>
+
+        <aside style={{ minHeight: 0, overflow: 'auto', padding: 14, borderLeft: '1px solid #2a3142', background: '#121621' }}>
+          <div style={{ color: '#9aa3b4', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}>
+            点击中间的设备预览，查看对应的审计结果。
+          </div>
+          {selected && (
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 8 }}>
+                <strong style={{ fontSize: 13 }}>{selected.device.label}</strong>
+                <Button size="small" icon={<EyeOutlined />} onClick={() => viewOnCanvas(selected.device, selected.wide)}>画布</Button>
+              </div>
+              <div style={{ marginTop: 8 }}><Tag color={selected.wide ? 'orange' : 'blue'}>{selected.wide ? '宽屏层' : '基础层'}</Tag></div>
+              <div style={{ display: 'grid', gap: 7, marginTop: 10 }}>
+                {selected.result.issues.length === 0 ? (
+                  <span style={{ color: '#83d9b4', fontSize: 12 }}>未发现确定的几何风险。</span>
+                ) : selected.result.issues.map((issue, index) => (
+                  <div key={issue.nodeId + '-' + index} style={{ borderLeft: '3px solid ' + (issue.level === 'error' ? '#ff7875' : '#f4b400'), background: '#10141d', padding: '7px 8px', borderRadius: 3, fontSize: 12 }}>
+                    <strong style={{ color: issue.level === 'error' ? '#ff9c9c' : '#ffd36a' }}>{issue.nodeName}</strong><br />
+                    <span style={{ color: '#c4ccda' }}>{issue.message}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
     </div>
   )

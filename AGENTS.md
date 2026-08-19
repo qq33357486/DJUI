@@ -25,11 +25,14 @@ DJUI/
 │   │       ├── api/client.ts          # 所有文件操作集中在此（页面 CRUD、素材、发布）
 │   │       ├── lib/normalize.ts       # ★ 数据边界关卡：unknown JSON → 安全 UiPage
 │   │       ├── lib/patches.ts         # 语义迁移：锚点升级、音效补丁
+│   │       ├── lib/agentsTemplate.ts  # ★ 工作区 AGENTS.md 唯一权威源（AGENTS_VERSION）
+│   │       ├── lib/runtimeBundle.ts   # ★ RUNTIME_VERSION 与 runtime 文件清单
 │   │       └── types/layout.ts        # UI 节点数据模型
 │   ├── Dockerfile         # 纯前端镜像（Nginx serve dist）
 │   └── screenshots/       # 截图归档
 ├── runtime/               # C# Runtime（发布到星火工程 src/DjuiRuntime/）
-├── projects/              # 内置示例工程（导出 JSON 样例）
+├── scripts/               # 素材处理脚本源（同步到工作区「脚本区」，独立 version.txt）
+├── projects/              # 示例 UI 工作区骨架（目录结构样例）
 └── docs/                  # 设计文档
 ```
 
@@ -59,21 +62,21 @@ cd editor/frontend; npm run build      # 产物在 frontend/dist
 
 - 源在 `runtime/*.cs`
 - 通过前端 `api/client.ts` 的 `initRuntime()` 复制到 `<星火工程>/src/DjuiRuntime/`
-- 版本号在 `lib/bundledAssets.ts` 的 `RUNTIME_VERSION` 常量
+- 版本号在 `lib/runtimeBundle.ts` 的 `RUNTIME_VERSION` 常量（`bundledAssets.ts` 仅做转出口）；新增 runtime 文件要在同文件 `RUNTIME_FILES` 登记
 - 升级 Runtime 时同步升 `RUNTIME_VERSION`，前端 TopBar 会出现"更新 Runtime"提示
 
 ## 四、AGENTS.md 规范更新机制（重点）
 
 工作区 AGENTS.md 是「描述素材规范」的文档，由编辑器维护。完整流程：
 
-1. **改 DJUI**：编辑 `editor/backend/src/agentsTemplate.ts`
+1. **改 DJUI**：编辑 `editor/frontend/src/lib/agentsTemplate.ts`
    - 修改 `buildAgentsMd()` 内容
    - **必须升级** `AGENTS_VERSION`（小修 patch，新增分类 minor，删除/重命名分类 major）
-2. **触发更新提醒**：编辑器启动时前端调用 `GET /api/workspace/check-agents`，
-   后端读取 workspace `AGENTS.md` 顶部的 `<!-- DJUI-AGENTS-VERSION: x.x.x -->` 标记，
-   与 `AGENTS_VERSION` 比较，返回 `ok` / `outdated` / `missing`。
+2. **触发更新提醒**：编辑器启动时前端调用 `api/client.ts` 的 `checkAgentsUpdate()`，
+   直接经 File System Access API 读取 workspace `AGENTS.md` 顶部的 `<!-- DJUI-AGENTS-VERSION: x.x.x -->` 标记，
+   与 `AGENTS_VERSION` 比较。脚本区（`scripts/version.txt` ↔ 工作区 `脚本区/version.txt`）过期会合并到同一提醒。
 3. **用户点更新**：TopBar 右侧出现橙色徽章（`SyncOutlined`），点击弹窗确认，
-   调用 `POST /api/workspace/update-agents` 把 `buildAgentsMd()` 整文件写入 workspace。
+   调用 `updateAgents()` 把 `buildAgentsMd()` 整文件写入 workspace。
    旧文件备份为 `AGENTS.md.bak`。
 
 **永远不要**把 workspace AGENTS.md 的内容硬编码到别处，唯一权威源是 `agentsTemplate.ts`。
@@ -82,9 +85,9 @@ cd editor/frontend; npm run build      # 产物在 frontend/dist
 
 工作区 AGENTS.md 里维护着完整的成品素材分类决策树和命名规范（backgrounds/buttons/frames/icons/lists/decorations/text/misc）。
 修改分类时同步：
-- `agentsTemplate.ts` 的 `buildAgentsMd()`（文档）
-- `project.ts` 的 `FINISHED_SUBDIRS`（实际初始化时创建的目录）
-- `assets.ts` 的 `IMAGE_EXTS`（如果引入新格式）
+- `lib/agentsTemplate.ts` 的 `buildAgentsMd()`（文档）
+- `api/client.ts` 的 `FINISHED_SUBDIRS`（实际初始化时创建的目录）
+- `fs/fsAccess.ts` 的 `IMAGE_EXTS`（如果引入新格式）
 
 三者必须保持一致。
 

@@ -1,6 +1,6 @@
 # Security Policy
 
-DJUI is a local development tool for StarEngine 2.0 UI workflows. The backend can browse local directories and copy files into user-selected projects, so it should not be exposed to untrusted networks.
+DJUI is a purely client-side editor for StarEngine 2.0 UI workflows. All file access goes through the browser File System Access API with explicit user directory grants; there is no backend service. Deployed builds are static files only.
 
 ## Supported Versions
 
@@ -16,10 +16,10 @@ Useful details:
 
 - Operating system
 - DJUI commit or release version
-- Node.js version
+- Browser and version
 - Reproduction steps
-- Whether the backend was bound to `127.0.0.1` or `0.0.0.0`
+- Which directories were granted to the editor
 
 ## Security Boundaries
 
-By default DJUI listens on `127.0.0.1`, restricts CORS to local origins, and treats `editor/backend/djui_config.json` as local-only state. See [docs/security.md](docs/security.md) for details.
+The editor can only read and write directories the user explicitly granted through the browser. Builds are static assets with no server-side logic, environment variables, or secrets. See [docs/security.md](docs/security.md) for details.

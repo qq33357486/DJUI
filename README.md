@@ -59,10 +59,10 @@ DJUI 适合用来做静态页面、通用弹窗、背包格子、奖励列表、
 
 在 DJUI 左侧新建页面：
 
-- **窗口**：运行时可以通过 `DjuiWindowManager.OpenWindow("页面ID")` 打开。
+- **窗口**：运行时可以通过 `DjuiWindowManagerV6.OpenWindow("页面ID")` 打开。
 - **模板**：可复用 UI 片段，例如奖励格子、物品卡、通用列表项。
 
-编辑完成后保存页面。页面源文件会写入星火工程的 `ui/djui/pages/`，发布时再复制到运行时读取的 `user_files/djui/pages/`。
+编辑完成后保存页面。页面源文件保存在 UI 工程的 `.djui/layout/pages/`，星火工程中的副本由「发布」生成，不作为编辑源。
 
 ### 2. 准备素材
 
@@ -87,21 +87,23 @@ AI 生图、切图和素材加工都先放在 UI 工程里做。最终确认可�
 点击 DJUI 顶部菜单的发布功能后，会同步：
 
 - `成品素材/` 到星火工程的 `ui/image/djui/`
-- 页面 JSON 到 `user_files/djui/pages/`
-- 声音配置到 `user_files/djui/sounds.json`
+- 页面 JSON 到 `ui/djui/pages/` 与运行时读取的 `ui/AppBundle/user_files/djui/pages/`
+- 声音配置到 `ui/AppBundle/user_files/djui/sounds.json`
 
 游戏启动时初始化 Runtime：
 
 ```csharp
 using DjuiRuntime;
 
-DjuiWindowManager.Initialize();
+DjuiWindowManagerV6.Initialize();
 ```
 
 打开窗口：
 
 ```csharp
-DjuiWindowManager.OpenWindow("main_menu");
+var root = DjuiWindowManagerV6.OpenWindow("main_menu");
+// 页面作用域查询控件（推荐）；多实例用 OpenInstance
+var btn = DjuiWindowManagerV6.GetSingletonControl<GameUI.Control.Primitive.Button>("main_menu", "button_start");
 ```
 
 Runtime 接入细节见 [Runtime 接入](docs/runtime.md)。
@@ -113,8 +115,8 @@ Runtime 接入细节见 [Runtime 接入](docs/runtime.md)。
 - 支持锚点、拉伸、自动布局、九宫格、透明度、遮罩、层级等 UI 属性。
 - 支持窗口转场、控件动效预设、按钮默认点击音效。
 - 支持引用 StarEngine 数编里的 `GameDataSound`，不重复管理音频资源。
-- 支持 AI 素材工作区规则、待审核素材流转和素材处理脚本。
-- Runtime 支持窗口管理、模板实例、动作路由、数据绑定、音频后端接管。
+- 支持 AI 素材工作区规则、素材目录人工审批流转和素材处理脚本。
+- Runtime 支持窗口管理、模板实例、动作路由、数据绑定（visible/disabled/text/value）、按钮四态状态图与禁用灰化、音频后端接管。
 
 ## 本地启动
 
@@ -125,25 +127,11 @@ Runtime 接入细节见 [Runtime 接入](docs/runtime.md)。
 - StarEngine 2.0 工程
 - 可选：Python 3.10+ 和 Pillow，用于运行素材处理脚本
 
-安装依赖：
-
-```powershell
-cd editor/backend
-npm ci
-
-cd ../frontend
-npm ci
-```
-
-启动开发环境，分别打开两个终端：
-
-```powershell
-cd editor/backend
-npm run dev
-```
+安装并启动（纯前端架构，无后端）：
 
 ```powershell
 cd editor/frontend
+npm ci
 npm run dev
 ```
 
@@ -153,13 +141,12 @@ npm run dev
 http://localhost:7321
 ```
 
-根目录也提供了聚合命令：
+类型检查与生产构建：
 
 ```powershell
-npm run typecheck
+cd editor/frontend
+npx tsc --noEmit
 npm run build
-npm run dev:backend
-npm run dev:frontend
 ```
 
 ## 文档入口
@@ -169,7 +156,7 @@ npm run dev:frontend
 | 从零接入一个 StarEngine 工程 | [快速开始](docs/quickstart.md) |
 | AI 生图、素材目录、成品素材规则 | [素材与 AI 工作流](docs/workflow.md) |
 | 游戏代码里如何初始化和打开窗口 | [Runtime 接入](docs/runtime.md) |
-| 本地服务、CORS、路径访问安全 | [安全说明](docs/security.md) |
+| 浏览器目录授权与静态部署安全 | [安全说明](docs/security.md) |
 | 正式发布前检查哪些项目 | [发布检查清单](docs/release-checklist.md) |
 | 如何参与维护 | [贡献指南](CONTRIBUTING.md) |
 
@@ -195,44 +182,33 @@ UI 工程主要保存素材、素材规则、脚本和素材元数据；星火�
 
 ## 生产运行
 
+纯前端架构：构建产物是静态文件，任意静态服务器均可托管。
+
 ```powershell
 cd editor/frontend
 npm run build
-
-cd ../backend
-npm run build
-$env:NODE_ENV="production"
-npm start
+# 产物在 editor/frontend/dist，交给 Nginx / 任意静态服务托管
 ```
 
-生产模式下后端会 serve `editor/frontend/dist`。
-
-Docker 构建从仓库根目录执行：
+Docker 构建从仓库根目录执行（镜像内是 Nginx 静态托管，容器监听 80）：
 
 ```powershell
 docker build -f editor/Dockerfile -t djui-editor .
-docker run --rm -p 37241:37241 djui-editor
+docker run --rm -p 7321:80 djui-editor
 ```
 
 也可以直接拉取每次提交 main 后自动构建发布的镜像（GHCR）：
 
 ```powershell
 docker pull ghcr.io/qq33357486/djui:latest
-docker run --rm -p 37241:37241 ghcr.io/qq33357486/djui:latest
+docker run --rm -p 7321:80 ghcr.io/qq33357486/djui:latest
 ```
 
 镜像标签：`latest` 始终指向 main 最新构建；另带 7 位 commit SHA 标签用于回溯历史版本。
 
-## 安全默认值
+## 安全模型
 
-DJUI 是本地开发工具，默认只监听 `127.0.0.1`，CORS 只允许本机来源。不要把后端暴露到不可信网络。需要远程访问时，显式设置：
-
-```powershell
-$env:DJUI_HOST="0.0.0.0"
-$env:DJUI_CORS_ORIGIN="http://你的前端域名"
-```
-
-更多说明见 [安全说明](docs/security.md)。
+DJUI 是纯前端应用：无服务端，文件读写全部通过浏览器 File System Access API 的目录授权完成，最近工程记录保存在浏览器本地。部署产物是纯静态文件，不含任何本机路径或凭据。更多说明见 [安全说明](docs/security.md)。
 
 ## 开源许可
 

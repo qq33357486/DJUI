@@ -25,27 +25,11 @@ UI 工作区/
 
 ## 2. 启动编辑器
 
-安装依赖：
-
-```powershell
-cd editor/backend
-npm ci
-
-cd ../frontend
-npm ci
-```
-
-启动后端：
-
-```powershell
-cd editor/backend
-npm run dev
-```
-
-启动前端：
+安装并启动（纯前端架构，无后端）：
 
 ```powershell
 cd editor/frontend
+npm ci
 npm run dev
 ```
 
@@ -58,17 +42,17 @@ npm run dev
 1. 选择 StarEngine 2.0 工程根目录。
 2. 选择或新建 UI 工作区目录。
 3. 选择横屏/竖屏和设计分辨率。
-4. 点击「初始化 Runtime」，把 `runtime/*.cs` 复制到 StarEngine 工程的 `src/DjuiRuntime/`。
+4. 点击「初始化 / 升级」，把 `runtime/*.cs` 复制到 StarEngine 工程的 `src/DjuiRuntime/`。
 5. 点击「初始化工作区」，创建素材目录、`AGENTS.md` 和脚本区。
 6. 保存配置。
 
-本机配置会写入 `editor/backend/djui_config.json`。该文件包含本机路径，已被 `.gitignore` 排除。
+工程目录授权由浏览器记住，最近工程列表保存在浏览器本地，不会产生本机配置文件。
 
 ## 4. 创建页面
 
 在左侧面板新建页面：
 
-- **窗口**：运行时可通过 `DjuiWindowManager.OpenWindow("page_id")` 打开。
+- **窗口**：运行时可通过 `DjuiWindowManagerV6.OpenWindow("page_id")` 打开。
 - **模板**：可在其他页面中作为可复用控件引用。
 
 编辑时建议：
@@ -105,19 +89,19 @@ UI 工作区/.djui/layout/sounds.json -> StarEngine 工程/ui/djui/sounds.json �
 在 StarEngine 客户端初始化时调用：
 
 ```csharp
-DjuiRuntime.DjuiWindowManager.Initialize();
+DjuiRuntime.DjuiWindowManagerV6.Initialize();
 ```
 
 需要打开页面时：
 
 ```csharp
-DjuiRuntime.DjuiWindowManager.OpenWindow("main_menu");
+DjuiRuntime.DjuiWindowManagerV6.OpenWindow("main_menu");
 ```
 
 关闭窗口：
 
 ```csharp
-DjuiRuntime.DjuiWindowManager.CloseWindow("main_menu");
+DjuiRuntime.DjuiWindowManagerV6.CloseWindow("main_menu");
 ```
 
 更多 Runtime API 见 [Runtime 接入](runtime.md)。

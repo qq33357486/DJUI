@@ -13,7 +13,7 @@ StarEngine 工程/src/DjuiRuntime/
 1. 如果未安装 Runtime，点击「初始化」。
 2. 如果版本过期，点击「升级」。
 
-Runtime 版本号由 `editor/frontend/src/lib/bundledAssets.ts` 中的 `RUNTIME_VERSION` 管理。改动 `runtime/*.cs` 的兼容行为时，应同步提升版本号。
+Runtime 版本号由 `editor/frontend/src/lib/runtimeBundle.ts` 中的 `RUNTIME_VERSION` 管理（`bundledAssets.ts` 仅做转出口）。改动 `runtime/*.cs` 的兼容行为时，应同步提升版本号。
 
 ## 发布后的文件位置
 
@@ -46,7 +46,7 @@ Runtime（全部 `#if CLIENT`）从相对路径 `user_files/djui/pages` 扫描�
 ```csharp
 using DjuiRuntime;
 
-DjuiWindowManager.Initialize();
+DjuiWindowManagerV6.Initialize();
 ```
 
 `Initialize()` 会扫描页面 JSON 并缓存页面定义。
@@ -54,52 +54,49 @@ DjuiWindowManager.Initialize();
 ## 打开和关闭窗口
 
 ```csharp
-var root = DjuiWindowManager.OpenWindow("main_menu");
+var root = DjuiWindowManagerV6.OpenWindow("main_menu");
 ```
 
-`pageId` 必须和编辑器页面 ID 一致。只有 `nodeKind` 为 `window` 的页面能通过 `OpenWindow` 打开。
+`pageId` 必须和编辑器页面 ID 一致。只有 `kind` 为 `window` 的页面能通过 `OpenWindow` 打开。
 
 关闭：
 
 ```csharp
-DjuiWindowManager.CloseWindow("main_menu");
+DjuiWindowManagerV6.CloseWindow("main_menu");
 ```
 
 关闭所有：
 
 ```csharp
-DjuiWindowManager.CloseAll();
+DjuiWindowManagerV6.CloseAll();
 ```
 
 ## 查找控件
 
-按节点 ID 查找：
+优先使用页面作用域查询（同页多实例不冲突）：
 
 ```csharp
-var startButton = DjuiWindowManager.GetControl("button_start");
+var btn = DjuiWindowManagerV6.GetSingletonControl<Button>("main_menu", "button_start");
 ```
 
-按窗口和节点查找：
+只有确实需要同页多实例时才用实例 API：
 
 ```csharp
-var title = DjuiWindowManager.GetControl("main_menu", "label_title");
-```
-
-按类型查找：
-
-```csharp
-var button = DjuiWindowManager.GetControl<Button>("button_start");
+string instanceId = DjuiWindowManagerV6.OpenInstance("toast");
+var label = DjuiWindowManagerV6.GetControl<Label>(instanceId, "toast_text");
 ```
 
 ## 模板
 
-编辑器中的模板页面会以 `nodeKind = "template"` 保存。运行时可以手动创建模板控件：
+编辑器中的模板页面会以 `kind = "template"` 保存。模板实例可以在编辑器中放入页面，Runtime 会按 `templateRef` 展开；运行时多实例用 `OpenInstance`。
 
-```csharp
-var item = DjuiWindowManager.CreateTemplate("item_card");
-```
+## 按钮状态视觉
 
-模板实例也可以在编辑器中放入页面，Runtime 会按 `templateRef` 构建。
+按钮支持 `button.imageHover / imagePressed / imageDisabled` 三张可选状态图，由 Runtime 状态机（`DjuiButtonStateV6`）监听指针事件自动切换；未设置的态沿用正常图。
+
+- 禁用时未配置 `imageDisabled` → 自动兜底：图片灰度 + 整体透明度降为 50%（常量 `DjuiButtonStateV6.DisabledFallbackOpacity`）。
+- 运行时动态切换禁用：数据绑定属性 `disabled`，或调用 `DjuiButtonState.SetDisabled(control, bool)`。
+- 已知限制：直接给引擎控件赋 `Disabled` 只拦截点击、不刷新 DJUI 禁用视觉（引擎没有 Disabled 变更通知）。
 
 ## 动作路由
 
@@ -137,10 +134,25 @@ DjuiAudioSystem.SetBackend(new MyDjuiAudioBackend());
 
 ## 数据绑定
 
-`DjuiBindingSystem` 负责维护节点 ID 到控件实例的映射。当前版本提供基础注册和查找能力，项目侧可以在此基础上扩展状态同步。
+页面节点的 `djui.bindings` 声明「属性 → 绑定 key」。游戏侧用 `Set` 推值，绑定该 key 的控件自动刷新：
+
+```csharp
+DjuiBindingSystem.Set("coin_count", 999);
+```
+
+当前支持的绑定属性：
+
+| 属性 | 适用控件 | 行为 |
+|---|---|---|
+| `visible` | 全部 | 显隐 |
+| `disabled` | 全部 | 禁用并刷新 DJUI 禁用视觉（走 `DjuiButtonState.SetDisabled`） |
+| `text` | Label / Input | 文本 |
+| `value` | Progress | 进度值 |
+
+动态禁用也可以直接调 `DjuiButtonState.SetDisabled(control, bool)`（设置引擎属性并同步视觉）。
 
 ## 注意事项
 
 - Runtime 文件被 DJUI 管理，不建议在 StarEngine 工程中直接手改；如需改动，请改 DJUI 仓库的 `runtime/` 源文件再同步。
-- 修改 JSON 协议字段时，需要同步更新 `editor/frontend/src/types/layout.ts` 和 `runtime/DjuiModels.cs`。
+- 修改 v6 协议字段时，需要同步更新 `editor/frontend/src/types/protocolV6.ts`（协议与宽屏覆盖白名单）与 `runtime/DjuiProtocolV6.cs`（v6 JSON 模型）；编辑器内部节点模型 `types/layout.ts` 若受影响也需同步。
 - 修改 Runtime 行为后要提升 `RUNTIME_VERSION`，否则前端不会提示用户升级 Runtime。

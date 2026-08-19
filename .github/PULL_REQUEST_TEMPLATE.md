@@ -4,9 +4,9 @@
 
 ## 检查项
 
-- [ ] 已运行 `npm run typecheck`
-- [ ] 已运行 `npm run build`
-- [ ] 未提交 `djui_config.json`、`node_modules/`、`dist/` 或临时素材
+- [ ] 已运行 `cd editor/frontend && npx tsc --noEmit`
+- [ ] 已运行 `cd editor/frontend && npm run build`
+- [ ] 未提交 `node_modules/`、`dist/` 或临时素材
 - [ ] 如修改 Runtime，已提升 `RUNTIME_VERSION`
 - [ ] 如修改工作区 AGENTS 模板，已提升 `AGENTS_VERSION`
 - [ ] 如修改素材脚本，已提升 `scripts/version.txt`

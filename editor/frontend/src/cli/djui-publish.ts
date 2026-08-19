@@ -149,14 +149,15 @@ async function main(): Promise<number> {
     return runtime.status === 'ok' ? 0 : 20
   }
   if (command === 'upgrade-runtime') {
-    output(await upgradeRuntimeCore(star), asJson)
-    return 0
+    const result = await upgradeRuntimeCore(star)
+    output(result, asJson)
+    return result.ok ? 0 : 26
   }
   if (command === 'publish') {
     try {
       const result = await publishCore(workspace, star)
       output(result, asJson)
-      return result.ok ? 0 : result.code === 'RUNTIME_NOT_READY' ? 20 : 30
+      return result.ok ? 0 : result.code === 'RUNTIME_NOT_READY' ? 20 : result.code === 'PUBLISHER_OUTDATED' ? 25 : 30
     } catch (error) {
       output({ ok: false, code: 'PUBLISH_FAILED', error: error instanceof Error ? error.message : String(error) }, asJson)
       return 40

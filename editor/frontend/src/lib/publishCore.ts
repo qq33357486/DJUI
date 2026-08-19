@@ -33,6 +33,8 @@ export interface RuntimeStatusCore {
   message: string
   installedVersion?: string
   expectedVersion?: string
+  /** 已安装版本比当前工具内置的更新：问题在调用方（网页/CLI）过旧，禁止引导 upgrade-runtime */
+  installedNewer?: boolean
   installedDir?: string
   installedFiles?: string[]
   sourceFiles?: string[]
@@ -40,9 +42,25 @@ export interface RuntimeStatusCore {
   extraFiles?: string[]
 }
 
+export type UpgradeRuntimeResult =
+  | { ok: true; version: string; targetDir: string; copiedFiles: string[] }
+  | { ok: false; code: 'RUNTIME_DOWNGRADE_BLOCKED'; error: string; userAction: string }
+
+/** 语义化版本比较（x.y.z 数字段），返回 >0 / 0 / <0 */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => v.trim().split('.').map(part => parseInt(part, 10))
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff) return diff
+  }
+  return 0
+}
+
 export interface PublishCoreResult {
   ok: boolean
-  code?: 'RUNTIME_NOT_READY' | 'INVALID_WORKSPACE' | 'PUBLISH_FAILED'
+  code?: 'RUNTIME_NOT_READY' | 'PUBLISHER_OUTDATED' | 'INVALID_WORKSPACE' | 'PUBLISH_FAILED'
   error?: string
   userAction?: string
   copiedAssets?: string[]
@@ -257,11 +275,26 @@ export async function checkRuntimeCore(star: PublishStore): Promise<RuntimeStatu
   if (installedVersion === RUNTIME_VERSION && missingFiles.length === 0 && extraFiles.length === 0) {
     return { status: 'ok', message: 'Runtime 已就绪', installedVersion, expectedVersion: RUNTIME_VERSION }
   }
+  if (compareVersions(installedVersion, RUNTIME_VERSION) > 0) {
+    return {
+      status: 'outdated', installedNewer: true,
+      message: `星火工程 Runtime（${installedVersion}）比当前工具内置（${RUNTIME_VERSION}）更新，工具侧过旧`,
+      installedVersion, expectedVersion: RUNTIME_VERSION, installedFiles, sourceFiles, missingFiles, extraFiles,
+    }
+  }
   return { status: 'outdated', message: 'Runtime 可升级', installedVersion, expectedVersion: RUNTIME_VERSION, installedFiles, sourceFiles, missingFiles, extraFiles }
 }
 
-export async function upgradeRuntimeCore(star: PublishStore, files: BundledRuntimeFile[] = RUNTIME_FILES): Promise<{ ok: true; version: string; targetDir: string; copiedFiles: string[] }> {
+export async function upgradeRuntimeCore(star: PublishStore, files: BundledRuntimeFile[] = RUNTIME_FILES): Promise<UpgradeRuntimeResult> {
   const dir = 'src/DjuiRuntime'
+  const current = (await star.readText(dir + '/djui_version.txt'))?.trim()
+  if (current && compareVersions(current, RUNTIME_VERSION) > 0) {
+    return {
+      ok: false, code: 'RUNTIME_DOWNGRADE_BLOCKED',
+      error: `星火工程 Runtime 已是 ${current}，比当前工具内置的 ${RUNTIME_VERSION} 更新`,
+      userAction: '禁止降级：请先在 DJUI 网页执行「检查工作区更新」同步脚本区，让本地发布器与 Runtime 同代后再操作。',
+    }
+  }
   await star.ensureDir(dir)
   for (const entry of await star.listEntries(dir)) if (entry.kind === 'file' && entry.name.endsWith('.cs')) await star.remove(joinPath(dir, entry.name))
   for (const file of files) await star.writeText(joinPath(dir, file.name), file.content)
@@ -273,9 +306,16 @@ export async function upgradeRuntimeCore(star: PublishStore, files: BundledRunti
 export async function publishCore(workspace: PublishStore, star: PublishStore): Promise<PublishCoreResult> {
   await migrateLegacyLayoutCore(workspace, star)
   const runtime = await checkRuntimeCore(star)
-  if (runtime.status !== 'ok') return {
-    ok: false, code: 'RUNTIME_NOT_READY', error: runtime.message,
-    userAction: `DJUI Runtime 状态为 ${runtime.status}（已安装 ${runtime.installedVersion ?? '无'}，需要 ${runtime.expectedVersion ?? RUNTIME_VERSION}）。请询问用户是否允许执行 upgrade-runtime。`,
+  if (runtime.status !== 'ok') {
+    if (runtime.installedNewer) return {
+      ok: false, code: 'PUBLISHER_OUTDATED',
+      error: `星火工程 Runtime 已是 ${runtime.installedVersion ?? '未知版本'}，比本发布器内置的 ${RUNTIME_VERSION} 更新`,
+      userAction: '本地发布器过旧：请让用户在 DJUI 网页执行「检查工作区更新」同步脚本区后再发布。禁止执行 upgrade-runtime（会把 Runtime 降级）。',
+    }
+    return {
+      ok: false, code: 'RUNTIME_NOT_READY', error: runtime.message,
+      userAction: `DJUI Runtime 状态为 ${runtime.status}（已安装 ${runtime.installedVersion ?? '无'}，需要 ${runtime.expectedVersion ?? RUNTIME_VERSION}）。请询问用户是否允许执行 upgrade-runtime。`,
+    }
   }
   const patches = await applyProjectPatchesCore(workspace)
   if (!patches.ok || patches.blockers.length) return { ok: false, code: 'INVALID_WORKSPACE', error: patches.blockers.join('\n') || '补丁应用失败' }

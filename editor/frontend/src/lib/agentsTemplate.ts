@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.7.2'
+export const AGENTS_VERSION = '0.7.3'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -351,7 +351,8 @@ node .\\脚本区\\djui-publish.mjs publish --json
 - 目标路径保存在 \`.djui/publish.json\`；若 CLI 返回 \`MISSING_TARGET_CONFIG\`，AI 必须停止并向用户索取路径，再执行 \`configure\`
 - CLI 返回 JSON 和退出码，AI 应根据 \`ok\`、\`code\`、\`userAction\` 处理；不得忽略失败继续声称已发布
 - \`publish\` 会严格镜像资源和页面，目标侧已不在工作区的旧文件会被删除
-- Runtime 缺失或过期时，\`publish\` 会返回 \`RUNTIME_NOT_READY\` 并阻止发布；AI 必须询问用户「是否允许更新 Runtime」，得到明确同意后才可执行 \`node .\\脚本区\\djui-publish.mjs upgrade-runtime --json\`，再重新发布
+- Runtime 缺失或过期时，\`publish\` 会返回 \`RUNTIME_NOT_READY\`（退出码 20）并阻止发布；AI 必须询问用户「是否允许更新 Runtime」，得到明确同意后才可执行 \`node .\\脚本区\\djui-publish.mjs upgrade-runtime --json\`，再重新发布
+- 若返回 \`PUBLISHER_OUTDATED\`（退出码 25），说明本地发布器比星火工程已装的 Runtime 旧（通常发生在用户已从网页更新 Runtime 之后）；此时**禁止**执行 \`upgrade-runtime\`（会把 Runtime 降级并损坏工程），必须停止发布，请用户在 DJUI 网页执行「检查工作区更新」同步脚本区后重试
 - \`upgrade-runtime\` 与 \`publish\` 必须分开调用；不得自动覆盖星火工程的 Runtime
 - 当编辑器提示更新脚本区并执行同步时，会自动把旧星火工程内的布局源迁入工作区；迁移只在工作区尚无 \`.djui/layout/project.json\` 时执行，绝不会覆盖现有编辑源
 

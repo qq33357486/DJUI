@@ -1640,6 +1640,16 @@ var RUNTIME_FILES = [
 ];
 
 // src/lib/publishCore.ts
+function compareVersions(a, b) {
+  const parse = (v) => v.trim().split(".").map((part) => parseInt(part, 10));
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
 var PUBLISH_CONFIG_FILE = ".djui/publish.json";
 var UI_LAYOUT_DIR = ".djui/layout";
 var PROJECT_FILE = UI_LAYOUT_DIR + "/project.json";
@@ -1823,10 +1833,32 @@ async function checkRuntimeCore(star) {
   if (installedVersion === RUNTIME_VERSION && missingFiles.length === 0 && extraFiles.length === 0) {
     return { status: "ok", message: "Runtime \u5DF2\u5C31\u7EEA", installedVersion, expectedVersion: RUNTIME_VERSION };
   }
+  if (compareVersions(installedVersion, RUNTIME_VERSION) > 0) {
+    return {
+      status: "outdated",
+      installedNewer: true,
+      message: `\u661F\u706B\u5DE5\u7A0B Runtime\uFF08${installedVersion}\uFF09\u6BD4\u5F53\u524D\u5DE5\u5177\u5185\u7F6E\uFF08${RUNTIME_VERSION}\uFF09\u66F4\u65B0\uFF0C\u5DE5\u5177\u4FA7\u8FC7\u65E7`,
+      installedVersion,
+      expectedVersion: RUNTIME_VERSION,
+      installedFiles,
+      sourceFiles,
+      missingFiles,
+      extraFiles
+    };
+  }
   return { status: "outdated", message: "Runtime \u53EF\u5347\u7EA7", installedVersion, expectedVersion: RUNTIME_VERSION, installedFiles, sourceFiles, missingFiles, extraFiles };
 }
 async function upgradeRuntimeCore(star, files = RUNTIME_FILES) {
   const dir = "src/DjuiRuntime";
+  const current = (await star.readText(dir + "/djui_version.txt"))?.trim();
+  if (current && compareVersions(current, RUNTIME_VERSION) > 0) {
+    return {
+      ok: false,
+      code: "RUNTIME_DOWNGRADE_BLOCKED",
+      error: `\u661F\u706B\u5DE5\u7A0B Runtime \u5DF2\u662F ${current}\uFF0C\u6BD4\u5F53\u524D\u5DE5\u5177\u5185\u7F6E\u7684 ${RUNTIME_VERSION} \u66F4\u65B0`,
+      userAction: "\u7981\u6B62\u964D\u7EA7\uFF1A\u8BF7\u5148\u5728 DJUI \u7F51\u9875\u6267\u884C\u300C\u68C0\u67E5\u5DE5\u4F5C\u533A\u66F4\u65B0\u300D\u540C\u6B65\u811A\u672C\u533A\uFF0C\u8BA9\u672C\u5730\u53D1\u5E03\u5668\u4E0E Runtime \u540C\u4EE3\u540E\u518D\u64CD\u4F5C\u3002"
+    };
+  }
   await star.ensureDir(dir);
   for (const entry of await star.listEntries(dir)) if (entry.kind === "file" && entry.name.endsWith(".cs")) await star.remove(joinPath(dir, entry.name));
   for (const file of files) await star.writeText(joinPath(dir, file.name), file.content);
@@ -1843,12 +1875,20 @@ Do not edit manually - use DJUI Editor to update.
 async function publishCore(workspace, star) {
   await migrateLegacyLayoutCore(workspace, star);
   const runtime = await checkRuntimeCore(star);
-  if (runtime.status !== "ok") return {
-    ok: false,
-    code: "RUNTIME_NOT_READY",
-    error: runtime.message,
-    userAction: `DJUI Runtime \u72B6\u6001\u4E3A ${runtime.status}\uFF08\u5DF2\u5B89\u88C5 ${runtime.installedVersion ?? "\u65E0"}\uFF0C\u9700\u8981 ${runtime.expectedVersion ?? RUNTIME_VERSION}\uFF09\u3002\u8BF7\u8BE2\u95EE\u7528\u6237\u662F\u5426\u5141\u8BB8\u6267\u884C upgrade-runtime\u3002`
-  };
+  if (runtime.status !== "ok") {
+    if (runtime.installedNewer) return {
+      ok: false,
+      code: "PUBLISHER_OUTDATED",
+      error: `\u661F\u706B\u5DE5\u7A0B Runtime \u5DF2\u662F ${runtime.installedVersion ?? "\u672A\u77E5\u7248\u672C"}\uFF0C\u6BD4\u672C\u53D1\u5E03\u5668\u5185\u7F6E\u7684 ${RUNTIME_VERSION} \u66F4\u65B0`,
+      userAction: "\u672C\u5730\u53D1\u5E03\u5668\u8FC7\u65E7\uFF1A\u8BF7\u8BA9\u7528\u6237\u5728 DJUI \u7F51\u9875\u6267\u884C\u300C\u68C0\u67E5\u5DE5\u4F5C\u533A\u66F4\u65B0\u300D\u540C\u6B65\u811A\u672C\u533A\u540E\u518D\u53D1\u5E03\u3002\u7981\u6B62\u6267\u884C upgrade-runtime\uFF08\u4F1A\u628A Runtime \u964D\u7EA7\uFF09\u3002"
+    };
+    return {
+      ok: false,
+      code: "RUNTIME_NOT_READY",
+      error: runtime.message,
+      userAction: `DJUI Runtime \u72B6\u6001\u4E3A ${runtime.status}\uFF08\u5DF2\u5B89\u88C5 ${runtime.installedVersion ?? "\u65E0"}\uFF0C\u9700\u8981 ${runtime.expectedVersion ?? RUNTIME_VERSION}\uFF09\u3002\u8BF7\u8BE2\u95EE\u7528\u6237\u662F\u5426\u5141\u8BB8\u6267\u884C upgrade-runtime\u3002`
+    };
+  }
   const patches = await applyProjectPatchesCore(workspace);
   if (!patches.ok || patches.blockers.length) return { ok: false, code: "INVALID_WORKSPACE", error: patches.blockers.join("\n") || "\u8865\u4E01\u5E94\u7528\u5931\u8D25" };
   if (!await workspace.dirExists("\u6210\u54C1\u7D20\u6750")) return { ok: false, code: "INVALID_WORKSPACE", error: "\u6210\u54C1\u7D20\u6750\u76EE\u5F55\u4E0D\u5B58\u5728" };
@@ -2045,14 +2085,15 @@ async function main() {
     return runtime.status === "ok" ? 0 : 20;
   }
   if (command === "upgrade-runtime") {
-    output(await upgradeRuntimeCore(star), asJson);
-    return 0;
+    const result = await upgradeRuntimeCore(star);
+    output(result, asJson);
+    return result.ok ? 0 : 26;
   }
   if (command === "publish") {
     try {
       const result = await publishCore(workspace, star);
       output(result, asJson);
-      return result.ok ? 0 : result.code === "RUNTIME_NOT_READY" ? 20 : 30;
+      return result.ok ? 0 : result.code === "RUNTIME_NOT_READY" ? 20 : result.code === "PUBLISHER_OUTDATED" ? 25 : 30;
     } catch (error) {
       output({ ok: false, code: "PUBLISH_FAILED", error: error instanceof Error ? error.message : String(error) }, asJson);
       return 40;

@@ -53,6 +53,8 @@ export interface RuntimeStatus {
   message: string
   installedVersion?: string
   expectedVersion?: string
+  /** 已安装版本比编辑器内置的更新（本地工具侧过旧），此时不应引导覆盖安装 */
+  installedNewer?: boolean
   installedDir?: string
   installedFiles?: string[]
   sourceFiles?: string[]
@@ -63,7 +65,9 @@ export interface RuntimeStatus {
 
 export interface InitRuntimeResult {
   ok: boolean
+  code?: string
   error?: string
+  userAction?: string
   version?: string
   targetDir?: string
   copiedFiles?: string[]
@@ -687,6 +691,16 @@ export async function checkScriptsUpdate(_workspacePath: string): Promise<Script
   const installedVersion = installedVersionText.trim()
   if (installedVersion !== SCRIPTS_VERSION) {
     return { status: 'outdated', latestVersion: SCRIPTS_VERSION, installedVersion, message: '脚本区需要更新' }
+  }
+
+  // 版本号一致也要校验发布器本体：发布器内嵌整套 Runtime，
+  // 万一 RUNTIME_VERSION 升了而脚本区版本号漏升（或文件被改动），仍能据此发现。
+  const bundledPublisher = SCRIPT_FILES.find(file => file.path === 'djui-publish.mjs')
+  if (bundledPublisher) {
+    const installedPublisher = await fs.readFileText(ws, '脚本区/djui-publish.mjs')
+    if (installedPublisher !== bundledPublisher.content) {
+      return { status: 'outdated', latestVersion: SCRIPTS_VERSION, installedVersion, message: '脚本区的发布器文件与当前版本不一致，需要更新' }
+    }
   }
 
   return { status: 'ok', latestVersion: SCRIPTS_VERSION, installedVersion, message: '脚本区已是最新' }

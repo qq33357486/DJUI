@@ -58,12 +58,16 @@ cd editor/frontend; npm run build      # 产物在 frontend/dist
 # Docker 镜像用 Nginx serve dist/
 ```
 
-## 三、Runtime 同步
+## 三、Runtime 同步与发布器绑定（重点）
 
 - 源在 `runtime/*.cs`
 - 通过前端 `api/client.ts` 的 `initRuntime()` 复制到 `<星火工程>/src/DjuiRuntime/`
 - 版本号在 `lib/runtimeBundle.ts` 的 `RUNTIME_VERSION` 常量（`bundledAssets.ts` 仅做转出口）；新增 runtime 文件要在同文件 `RUNTIME_FILES` 登记
 - 升级 Runtime 时同步升 `RUNTIME_VERSION`，前端 TopBar 会出现"更新 Runtime"提示
+- **发布器与 Runtime 必须同代**：`scripts/djui-publish.mjs` 是 `src/cli/djui-publish.ts` + `publishCore.ts` + `runtimeBundle.ts` 的打包产物（内嵌整套 Runtime），由 `npm run build:publisher` 生成（dev/typecheck/build 前置钩子自动执行）。改了 runtime 或 publishCore 后务必让构建跑完再提交，否则工作区 CLI 携旧版 Runtime
+- **脚本区版本线派生自 Runtime**：`SCRIPTS_VERSION = <scripts/version.txt>+rt<RUNTIME_VERSION>`（见 `bundledAssets.ts`）。`scripts/version.txt` 只维护素材脚本（green_key_to_png.py 等）的版本；`RUNTIME_VERSION` 一变，脚本区版本必然变化，网页必然提醒同步，杜绝「Runtime 升了、发布器没跟上」
+- `checkScriptsUpdate()` 除比对版本号外还逐字校验工作区 `脚本区/djui-publish.mjs` 内容，兜底防版本号漏升
+- `upgradeRuntimeCore()` 拒绝降级（星火工程已装版本比内置新时报 `RUNTIME_DOWNGRADE_BLOCKED`）；发布前检查发现同类情况返回 `PUBLISHER_OUTDATED`，指引先在网页同步脚本区
 
 ## 四、AGENTS.md 规范更新机制（重点）
 
@@ -74,7 +78,7 @@ cd editor/frontend; npm run build      # 产物在 frontend/dist
    - **必须升级** `AGENTS_VERSION`（小修 patch，新增分类 minor，删除/重命名分类 major）
 2. **触发更新提醒**：编辑器启动时前端调用 `api/client.ts` 的 `checkAgentsUpdate()`，
    直接经 File System Access API 读取 workspace `AGENTS.md` 顶部的 `<!-- DJUI-AGENTS-VERSION: x.x.x -->` 标记，
-   与 `AGENTS_VERSION` 比较。脚本区（`scripts/version.txt` ↔ 工作区 `脚本区/version.txt`）过期会合并到同一提醒。
+   与 `AGENTS_VERSION` 比较。脚本区（工作区 `脚本区/version.txt` ↔ `SCRIPTS_VERSION`，格式如 `0.2.1+rt0.7.17`）过期会合并到同一提醒。
 3. **用户点更新**：TopBar 右侧出现橙色徽章（`SyncOutlined`），点击弹窗确认，
    调用 `updateAgents()` 把 `buildAgentsMd()` 整文件写入 workspace。
    旧文件备份为 `AGENTS.md.bak`。

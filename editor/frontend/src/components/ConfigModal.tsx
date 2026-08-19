@@ -103,6 +103,14 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
       if (result.ok) {
         message.success(`Runtime v${result.version} 已安装`)
         checkRuntime()
+        // Runtime 与本地发布器必须同代：网页更新 Runtime 后，旧发布器会因内嵌版本落后而拒绝发布，
+        // 这里主动提醒同步脚本区，避免用户在网页走完流程、AI 侧却报发布器过旧。
+        if (projectContext.ws) {
+          const scripts = await api.checkScriptsUpdate('')
+          if (scripts.status === 'outdated' || scripts.status === 'missing') {
+            message.warning('本地发布器需要同步：请执行「检查工作区更新」更新脚本区，否则 AI 命令行发布会因版本不符被阻止', 6)
+          }
+        }
       } else {
         message.error(result.error || '安装失败')
       }

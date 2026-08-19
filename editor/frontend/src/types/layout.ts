@@ -98,6 +98,7 @@ export interface DjuiText {
 export interface DjuiButton {
   imageHover?: string | null
   imagePressed?: string | null
+  imageDisabled?: string | null
 }
 
 export interface DjuiProgress {

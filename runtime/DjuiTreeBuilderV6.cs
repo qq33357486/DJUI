@@ -25,15 +25,17 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     public DjuiLayoutSessionV6 Session { get; }
     public bool OwnsHost { get; }
     private readonly DjuiImageVisualLayerV6 _imageVisuals;
+    private readonly DjuiButtonStateRegistryV6 _buttonStates;
     private readonly List<IDisposable> _bindingRegistrations;
 
-    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, List<IDisposable> bindingRegistrations)
+    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
     {
         Host = host;
         Root = root;
         Session = session;
         OwnsHost = ownsHost;
         _imageVisuals = imageVisuals;
+        _buttonStates = buttonStates;
         _bindingRegistrations = bindingRegistrations;
     }
 
@@ -48,6 +50,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         foreach (var control in Session.Controls.Values) DjuiEffectPlayer.Stop(control);
         Session.Dispose();
         _imageVisuals.Dispose();
+        _buttonStates.Dispose();
         Root.Dispose();
         Host.RemoveFromVisualTreeAndParent();
         Host.Dispose();
@@ -76,28 +79,30 @@ public static class DjuiTreeBuilderV6
 
         var session = new DjuiLayoutSessionV6(windowInstanceId, project, page);
         var imageVisuals = new DjuiImageVisualLayerV6();
+        var buttonStates = new DjuiButtonStateRegistryV6(imageVisuals);
         var bindingRegistrations = new List<IDisposable>();
         Panel? root = null;
         try
         {
-            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, bindingRegistrations);
+            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, buttonStates, bindingRegistrations);
             root.Parent = host;
-            session.SetNodeUpdater((node, control) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals));
+            session.SetNodeUpdater((node, control) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, buttonStates));
             session.Relayout();
-            return new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, bindingRegistrations);
+            return new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, buttonStates, bindingRegistrations);
         }
         catch
         {
             foreach (var registration in bindingRegistrations) registration.Dispose();
             session.Dispose();
             imageVisuals.Dispose();
+            buttonStates.Dispose();
             if (ownsHost) host.Dispose();
             else root?.Dispose();
             throw;
         }
     }
 
-    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, List<IDisposable> bindingRegistrations)
+    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
     {
         if (string.Equals(node.StarType, "TemplateInstance", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"DJUI v6: template node '{node.Id}' was not expanded.");
@@ -116,7 +121,7 @@ public static class DjuiTreeBuilderV6
             _ => throw new NotSupportedException($"DJUI v6: node '{node.Id}' uses unsupported starType '{node.StarType}'.")
         };
 
-        ApplyNodeFields(control, node, defaultFont, imageVisuals);
+        ApplyNodeFields(control, node, defaultFont, imageVisuals, buttonStates);
         ApplyInteraction(control, node.Interaction);
         ApplyEffects(control, node.Effects);
         session.Register(node.Id, control);
@@ -127,20 +132,20 @@ public static class DjuiTreeBuilderV6
 
         foreach (var childNode in node.Children)
         {
-            var child = BuildNode(childNode, session, defaultFont, imageVisuals, bindingRegistrations);
+            var child = BuildNode(childNode, session, defaultFont, imageVisuals, buttonStates, bindingRegistrations);
             child.Parent = control;
         }
         return control;
     }
 
-    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals)
+    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates)
     {
         ApplyBasic(control, node.Basic);
         ApplyTransformFields(control, node.Transform);
         ApplyAppearance(control, node.Appearance);
         imageVisuals.Apply(node.Id, control, node.Appearance);
         ApplyText(control, node.Text, defaultFont);
-        ApplyButton(control, node.Button);
+        ApplyButton(control, node.Button, node.Appearance, node.Transform, imageVisuals, buttonStates);
         ApplyProgress(control, node.Progress);
         ApplyLayout(control, node.Layout);
     }
@@ -214,11 +219,10 @@ public static class DjuiTreeBuilderV6
         }
         else if (control is Button button && text.Text != null)
         {
-            const string labelName = "__djui.v6.visual.button-label";
-            var buttonLabel = button.Children?.OfType<Label>().FirstOrDefault(child => child.Name == labelName);
+            var buttonLabel = button.Children?.OfType<Label>().FirstOrDefault(child => child.Name == DjuiButtonStateV6.ButtonLabelName);
             if (buttonLabel == null)
             {
-                buttonLabel = new Label { Name = labelName, IsStatic = true };
+                buttonLabel = new Label { Name = DjuiButtonStateV6.ButtonLabelName, IsStatic = true };
                 buttonLabel.FullScreen();
                 buttonLabel.Parent = button;
             }
@@ -239,11 +243,12 @@ public static class DjuiTreeBuilderV6
         if (!string.IsNullOrEmpty(text.TextOverflow) && Enum.TryParse<TextTrimming>(text.TextOverflow, out var trimming)) label.TextTrimming = trimming;
     }
 
-    private static void ApplyButton(Control control, DjuiButtonV6? button)
+    private static void ApplyButton(Control control, DjuiButtonV6? button, DjuiAppearanceV6? appearance, DjuiTransformV6? transform, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates)
     {
-        if (control is not Button target || button == null) return;
-        if (!string.IsNullOrEmpty(button.ImageHover)) target.ImageHover = button.ImageHover;
-        if (!string.IsNullOrEmpty(button.ImagePressed)) target.ImagePressed = button.ImagePressed;
+        // 引擎 Button 的 ImageHover/ImagePressed 在 v6 下不可用（图片画在 visual 子 Panel，宿主 Image 为空，
+        // 且引擎没有 ImageDisabled），四态换图与禁用灰化全部由 DjuiButtonStateV6 在 visual 层自管。
+        if (control is not Button target) return;
+        buttonStates.Attach(target, button, appearance?.Image, transform?.Opacity ?? 1f, appearance?.Desaturated ?? false);
     }
 
     private static void ApplyProgress(Control control, DjuiProgressV6? progress)

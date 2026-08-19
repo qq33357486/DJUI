@@ -68,6 +68,7 @@ public static class DjuiResponsiveResolverV6
             case "text.textWrap": (node.Text ??= new()).TextWrap = Bool(value, path); break;
             case "button.imageHover": (node.Button ??= new()).ImageHover = NullableString(value, path); break;
             case "button.imagePressed": (node.Button ??= new()).ImagePressed = NullableString(value, path); break;
+            case "button.imageDisabled": (node.Button ??= new()).ImageDisabled = NullableString(value, path); break;
             case "progress.value": (node.Progress ??= new()).Value = Unit(value, path); break;
             default: throw new InvalidDataException($"DJUI v6: 不允许响应式覆盖字段: {path}");
         }

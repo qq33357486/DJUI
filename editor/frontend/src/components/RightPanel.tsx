@@ -309,7 +309,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
       )}
 
       <Collapse
-        defaultActiveKey={['common', 'template', 'geometry', 'anchor', 'appearance', 'text', 'interaction']}
+        defaultActiveKey={['common', 'template', 'geometry', 'anchor', 'appearance', 'buttonStates', 'text', 'interaction']}
         ghost
         size="small"
         items={filterItems([
@@ -579,6 +579,37 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
               </Space>
             ),
           },
+          node.starType === 'Button' ? {
+            key: 'buttonStates', label: '按钮状态',
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <ButtonStatePreview node={node} />
+                {(() => {
+                  const btn = node.button ?? {}
+                  const rows = [
+                    { label: '悬停图', field: 'button.imageHover', value: btn.imageHover },
+                    { label: '按下图', field: 'button.imagePressed', value: btn.imagePressed },
+                    { label: '禁用图', field: 'button.imageDisabled', value: btn.imageDisabled },
+                  ] as const
+                  return rows.map(row => (
+                    <FieldRow key={row.field} label={row.label}>
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Button size="small" style={{ flex: 1, textAlign: 'left', overflow: 'hidden' }} onClick={() => openAssetPicker(row.field)}>
+                          {row.value ? `📷 ${String(row.value).split('/').pop()}` : '📷 选择图片'}
+                        </Button>
+                        {row.value && (
+                          <Button size="small" icon={<DeleteOutlined />} title="清除" onClick={() => updateNodeField(node.id, row.field, null)} />
+                        )}
+                      </Space.Compact>
+                    </FieldRow>
+                  ))
+                })()}
+                <div style={{ fontSize: 10, color: '#5b6378', lineHeight: 1.6 }}>
+                  悬停/按下未设置图时保持正常图；禁用未设置图时运行时自动灰化变淡。素材建议按 btn_功能_状态 同尺寸成套。
+                </div>
+              </Space>
+            ),
+          } : null,
           (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
             key: 'text', label: '文本',
             children: (
@@ -727,6 +758,63 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
           },
         ])}
       />
+    </div>
+  )
+}
+
+// === 按钮状态图（hover/pressed/disabled）迷你预览 ===
+function ButtonStateThumb({ label, path, fallbackPath, grayFallback }: { label: string; path?: string | null; fallbackPath?: string | null; grayFallback?: boolean }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const resolvedPath = path || fallbackPath || null
+  useEffect(() => {
+    let alive = true
+    if (resolvedPath) {
+      api.enginePathToUrl(resolvedPath)
+        .then(u => { if (alive) setUrl(u) })
+        .catch(() => { if (alive) setUrl(null) })
+    } else {
+      setUrl(null)
+    }
+    return () => { alive = false }
+  }, [resolvedPath])
+  const showFallbackLook = !!grayFallback && !path && !!url
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{
+        height: 34, borderRadius: 4, border: '1px solid #2a3142', background: '#171b26',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative',
+      }}>
+        {url ? (
+          <img
+            src={url}
+            alt={label}
+            style={{
+              maxWidth: '100%', maxHeight: '100%',
+              filter: showFallbackLook ? 'grayscale(1)' : undefined,
+              opacity: showFallbackLook ? 0.5 : 1,
+            }}
+          />
+        ) : (
+          <span style={{ fontSize: 10, color: '#5b6378' }}>未设置</span>
+        )}
+        {showFallbackLook && (
+          <span style={{ position: 'absolute', bottom: 0, right: 0, fontSize: 9, color: '#c0c6d4', background: 'rgba(30,34,46,0.85)', padding: '0 2px', borderRadius: 2 }}>自动</span>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: '#9aa3b4', marginTop: 2 }}>{label}</div>
+    </div>
+  )
+}
+
+function ButtonStatePreview({ node }: { node: any }) {
+  const app = node.appearance ?? {}
+  const btn = node.button ?? {}
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
+      <ButtonStateThumb label="正常" path={app.image} />
+      <ButtonStateThumb label="悬停" path={btn.imageHover} />
+      <ButtonStateThumb label="按下" path={btn.imagePressed} />
+      <ButtonStateThumb label="禁用" path={btn.imageDisabled} fallbackPath={app.image} grayFallback />
     </div>
   )
 }

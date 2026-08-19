@@ -756,6 +756,9 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   // 异步获取引擎图片 URL（pure-frontend FS API）
   const imgUrl = useEngineImage(app_preview.image ?? null)
   const image = useImage(imgUrl)
+  // 按钮禁用图：禁用中的按钮用它替代正常图渲染（无禁用图时走灰化兜底）
+  const disabledImgUrl = useEngineImage(node.starType === 'Button' ? (node.button?.imageDisabled ?? null) : null)
+  const disabledImage = useImage(disabledImgUrl)
 
   // 编辑器隐藏：不渲染（子节点也跟着隐藏）
   if (node.editorHidden) return null
@@ -888,14 +891,22 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
 
   const hasImage = !!image
 
+  // 禁用中的按钮：配置了禁用图则直接替换正常图；否则灰化兜底（降透明 + 灰罩 + 角标）
+  const isButtonDisabled = node.starType === 'Button' && node.basic?.disabled === true
+  const showDisabledImage = isButtonDisabled && !!disabledImage
+  const effectiveImage = showDisabledImage ? disabledImage : image
+  const effectiveImagePath = showDisabledImage ? node.button?.imageDisabled : app.image
+  const disabledFallback = isButtonDisabled && !showDisabledImage
+  const renderOpacity = disabledFallback ? opacity * 0.55 : opacity
+
   // 背景色：如果有设背景就用；有图片时不画底色
   // 透明背景控件不画底色——仅用 stroke 边框标识（辅助线），避免实心填充盖住下层素材
   const isTransparent = isTransparentColor(bgColor)
   const fillColor = hasImage
     ? undefined
     : (!isTransparent ? (bgColor ?? undefined) : undefined)
-  const sliceEdges = app.image ? sliceMeta[app.image] : undefined
-  const useNineSlice = !!(image && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
+  const sliceEdges = effectiveImagePath ? sliceMeta[effectiveImagePath] : undefined
+  const useNineSlice = !!(effectiveImage && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
   const borderThickness = positiveNumber(app.borderThickness)
   const sceneFrame = node.sceneFrame
 
@@ -952,21 +963,21 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         }}
       />
       {/* 图片渲染：在 Rect 上层，铺满控件框 */}
-      {hasImage && image && useNineSlice && sliceEdges ? (
+      {hasImage && effectiveImage && useNineSlice && sliceEdges ? (
         <NineSliceImage
-          image={image}
+          image={effectiveImage}
           x={displayX}
           y={displayY}
           width={width}
           height={height}
           rotation={rotation}
-          opacity={opacity}
+          opacity={renderOpacity}
           edges={sliceEdges}
         />
-      ) : hasImage && image && (() => {
+      ) : hasImage && effectiveImage && (() => {
         const fit = computeImageFit(
-          app.sourceSize?.width ?? image.naturalWidth ?? image.width,
-          app.sourceSize?.height ?? image.naturalHeight ?? image.height,
+          app.sourceSize?.width ?? effectiveImage.naturalWidth ?? effectiveImage.width,
+          app.sourceSize?.height ?? effectiveImage.naturalHeight ?? effectiveImage.height,
           width,
           height,
           app.imageFit ?? 'stretch',
@@ -975,7 +986,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         )
         return (
           <KImage
-            image={image}
+            image={effectiveImage}
             x={displayX + fit.x}
             y={displayY + fit.y}
             width={fit.width}
@@ -985,7 +996,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             cropWidth={fit.crop?.width}
             cropHeight={fit.crop?.height}
             rotation={rotation}
-            opacity={opacity}
+            opacity={renderOpacity}
             listening={false}
           />
         )
@@ -997,7 +1008,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           width={width}
           height={height}
           rotation={rotation}
-          opacity={opacity}
+          opacity={renderOpacity}
           stroke={app.borderColor ?? '#FFFFFFFF'}
           strokeWidth={borderThickness}
           cornerRadius={app.cornerRadius ?? 0}
@@ -1043,10 +1054,30 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             wrap={preview.wrap}
             ellipsis={preview.ellipsis}
             rotation={rotation}
+            opacity={renderOpacity}
             listening={false}
           />
         )
       })()}
+      {/* 禁用灰化兜底：未配置禁用图时叠加灰罩，模拟运行时的灰度+降透明 */}
+      {disabledFallback && (
+        <Rect
+          x={displayX}
+          y={displayY}
+          width={width}
+          height={height}
+          rotation={rotation}
+          fill="rgba(128,128,128,0.4)"
+          listening={false}
+        />
+      )}
+      {/* 禁用角标：无论是否配置禁用图，禁用中的按钮都带「禁」标识 */}
+      {isButtonDisabled && (
+        <Group x={displayX} y={displayY} listening={false}>
+          <Rect width={26} height={16} fill="#6b7280" cornerRadius={2} opacity={0.92} />
+          <Text text="禁" fontSize={10} width={26} height={16} align="center" verticalAlign="middle" fill="#ffffff" />
+        </Group>
+      )}
       {/* 进度条预览（Progress 类型）*/}
       {node.starType === 'Progress' && (() => {
         const prog = node.progress ?? {}
@@ -2189,27 +2220,18 @@ function computeRenderDims(
               // 为避免画出错误参考线，此处暂不显示（节点本体仍可直接编辑）。
               const selectedPath = findNodePath(page.root, selectedIds[0])
               if (selectedPath?.slice(0, -1).some(item => !!item.sceneFrame)) return null
-              // 父节点矩形（root 的子节点 → 实际预览分辨率；深层 → 用 solver 算父节点矩形）
-              const parent = findParent(page.root, selectedIds[0])
-              let parentRect
-              if (parent && parent.id !== page.root.id) {
-                // 深层节点：用 solver 算父节点矩形
-                const grandparent = findParent(page.root, parent.id)
-                const gpRect = grandparent
-                  ? solveLayout(grandparent,
-                      grandparent.id === page.root.id
-                        ? { x: 0, y: 0, width: actualW, height: actualH }
-                        : { x: 0, y: 0, width: actualW, height: actualH },
-                      actualW, actualH).rect
-                  : { x: 0, y: 0, width: actualW, height: actualH }
-                parentRect = solveLayout(parent, gpRect, actualW, actualH).rect
-              } else {
-                parentRect = { x: 0, y: 0, width: actualW, height: actualH }
+              // 父节点矩形：从画布矩形出发沿路径逐级求解（跳过 root——root 无 transform，
+              // 进 solver 会被解成 100×100 兜底矩形，导致锚点标记整体错位）。
+              // 这与 NodeShape 渲染链的 parentRect 递归完全一致。
+              let parentRect = { x: 0, y: 0, width: actualW, height: actualH }
+              for (let i = 1; i < (selectedPath?.length ?? 1) - 1; i++) {
+                parentRect = solveLayout(selectedPath![i], parentRect, actualW, actualH).rect
               }
               return (
                 <AnchorOverlay
                   node={selNode}
                   parentRect={parentRect}
+                  safeRect={safeRect}
                   designW={actualW}
                   designH={actualH}
                   invScale={invScale}
@@ -2384,19 +2406,21 @@ function computeRenderDims(
 
 // === 锚点/拉伸/Pivot 可视化叠加层 ===
 // 在主 Group 内绘制（受视口缩放影响）：
-// 1. 参考矩形（屏幕或父节点）虚线框
-// 2. 锚点位置标记（4 个小圆点）
-// 3. 拉伸连线（拉伸模式下从锚定边到控件）
-// 4. Pivot 十字标
+// 1. 参考线：经过锚点、贯穿参考物的水平/垂直虚线（不再画整框）
+// 2. 锚点十字 + 「锚点」文字标签（标签避让到控件外）
+// 3. 外延线：锚点 → pivot 的横纵两条分量线
+// 4. 拉伸边距线、Pivot 十字标
+// side=None 且无拉伸时不画任何参考元素，最大限度减少干扰。
 interface AnchorOverlayProps {
   node: UiNode
   parentRect: { x: number; y: number; width: number; height: number }
+  safeRect: { x: number; y: number; width: number; height: number } | null
   designW: number
   designH: number
   invScale: number
 }
 
-function AnchorOverlay({ node, parentRect, designW, designH, invScale }: AnchorOverlayProps) {
+function AnchorOverlay({ node, parentRect, safeRect, designW, designH, invScale }: AnchorOverlayProps) {
   const anchor = node.anchor ?? {}
   const target = anchor.target ?? 'parent'
   const sideId = anchor.side ?? DEFAULT_ANCHOR_SIDE
@@ -2404,10 +2428,21 @@ function AnchorOverlay({ node, parentRect, designW, designH, invScale }: AnchorO
   const stretch = node.stretch ?? {}
   const stretchStyle = stretch.style ?? 'None'
 
-  // 参考矩形（屏幕坐标，左上 + 尺寸）
+  // 拉伸轴判断
+  const hStretch = stretchStyle === 'Horizontal' || stretchStyle === 'Both'
+  const vStretch = stretchStyle === 'Vertical' || stretchStyle === 'Both'
+  const margins = stretch.margins ?? { left: 0, right: 0, top: 0, bottom: 0 }
+
+  // 无锚定且无拉伸：什么都不画，只保留选中框与 pivot 标（选中框由节点本体绘制）
+  const anchored = sideId !== 'None'
+  if (!anchored && !hStretch && !vStretch) return null
+
+  // 参考矩形（屏幕坐标，左上 + 尺寸）：锚定参考线/锚点定位的基准
   const ref = target === 'screen'
     ? { x: 0, y: 0, width: designW, height: designH }
-    : parentRect
+    : target === 'safe' && safeRect
+      ? safeRect
+      : parentRect
 
   // 锚点位置（屏幕坐标）
   // nx: 0=左 0.5=中 1=右 → 屏幕 X
@@ -2423,29 +2458,70 @@ function AnchorOverlay({ node, parentRect, designW, designH, invScale }: AnchorO
   const nh = solved.rect.height
 
   // pivot 屏幕位置
-  const pivot = node.transform?.pivot ?? DEFAULT_PIVOT
   const pivotX = solved.pivotX
   const pivotY = solved.pivotY
 
   const dotColor = '#ffaa44'
   const lineColor = '#5ab9ff'
   const pivotColor = '#ff4d8f'
+  // 外延线分色：横向与纵向分量一眼可分
+  const extHColor = '#64d2ff'
+  const extVColor = '#ffb15e'
 
-  // 拉伸轴判断
-  const hStretch = stretchStyle === 'Horizontal' || stretchStyle === 'Both'
-  const vStretch = stretchStyle === 'Vertical' || stretchStyle === 'Both'
-  const margins = stretch.margins ?? { left: 0, right: 0, top: 0, bottom: 0 }
+  // 「锚点」标签避让控件：默认在十字右下，若落入控件矩形则推到控件外的上/下侧
+  const labelFontSize = 11 * invScale
+  const labelW = 26 * invScale
+  const labelH = labelFontSize + 2 * invScale
+  let labelX = anchorX + 8 * invScale
+  let labelY = anchorY + 6 * invScale
+  const insideNode = labelX > nx - labelW && labelX < nx + nw && labelY > ny - labelH && labelY < ny + nh
+  if (insideNode) {
+    if (anchorY < ny + nh / 2) labelY = ny - labelH - 3 * invScale
+    else labelY = ny + nh + 3 * invScale
+    labelX = Math.min(Math.max(anchorX - labelW / 2, nx), nx + nw - labelW)
+  }
 
   return (
     <>
-      {/* 参考矩形 */}
-      {target === 'parent' && (
+      {/* target=safe：安全区在画布上没有其他可视化，选中锚定安全区的控件时画出安全区框 */}
+      {target === 'safe' && safeRect && (
         <Rect
-          x={ref.x} y={ref.y} width={ref.width} height={ref.height}
+          x={safeRect.x} y={safeRect.y} width={safeRect.width} height={safeRect.height}
           fill="none" stroke={lineColor} strokeWidth={1 * invScale}
           dash={[4 * invScale, 4 * invScale]} opacity={0.3} listening={false}
         />
       )}
+
+      {/* 参考线：经过锚点、贯穿参考物的水平/垂直虚线（不画整框）。
+          与控件矩形重叠的段落断开跳过——辅助线不遮素材本身的效果预览。 */}
+      {anchored && (() => {
+        const lineStyle: Pick<Konva.LineConfig, 'stroke' | 'strokeWidth' | 'opacity' | 'dash' | 'listening'> = { stroke: lineColor, strokeWidth: 1 * invScale, opacity: 0.3, dash: [5 * invScale, 4 * invScale], listening: false }
+        const refTop = ref.y, refBottom = ref.y + ref.height, refLeft = ref.x, refRight = ref.x + ref.width
+        const segs: Array<{ key: string; pts: number[] }> = []
+        const push = (key: string, x1: number, y1: number, x2: number, y2: number) => {
+          if (Math.abs(x2 - x1) < 0.5 && Math.abs(y2 - y1) < 0.5) return
+          segs.push({ key, pts: [x1, y1, x2, y2] })
+        }
+        if (anchorX >= nx && anchorX <= nx + nw) {
+          // 锚点 X 穿过控件：竖线只画控件上方与下方两段
+          push('ref-v-top', anchorX, refTop, anchorX, ny)
+          push('ref-v-bottom', anchorX, ny + nh, anchorX, refBottom)
+        } else {
+          push('ref-v', anchorX, refTop, anchorX, refBottom)
+        }
+        if (anchorY >= ny && anchorY <= ny + nh) {
+          // 锚点 Y 穿过控件：横线只画控件左侧与右侧两段
+          push('ref-h-left', refLeft, anchorY, nx, anchorY)
+          push('ref-h-right', nx + nw, anchorY, refRight, anchorY)
+        } else {
+          push('ref-h', refLeft, anchorY, refRight, anchorY)
+        }
+        return (
+          <>
+            {segs.map(s => <Line key={s.key} points={s.pts} {...lineStyle} />)}
+          </>
+        )
+      })()}
 
       {/* 拉伸指示：拉伸轴用箭头线 */}
       {hStretch && (
@@ -2477,25 +2553,51 @@ function AnchorOverlay({ node, parentRect, designW, designH, invScale }: AnchorO
         </>
       )}
 
-      {/* 锚点标记（十字 + 圆点，仅非拉伸时显示位置锚点） */}
-      {!hStretch && !vStretch && (
-        <Group x={anchorX} y={anchorY} listening={false}>
-          <Line
-            points={[-6 * invScale, 0, 6 * invScale, 0]}
-            stroke={dotColor} strokeWidth={1.2 * invScale}
-          />
-          <Line
-            points={[0, -6 * invScale, 0, 6 * invScale]}
-            stroke={dotColor} strokeWidth={1.2 * invScale}
-          />
-          <Circle
-            radius={3 * invScale}
-            fill={dotColor}
-            stroke="#000"
-            strokeWidth={0.5 * invScale}
+      {/* 锚点标记（十字 + 圆点）+ 「锚点」文字标签（控件外） */}
+      {anchored && (
+        <Group listening={false}>
+          <Group x={anchorX} y={anchorY}>
+            <Line
+              points={[-6 * invScale, 0, 6 * invScale, 0]}
+              stroke={dotColor} strokeWidth={1.2 * invScale}
+            />
+            <Line
+              points={[0, -6 * invScale, 0, 6 * invScale]}
+              stroke={dotColor} strokeWidth={1.2 * invScale}
+            />
+            <Circle
+              radius={3 * invScale}
+              fill={dotColor}
+              stroke="#000"
+              strokeWidth={0.5 * invScale}
+            />
+          </Group>
+          <Text
+            x={labelX} y={labelY} text="锚点" fontSize={labelFontSize}
+            fill={dotColor} listening={false}
           />
         </Group>
       )}
+
+      {/* 外延线：锚点 → 控件边框的 L 形路径（先纵后横），全程贴素材外沿、不进内部。
+          纵向段从锚点下到控件近端边所在高度，横向段再连到控件近端边框。 */}
+      {anchored && (() => {
+        const lineProps = { strokeWidth: 1.4 * invScale, opacity: 0.85, listening: false } as const
+        // 纵段终点：锚点落到控件近端边的 Y（锚点在控件行内则该段为零）
+        const joinY = anchorY < ny ? ny : anchorY > ny + nh ? ny + nh : anchorY
+        // 横段终点：控件近端边的 X（锚点在控件列内则该段为零）
+        const joinX = anchorX < nx ? nx : anchorX > nx + nw ? nx + nw : anchorX
+        return (
+          <>
+            {Math.abs(joinY - anchorY) > 0.5 && (
+              <Line points={[anchorX, anchorY, anchorX, joinY]} stroke={extVColor} {...lineProps} />
+            )}
+            {Math.abs(joinX - anchorX) > 0.5 && (
+              <Line points={[anchorX, joinY, joinX, joinY]} stroke={extHColor} {...lineProps} />
+            )}
+          </>
+        )
+      })()}
 
       {/* Pivot 十字标（控件中心点） */}
       <Group x={pivotX} y={pivotY} listening={false}>

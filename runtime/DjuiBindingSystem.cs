@@ -53,6 +53,7 @@ public static class DjuiBindingSystem
         return propertyName switch
         {
             "visible" => value => control.Visible = value is bool visible && visible,
+            "disabled" => value => DjuiButtonState.SetDisabled(control, value is bool disabled && disabled),
             "text" when control is Label label => value => label.Text = value?.ToString() ?? "",
             "value" when control is Progress progress => value => progress.Value = Convert.ToSingle(value ?? 0f),
             _ => null,

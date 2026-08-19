@@ -75,6 +75,9 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
         DjuiLayoutSessionV6.ApplyRect(visual, new DjuiRectV6(x, y, width, height));
     }
 
+    /// <summary>取回宿主对应的 visual 子 Panel（未创建图片层时为 null）。按钮状态机用它切换状态图。</summary>
+    internal Panel? GetVisual(Control authored) => _visuals.TryGetValue(authored, out var visual) ? visual : null;
+
     private void Remove(Control authored)
     {
         authored.Image = "";

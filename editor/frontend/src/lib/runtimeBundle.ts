@@ -9,6 +9,7 @@ import DjuiLayoutSolver from '../../../../runtime/DjuiLayoutSolver.cs?raw'
 import DjuiCanvasV6 from '../../../../runtime/DjuiCanvasV6.cs?raw'
 import DjuiLayoutSessionV6 from '../../../../runtime/DjuiLayoutSessionV6.cs?raw'
 import DjuiImageVisualLayerV6 from '../../../../runtime/DjuiImageVisualLayerV6.cs?raw'
+import DjuiButtonStateV6 from '../../../../runtime/DjuiButtonStateV6.cs?raw'
 import DjuiTreeBuilderV6 from '../../../../runtime/DjuiTreeBuilderV6.cs?raw'
 import DjuiModels from '../../../../runtime/DjuiModels.cs?raw'
 import DjuiProtocolV6 from '../../../../runtime/DjuiProtocolV6.cs?raw'
@@ -22,7 +23,7 @@ import DjuiWindowManager from '../../../../runtime/DjuiWindowManager.cs?raw'
 import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.7.16'
+export const RUNTIME_VERSION = '0.7.17'
 
 export interface BundledRuntimeFile {
   name: string
@@ -39,6 +40,7 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiCanvasV6.cs', content: DjuiCanvasV6 },
   { name: 'DjuiLayoutSessionV6.cs', content: DjuiLayoutSessionV6 },
   { name: 'DjuiImageVisualLayerV6.cs', content: DjuiImageVisualLayerV6 },
+  { name: 'DjuiButtonStateV6.cs', content: DjuiButtonStateV6 },
   { name: 'DjuiTreeBuilderV6.cs', content: DjuiTreeBuilderV6 },
   { name: 'DjuiModels.cs', content: DjuiModels },
   { name: 'DjuiProtocolV6.cs', content: DjuiProtocolV6 },

@@ -184,6 +184,7 @@ public sealed class DjuiButtonV6
 {
     [JsonPropertyName("imageHover")] public string? ImageHover { get; set; }
     [JsonPropertyName("imagePressed")] public string? ImagePressed { get; set; }
+    [JsonPropertyName("imageDisabled")] public string? ImageDisabled { get; set; }
 }
 
 public sealed class DjuiProgressV6

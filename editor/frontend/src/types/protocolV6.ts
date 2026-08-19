@@ -40,7 +40,7 @@ export const RESPONSIVE_OVERRIDE_PATHS = [
   'appearance.focalX', 'appearance.focalY', 'appearance.borderThickness', 'appearance.borderColor',
   'text.text', 'text.fontSize', 'text.textColor', 'text.strokeSize', 'text.strokeColor',
   'text.bold', 'text.font', 'text.textWrap',
-  'button.imageHover', 'button.imagePressed', 'progress.value',
+  'button.imageHover', 'button.imagePressed', 'button.imageDisabled', 'progress.value',
 ] as const
 
 export type ResponsiveOverridePathV6 = typeof RESPONSIVE_OVERRIDE_PATHS[number]

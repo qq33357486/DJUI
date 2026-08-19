@@ -37,7 +37,19 @@ DjuiActionRouter.On("open_inventory", () => { ... });
 
 // 6. 数据绑定（Set 后绑定该 key 的控件自动刷新）
 DjuiBindingSystem.Set("coin_count", 999);
+
+// 7. 运行时动态禁用（走此方法或 disabled 绑定才会刷新 DJUI 禁用视觉；
+//    直接给引擎控件赋 Disabled 只拦截点击、不变灰——引擎无 Disabled 变更通知）
+DjuiButtonState.SetDisabled(btn, false);
 ```
+
+## 按钮状态视觉（normal / hover / pressed / disabled）
+
+按钮四态换图与禁用灰化由 DJUI Runtime 自管（星火引擎 Button 无 ImageDisabled，且 v6 图片画在子 Panel 上、引擎状态换图不可用）：
+
+- `button.imageHover` / `button.imagePressed` / `button.imageDisabled`：三个可选状态图，未设置的态沿用正常图
+- 禁用时未配置 `imageDisabled` → 自动兜底：图片灰度 + 整体透明度降为 50%（常量 `DjuiButtonStateV6.DisabledFallbackOpacity`，实测后可调）
+- 动态切换禁用：数据绑定属性 `disabled`（`DjuiBindingSystem.Set("key", bool)`）或 `DjuiButtonState.SetDisabled(control, bool)`
 
 ## 响应式宽屏层（基础层 / 宽屏层）
 
@@ -55,7 +67,7 @@ DjuiBindingSystem.Set("coin_count", 999);
 | 变换 | `transform.x` / `y` / `width` / `height` |
 | 外观 | `appearance.image`、`background`、`imageFit`、`focalX`、`focalY`、`borderThickness`、`borderColor` |
 | 文本 | `text.text`、`fontSize`、`textColor`、`strokeSize`、`strokeColor`、`bold`、`font`、`textWrap` |
-| 按钮/进度 | `button.imageHover`、`button.imagePressed`、`progress.value` |
+| 按钮/进度 | `button.imageHover`、`button.imagePressed`、`button.imageDisabled`、`progress.value` |
 
 ### 全屏背景换图范式（双节点法）
 

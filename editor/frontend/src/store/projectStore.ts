@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ProjectConfig } from '@/types/layout'
 import { projectContext } from '@/fs/projectContext'
 import * as api from '@/api/client'
+import type { ExternalChange } from '@/lib/pageSync'
 
 export interface AgentsState {
   status: 'ok' | 'outdated' | 'missing' | 'unknown'
@@ -27,6 +28,7 @@ interface ProjectState {
   fonts: string[]  // 可用字体列表（来自工程 fontref.txt，主流程集中加载）
   fontInfos: api.FontInfo[]  // 字体分类信息（标准/系统/封装/缺失）
   fontManagerOpen: boolean  // 字体管理弹窗
+  syncConflicts: ExternalChange[]  // 检测到但尚未裁决的页面外部修改冲突（驱动 TopBar 徽章）
 
   initFromHandles: (handles: { star: boolean; ws: boolean }) => void
   loadProjectFile: () => Promise<api.ProjectFileLoadResult>
@@ -40,6 +42,7 @@ interface ProjectState {
   bumpFontVersion: () => void
   refreshFonts: () => Promise<void>
   setFontManagerOpen: (open: boolean) => void
+  setSyncConflicts: (conflicts: ExternalChange[]) => void
 }
 
 const initialAgents: AgentsState = {
@@ -66,6 +69,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   fonts: [],
   fontInfos: [],
   fontManagerOpen: false,
+  syncConflicts: [],
 
   initFromHandles: (handles) => {
     // 从 projectContext 恢复配置
@@ -98,7 +102,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   clearConfig: () => {
     api.clearStoredConfig()
     projectContext.clear()
-    set({ config: null, handlesReady: false, agents: initialAgents, scripts: initialScripts })
+    set({ config: null, handlesReady: false, agents: initialAgents, scripts: initialScripts, syncConflicts: [] })
   },
 
   setLastPage: (pageId) => {
@@ -156,4 +160,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   setFontManagerOpen: (open) => set({ fontManagerOpen: open }),
+
+  setSyncConflicts: (conflicts) => set({ syncConflicts: conflicts }),
 }))

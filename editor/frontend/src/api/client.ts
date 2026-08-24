@@ -352,14 +352,23 @@ export async function listPages(): Promise<string[]> {
 export async function loadPage(pageId: string): Promise<UiPage | null> {
   const ws = projectContext.ws
   if (!ws) return null
-  const raw = await fs.readFileJson<unknown>(ws, `${PAGES_DIR}/${pageId}.json`)
+  const rawText = await fs.readFileText(ws, `${PAGES_DIR}/${pageId}.json`)
+  let raw: unknown = null
+  if (rawText !== null) {
+    try {
+      raw = JSON.parse(rawText.replace(/^\uFEFF/, ''))
+    } catch { /* 与 readFileJson 行为一致：坏 JSON 按 null 交给下方校验报错 */ }
+  }
   const result = inspectPageV6(raw)
   if (!result.ok) {
     const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
     throw new Error('页面 ' + pageId + ' 不是可编辑的 DJUI v6 文件：' + detail)
   }
   // v6 仍经过结构边界归一化，但不再运行旧协议补丁或静默写回。
-  return normalizePage(uiPageFromV6(result.value))
+  const page = normalizePage(uiPageFromV6(result.value))
+  if (!page) return null
+  recordBaseline(pageId, rawText ?? '', page)
+  return page
 }
 
 export async function savePage(page: UiPage): Promise<void> {
@@ -372,12 +381,74 @@ export async function savePage(page: UiPage): Promise<void> {
     throw new Error('拒绝保存非 v6 页面：' + detail)
   }
   await fs.writeFileJson(ws, `${PAGES_DIR}/${page.pageId}.json`, result.value)
+  // 基线磁盘文本必须与 writeFileJson 落盘格式逐字一致（同为 2 空格缩进序列化）
+  recordBaseline(page.pageId, JSON.stringify(result.value, null, 2), page)
 }
 
 export async function deletePage(pageId: string): Promise<void> {
   const ws = projectContext.ws
   if (!ws) return
   await fs.removeFile(ws, `${PAGES_DIR}/${pageId}.json`)
+  pageBaselines.delete(pageId)
+}
+
+// ===== 页面基线（外部修改检测） =====
+// loadPage/savePage 自动记录每页的「编辑器视角快照」，供 pageSync 检测外部修改：
+//   diskText   最近一次读/写到的磁盘原文（外部修改 = 当前磁盘文本 ≠ diskText）
+//   canonical  加载/保存那一刻内存页的规范序列化（本地未保存修改 = 内存 canonical ≠ 基线 canonical）
+// 纯内存、随会话存活：切换工程必然整页 reload，天然按会话隔离。
+interface PageBaseline {
+  diskText: string
+  canonical: string
+  /** 用户已知情页面被外部删除并选择保留内存版，后续检测不再上报该删除 */
+  deleteAccepted?: boolean
+}
+const pageBaselines = new Map<string, PageBaseline>()
+
+function recordBaseline(pageId: string, diskText: string, page: UiPage): void {
+  pageBaselines.set(pageId, { diskText, canonical: canonicalizePage(page) })
+}
+
+export function canonicalizePage(page: UiPage): string {
+  return JSON.stringify(pageFileV6FromUiPage(page))
+}
+
+export function getPageBaseline(pageId: string): PageBaseline | undefined {
+  return pageBaselines.get(pageId)
+}
+
+export function getAllPageBaselineIds(): string[] {
+  return [...pageBaselines.keys()]
+}
+
+/** 「保留我的版本」：把磁盘当前内容记为已知状态，后续检测不再上报该页（内存未保存修改保留，下次保存自然覆盖） */
+export function setBaselineDiskText(pageId: string, diskText: string, page?: UiPage): void {
+  const baseline = pageBaselines.get(pageId)
+  if (baseline) {
+    baseline.diskText = diskText
+    return
+  }
+  // 兜底：磁盘新页与内存未落盘页同名等极端场景，按内存页重建基线
+  if (page) pageBaselines.set(pageId, { diskText, canonical: canonicalizePage(page) })
+}
+
+export function acceptBaselineDeletion(pageId: string): void {
+  const baseline = pageBaselines.get(pageId)
+  if (baseline) baseline.deleteAccepted = true
+}
+
+/** 清理已不在内存页面表中的残留基线（refreshPages 全量重载后调用） */
+export function pruneBaselines(alivePageIds: Iterable<string>): void {
+  const alive = new Set(alivePageIds)
+  for (const id of [...pageBaselines.keys()]) {
+    if (!alive.has(id)) pageBaselines.delete(id)
+  }
+}
+
+export async function readPageDiskText(pageId: string): Promise<string | null> {
+  const ws = projectContext.ws
+  if (!ws) return null
+  return fs.readFileText(ws, `${PAGES_DIR}/${pageId}.json`)
 }
 
 export async function getPageUnderlays(): Promise<PageUnderlayMap> {

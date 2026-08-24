@@ -7,6 +7,7 @@ import CanvasArea from './components/CanvasArea'
 import RightPanel from './components/RightPanel'
 import ConfigModal from './components/ConfigModal'
 import WhatsNewModal from './components/WhatsNewModal'
+import SyncConflictModal, { type ConflictResolution } from './components/SyncConflictModal'
 import AdaptationAuditPage from './components/AdaptationAuditPage'
 import { useProjectStore } from './store/projectStore'
 import { setDefaultButtonSoundId, setDefaultFontForNew, useEditorStore } from './store/editorStore'
@@ -14,6 +15,13 @@ import { projectContext } from './fs/projectContext'
 import { loadEngineFonts } from './lib/fontLoader'
 import * as api from './api/client'
 import { APP_VERSION } from './lib/changelog'
+import {
+  applyDiskVersions,
+  describeChanges,
+  detectAndSyncClean,
+  keepLocalVersions,
+  runExclusive,
+} from '@/lib/pageSync'
 import type { DevicePresetV6 } from './lib/devicePresetsV6'
 import { UiPage } from './types/layout'
 import { prunePageUnderlays } from './lib/pageUnderlays'
@@ -49,7 +57,7 @@ function markSoundSetupNoticeSeen() {
 }
 
 export default function App() {
-  const { config, handlesReady, setLastPage, lastPageId } = useProjectStore()
+  const { config, handlesReady, setLastPage, lastPageId, syncConflicts, setSyncConflicts } = useProjectStore()
   const { setAllPages, upsertPage, removePage, setActivePage, updatePageMeta, setPageUnderlays } = useEditorStore()
   const [loading, setLoading] = useState(true)
   const [configOpen, setConfigOpen] = useState(false)
@@ -59,7 +67,10 @@ export default function App() {
   const [auditDeviceReturn, setAuditDeviceReturn] = useState<{ presetId: string; variant: 'base' | 'wide' } | null>(null)
   const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
+  const [syncConflictOpen, setSyncConflictOpen] = useState(false)
+  const [syncResolving, setSyncResolving] = useState(false)
   const initialized = useRef(false)
+  const lastSyncCheckRef = useRef(0)
 
   // 审计页退出后等画布重新挂载，再带入用户刚刚复核的设备画像。
   useEffect(() => {
@@ -191,6 +202,82 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handlesReady])
 
+  // ===== 页面外部修改检测（AI 直接改工程文件场景） =====
+  // 回到编辑器（窗口聚焦 / 标签页重新可见）时与磁盘比对：
+  //   内存干净的页面自动按磁盘重载；有未保存修改的页面上报冲突，交由用户裁决。
+  const runFocusSync = () => {
+    const now = Date.now()
+    if (now - lastSyncCheckRef.current < 1500) return
+    lastSyncCheckRef.current = now
+    void runExclusive(async () => {
+      let result
+      try {
+        result = await detectAndSyncClean()
+      } catch {
+        return // 权限失效 / 读盘异常：本轮放弃，下次聚焦再试
+      }
+      if (result.synced.length > 0) {
+        setPages(await api.listPages())
+        message.info('已同步外部修改：' + describeChanges(result.synced))
+      }
+      if (result.conflicts.length > 0) {
+        const prev = useProjectStore.getState().syncConflicts
+        useProjectStore.getState().setSyncConflicts(result.conflicts)
+        // 与上次提示相同的冲突集合只保留徽章，避免每次聚焦重复弹窗
+        const sameAsBefore =
+          prev.length === result.conflicts.length &&
+          prev.every(c => result.conflicts.some(n => n.pageId === c.pageId && n.type === c.type))
+        if (!sameAsBefore) setSyncConflictOpen(true)
+      } else if (useProjectStore.getState().syncConflicts.length > 0) {
+        useProjectStore.getState().setSyncConflicts([])
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!handlesReady) return
+    const onVisible = () => { if (document.visibilityState === 'visible') runFocusSync() }
+    window.addEventListener('focus', runFocusSync)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', runFocusSync)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlesReady])
+
+  // TopBar 冲突徽章点击 → 重新打开裁决弹窗
+  useEffect(() => {
+    const openSyncConflicts = () => {
+      if (useProjectStore.getState().syncConflicts.length > 0) setSyncConflictOpen(true)
+    }
+    window.addEventListener('djui:openSyncConflicts', openSyncConflicts)
+    return () => window.removeEventListener('djui:openSyncConflicts', openSyncConflicts)
+  }, [])
+
+  const resolveSyncConflicts = async (resolution: ConflictResolution) => {
+    const conflicts = useProjectStore.getState().syncConflicts
+    setSyncResolving(true)
+    try {
+      await runExclusive(async () => {
+        if (resolution === 'disk') {
+          await applyDiskVersions(conflicts)
+          setPages(await api.listPages())
+          message.success('已按磁盘版本同步')
+        } else {
+          await keepLocalVersions(conflicts)
+          message.success('已保留编辑器版本，下次保存时将覆盖磁盘文件')
+        }
+        useProjectStore.getState().setSyncConflicts([])
+      })
+      setSyncConflictOpen(false)
+    } catch {
+      message.error('同步失败，请重试')
+    } finally {
+      setSyncResolving(false)
+    }
+  }
+
   // 全局默认字体变化时同步给 createNode（新建控件预填字体用）
   useEffect(() => {
     setDefaultFontForNew(config?.defaultFont ?? null)
@@ -276,6 +363,8 @@ export default function App() {
         }
       }
       setAllPages(allPagesMap)
+      // 全量重载后清理已消失页面的基线残留（loadPage 已顺带刷新存活页基线）
+      api.pruneBaselines(Object.keys(allPagesMap))
       const savedUnderlays = await api.getPageUnderlays()
       const validUnderlays = prunePageUnderlays(savedUnderlays, allPagesMap)
       setPageUnderlays(validUnderlays)
@@ -489,6 +578,14 @@ export default function App() {
         onSave={handleConfigSaved}
       />
       <WhatsNewModal open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
+      <SyncConflictModal
+        open={syncConflictOpen && syncConflicts.length > 0}
+        mode="focus"
+        conflicts={syncConflicts}
+        resolving={syncResolving}
+        onResolve={resolveSyncConflicts}
+        onClose={() => setSyncConflictOpen(false)}
+      />
     </Layout>
   )
 }

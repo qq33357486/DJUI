@@ -5,7 +5,7 @@ import {
   FileAddOutlined, CloudUploadOutlined, FolderOpenOutlined,
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
   InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
-  SoundOutlined, BellOutlined, SafetyCertificateOutlined,
+  SoundOutlined, BellOutlined, SafetyCertificateOutlined, FileSyncOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
@@ -13,10 +13,20 @@ import { projectContext } from '@/fs/projectContext'
 import { getRecentProjects, pushRecentProject, type RecentProject } from '@/lib/recentProjects'
 import SoundConfigModal from './SoundConfigModal'
 import FontManagerModal from './FontManagerModal'
+import SyncConflictModal from './SyncConflictModal'
 import { buildFontSelectOptions, FONT_MANAGE_VALUE, ENGINE_DEFAULT_FONT_VALUE } from './RightPanel'
 import * as api from '@/api/client'
+import {
+  applyDiskVersions,
+  checkCurrentPageExternalChange,
+  describeChanges,
+  detectAndSyncClean,
+  keepLocalVersions,
+  runExclusive,
+  type ExternalChange,
+} from '@/lib/pageSync'
 import { APP_VERSION } from '@/lib/changelog'
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 
 interface TopBarProps {
   soundSetup: api.SoundSetupStatus | null
@@ -49,10 +59,15 @@ function menuLabel(text: string, shortcut?: string) {
 export default function TopBar(props: TopBarProps) {
   const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit } = props
   const { page, undo, redo, undoStack, redoStack, pendingHistory } = useEditorStore()
-  const { config, agents, scripts, refreshAgents, refreshScripts } = useProjectStore()
+  const { config, agents, scripts, syncConflicts, refreshAgents, refreshScripts } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
   const [updatingAgents, setUpdatingAgents] = useState(false)
   const [updatingScripts, setUpdatingScripts] = useState(false)
+  // 保存冲突：当前页被外部修改且本地有未保存修改，等待用户选择覆盖 / 改用磁盘版
+  const [saveConflict, setSaveConflict] = useState<ExternalChange | null>(null)
+  // 发布门禁：发布前检测到冲突页面，必须二选一才放行
+  const [publishGate, setPublishGate] = useState<ExternalChange[] | null>(null)
+  const publishGateResolveRef = useRef<((v: 'editor' | 'disk' | 'cancel') => void) | null>(null)
   const [globalFontOpen, setGlobalFontOpen] = useState(false)
   const [unifyFontOpen, setUnifyFontOpen] = useState(false)
   const [soundConfigOpen, setSoundConfigOpen] = useState(false)
@@ -115,44 +130,113 @@ export default function TopBar(props: TopBarProps) {
 
   const handleSave = useCallback(async () => {
     if (!page) return
-    await api.savePage(page)
-    message.success('页面已保存')
+    await runExclusive(async () => {
+      // 保存前轻量检查：当前页被外部修改且本地有未保存修改时，先让用户裁决，防止静默覆盖
+      const change = await checkCurrentPageExternalChange()
+      if (change && change.hasLocalEdits) {
+        setSaveConflict(change)
+        return
+      }
+      const current = useEditorStore.getState().page
+      if (!current) return
+      await api.savePage(current)
+      message.success('页面已保存')
+    })
   }, [page])
+
+  const handleSaveOverwrite = async () => {
+    if (!saveConflict) return
+    setSaveConflict(null)
+    await runExclusive(async () => {
+      const current = useEditorStore.getState().page
+      if (!current) return
+      await api.savePage(current)
+      message.success('页面已保存（磁盘上的外部修改已被覆盖）')
+    })
+  }
+
+  const handleSaveUseDisk = async () => {
+    const conflict = saveConflict
+    if (!conflict) return
+    setSaveConflict(null)
+    await runExclusive(async () => {
+      await applyDiskVersions([conflict])
+      message.info(`页面「${conflict.pageId}」已按磁盘版本重载（本地修改已丢弃）`)
+    })
+  }
 
   const handlePublish = useCallback(async () => {
     if (!config || !page) { message.warning('请先配置工程并打开页面'); return }
-    await api.savePage(page)
     setPublishing(true)
     try {
-      const result = await api.publishAssets()
-      if (result.ok) {
-        Modal.success({
-          title: '发布成功',
-          content: (
-            <div>
-              <p>素材：<strong>{result.copiedAssets?.length ?? 0}</strong> 个</p>
-              <p>页面：<strong>{result.copiedPages?.length ?? result.copiedClientPages?.length ?? 0}</strong> 个</p>
-              <p>音效配置：<strong>{result.copiedSoundsConfig ? 1 : 0}</strong> 个</p>
-              <p>配置：<strong>{result.copiedConfig ? 1 : 0}</strong> 个</p>
-              {result.warnings && result.warnings.length > 0 && (
-                <div style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 6, background: '#fff7e6', color: '#8a5200', fontSize: 12 }}>
-                  {result.warnings.map((warning, index) => (
-                    <div key={index}>{warning}</div>
-                  ))}
+      // 发布前强制与磁盘比对（整段与保存/焦点检测互斥，避免读到写一半的状态）：
+      // 内存干净的页面自动同步；有冲突必须裁决，避免旧内容静默覆盖 AI 修改
+      await runExclusive(async () => {
+        const sync = await detectAndSyncClean()
+        if (sync.synced.length > 0) {
+          message.info('发布前已同步外部修改：' + describeChanges(sync.synced))
+        }
+        if (sync.conflicts.length > 0) {
+          const decision = await new Promise<'editor' | 'disk' | 'cancel'>(resolve => {
+            publishGateResolveRef.current = resolve
+            setPublishGate(sync.conflicts)
+          })
+          if (decision === 'cancel') return
+          if (decision === 'disk') {
+            await applyDiskVersions(sync.conflicts)
+          } else {
+            // 「以编辑器版本发布」：当前页即将覆盖保存；其余冲突页保持磁盘版发布，本地修改留在编辑器
+            await keepLocalVersions(sync.conflicts)
+          }
+          useProjectStore.getState().setSyncConflicts([])
+        }
+        const current = useEditorStore.getState().page
+        if (current) await api.savePage(current)
+        const result = await api.publishAssets()
+        if (result.ok) {
+          Modal.success({
+            title: '发布成功',
+            content: (
+              <div>
+                <p>素材：<strong>{result.copiedAssets?.length ?? 0}</strong> 个</p>
+                <p>页面：<strong>{result.copiedPages?.length ?? result.copiedClientPages?.length ?? 0}</strong> 个</p>
+                <p>音效配置：<strong>{result.copiedSoundsConfig ? 1 : 0}</strong> 个</p>
+                <p>配置：<strong>{result.copiedConfig ? 1 : 0}</strong> 个</p>
+                {result.warnings && result.warnings.length > 0 && (
+                  <div style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 6, background: '#fff7e6', color: '#8a5200', fontSize: 12 }}>
+                    {result.warnings.map((warning, index) => (
+                      <div key={index}>{warning}</div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: '#999' }}>
+                  <div>{result.targetDirs?.images ?? result.targetDir}</div>
+                  <div>{result.targetDirs?.clientPages}</div>
+                  {result.targetDirs?.clientSounds && <div>{result.targetDirs.clientSounds}</div>}
                 </div>
-              )}
-              <div style={{ fontSize: 12, color: '#999' }}>
-                <div>{result.targetDirs?.images ?? result.targetDir}</div>
-                <div>{result.targetDirs?.clientPages}</div>
-                {result.targetDirs?.clientSounds && <div>{result.targetDirs.clientSounds}</div>}
               </div>
-            </div>
-          ),
-        })
-      } else { message.error([result.error, result.userAction].filter(Boolean).join(' ') || '发布失败') }
+            ),
+          })
+        } else { message.error([result.error, result.userAction].filter(Boolean).join(' ') || '发布失败') }
+      })
     } catch { message.error('发布失败') }
     finally { setPublishing(false) }
   }, [config, page])
+
+  // publish 模式弹窗的「保留我的版本」在发布语境下即「以编辑器版本发布」
+  const resolvePublishGate = (resolution: 'disk' | 'local') => {
+    setPublishGate(null)
+    const resolve = publishGateResolveRef.current
+    publishGateResolveRef.current = null
+    resolve?.(resolution === 'disk' ? 'disk' : 'editor')
+  }
+
+  const cancelPublishGate = () => {
+    setPublishGate(null)
+    const resolve = publishGateResolveRef.current
+    publishGateResolveRef.current = null
+    resolve?.('cancel')
+  }
 
   // 检查 AGENTS 规范更新
   const handleCheckAgents = useCallback(async () => {
@@ -615,6 +699,23 @@ export default function TopBar(props: TopBarProps) {
 
         {/* 右：快捷操作 */}
         <Space size={4}>
+          {/* 页面外部修改冲突提醒（检测到 AI 等外部改动且尚未裁决） */}
+          {syncConflicts.length > 0 && (
+            <Tooltip title={
+              '页面被外部修改，待处理：' + syncConflicts
+                .map(c => `「${c.pageId}」${c.type === 'deleted' ? '已删除' : '已修改'}`)
+                .join('、') + '（点击处理）'
+            }>
+              <Badge dot offset={[-2, 2]}>
+                <Button
+                  icon={<FileSyncOutlined style={{ color: '#ff8c42' }} />}
+                  onClick={() => window.dispatchEvent(new CustomEvent('djui:openSyncConflicts'))}
+                  type="text"
+                  size="small"
+                />
+              </Badge>
+            </Tooltip>
+          )}
           {/* 工作区更新提醒（AGENTS.md 或 脚本区 任一过期） */}
           {workspaceOutdated && (
             <Tooltip title={
@@ -667,6 +768,45 @@ export default function TopBar(props: TopBarProps) {
 
       <SoundConfigModal open={soundConfigOpen} onClose={() => setSoundConfigOpen(false)} />
       <FontManagerModal />
+
+      {/* 保存冲突裁决：覆盖保存 / 改用磁盘版本 / 取消 */}
+      <Modal
+        open={!!saveConflict}
+        title={
+          <span>
+            <FileSyncOutlined style={{ color: '#ff8c42', marginRight: 8 }} />
+            保存前发现页面被外部修改
+          </span>
+        }
+        width={480}
+        maskClosable={false}
+        onCancel={() => setSaveConflict(null)}
+        footer={
+          <Space>
+            <Button onClick={() => setSaveConflict(null)}>取消</Button>
+            <Button onClick={handleSaveUseDisk}>改用磁盘版本</Button>
+            <Button type="primary" onClick={handleSaveOverwrite}>覆盖保存</Button>
+          </Space>
+        }
+      >
+        <div style={{ fontSize: 13 }}>
+          <p>
+            页面「{saveConflict?.pageId}」在磁盘上被外部修改（可能是 AI 直接编辑），编辑器中也有未保存的修改。
+          </p>
+          <p style={{ color: '#8d96aa', fontSize: 12, margin: 0 }}>
+            「覆盖保存」用编辑器版本替换磁盘内容；「改用磁盘版本」丢弃本地修改并重载最新内容。
+          </p>
+        </div>
+      </Modal>
+
+      {/* 发布门禁：外部修改冲突未裁决前不放行 */}
+      <SyncConflictModal
+        open={!!publishGate}
+        mode="publish"
+        conflicts={publishGate ?? []}
+        onResolve={resolvePublishGate}
+        onClose={cancelPublishGate}
+      />
 
       {/* 全局字体设置 */}
       <Modal

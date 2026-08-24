@@ -103,6 +103,8 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
       if (result.ok) {
         message.success(`Runtime v${result.version} 已安装`)
         checkRuntime()
+        // 同步 TopBar 徽章状态（启动检测也盯着星火 Runtime）
+        void useProjectStore.getState().refreshRuntime()
         // Runtime 与本地发布器必须同代：网页更新 Runtime 后，旧发布器会因内嵌版本落后而拒绝发布，
         // 这里主动提醒同步脚本区，避免用户在网页走完流程、AI 侧却报发布器过旧。
         if (projectContext.ws) {

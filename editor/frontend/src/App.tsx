@@ -173,6 +173,9 @@ export default function App() {
       loadEngineFonts().then(() => useProjectStore.getState().bumpFontVersion())
       useProjectStore.getState().refreshAgents()
       useProjectStore.getState().refreshScripts()
+      // 星火工程 Runtime 状态也纳入启动检测：脚本区最新不代表 Runtime 已升级，
+      // 不在这里查就会退化成「启动不提醒、发布才拦截」
+      useProjectStore.getState().refreshRuntime()
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, config, handlesReady])

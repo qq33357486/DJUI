@@ -59,10 +59,11 @@ function menuLabel(text: string, shortcut?: string) {
 export default function TopBar(props: TopBarProps) {
   const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit } = props
   const { page, undo, redo, undoStack, redoStack, pendingHistory } = useEditorStore()
-  const { config, agents, scripts, syncConflicts, refreshAgents, refreshScripts } = useProjectStore()
+  const { config, agents, scripts, runtime, syncConflicts, refreshAgents, refreshScripts, refreshRuntime } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
   const [updatingAgents, setUpdatingAgents] = useState(false)
   const [updatingScripts, setUpdatingScripts] = useState(false)
+  const [updatingRuntime, setUpdatingRuntime] = useState(false)
   // 保存冲突：当前页被外部修改且本地有未保存修改，等待用户选择覆盖 / 改用磁盘版
   const [saveConflict, setSaveConflict] = useState<ExternalChange | null>(null)
   // 发布门禁：发布前检测到冲突页面，必须二选一才放行
@@ -83,8 +84,11 @@ export default function TopBar(props: TopBarProps) {
   const agentsOutdated = agents.status === 'outdated' || agents.status === 'missing'
   const scriptsOutdated = scripts.status === 'outdated' || scripts.status === 'missing'
   const scriptsAvailable = scripts.status !== 'unavailable' && scripts.status !== 'unknown'
+  // 星火工程 Runtime 落后或未装（invalid = 未选星火目录不算过期；
+  // installedNewer = 星火比编辑器新，只能刷新网页，不放进一键更新）
+  const runtimeOutdated = (runtime.status === 'outdated' || runtime.status === 'missing') && !runtime.installedNewer
   // 合并徽章：任一过期即显示
-  const workspaceOutdated = agentsOutdated || scriptsOutdated
+  const workspaceOutdated = agentsOutdated || scriptsOutdated || runtimeOutdated
   const soundSetupNeedsAttention = !!soundSetup && soundSetup.status !== 'ok'
   const soundSetupTooltip = soundSetup?.status === 'missing-default'
     ? '未选择按钮默认音效；配置后后续创建 Button 会自动带点击音效。'
@@ -165,6 +169,51 @@ export default function TopBar(props: TopBarProps) {
     })
   }
 
+  // 发布前 Runtime 门禁：星火工程 Runtime 落后/未装时弹窗征得同意就地升级，
+  // 避免发布走到一半才被 RUNTIME_NOT_READY 拦截；星火比编辑器新只能刷新网页解决
+  const ensureRuntimeReadyForPublish = async (): Promise<boolean> => {
+    const status = await api.checkRuntime('')
+    if (status.status === 'ok') return true
+    if (status.installedNewer) {
+      message.error(`星火工程 Runtime（v${status.installedVersion ?? '?'}）比当前编辑器内置（v${status.expectedVersion ?? '?'}）更新，请刷新网页（Ctrl+F5）加载最新版编辑器后再发布`, 6)
+      return false
+    }
+    const allow = await new Promise<boolean>(resolve => {
+      Modal.confirm({
+        title: status.status === 'missing' ? '安装 DJUI Runtime' : '升级 DJUI Runtime',
+        content: (
+          <div style={{ fontSize: 13 }}>
+            <p>
+              星火工程{status.status === 'missing' ? '尚未安装' : '的'} DJUI Runtime
+              {status.status !== 'missing' && <>（当前 v{status.installedVersion ?? '?'}）</>}
+              {' '}需要更新到 <strong style={{ color: '#5ab9ff' }}>v{status.expectedVersion ?? '?'}</strong> 才能发布。
+            </p>
+            <p style={{ color: '#888', fontSize: 12 }}>
+              会更新星火工程 <code>src/DjuiRuntime/</code> 目录（覆盖旧版文件），游戏工程其余文件不受影响。
+            </p>
+          </div>
+        ),
+        okText: status.status === 'missing' ? '安装并发布' : '升级并发布',
+        cancelText: '取消发布',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+    if (!allow) return false
+    const up = await api.initRuntime('')
+    if (!up.ok) {
+      message.error(up.error ?? 'Runtime 更新失败，发布中止')
+      return false
+    }
+    await refreshRuntime()
+    // Runtime 升级后本地发布器必须同代，落后时提醒同步脚本区（与工程配置弹窗行为一致）
+    const scripts = await api.checkScriptsUpdate('')
+    if (scripts.status === 'outdated' || scripts.status === 'missing') {
+      message.warning('本地发布器需要同步：请执行「帮助 → 检查工作区更新」更新脚本区，否则 AI 命令行发布会因版本不符被阻止', 6)
+    }
+    return true
+  }
+
   const handlePublish = useCallback(async () => {
     if (!config || !page) { message.warning('请先配置工程并打开页面'); return }
     setPublishing(true)
@@ -172,6 +221,7 @@ export default function TopBar(props: TopBarProps) {
       // 发布前强制与磁盘比对（整段与保存/焦点检测互斥，避免读到写一半的状态）：
       // 内存干净的页面自动同步；有冲突必须裁决，避免旧内容静默覆盖 AI 修改
       await runExclusive(async () => {
+        if (!(await ensureRuntimeReadyForPublish())) return
         const sync = await detectAndSyncClean()
         if (sync.synced.length > 0) {
           message.info('发布前已同步外部修改：' + describeChanges(sync.synced))
@@ -217,7 +267,12 @@ export default function TopBar(props: TopBarProps) {
               </div>
             ),
           })
-        } else { message.error([result.error, result.userAction].filter(Boolean).join(' ') || '发布失败') }
+        } else if (result.code === 'PUBLISHER_OUTDATED') {
+          message.error('星火工程 Runtime 比当前编辑器内置的更新，请刷新网页（Ctrl+F5）加载最新版编辑器后再发布')
+        } else if (result.code === 'RUNTIME_NOT_READY') {
+          // 前置门禁刚确认过，这里只兜底（如升级确认期间文件又被外部改动）
+          message.error(`${result.error ?? '星火工程 Runtime 未就绪'}，发布中止；可重试，或执行「帮助 → 检查工作区更新」`)
+        } else { message.error(result.error || '发布失败') }
       })
     } catch { message.error('发布失败') }
     finally { setPublishing(false) }
@@ -346,57 +401,63 @@ export default function TopBar(props: TopBarProps) {
     })
   }
 
-  // 一键检查工作区全部更新（AGENTS + 脚本）
+  // 一键检查工作区全部更新（AGENTS + 脚本区 + 星火 Runtime）
   const handleCheckWorkspace = useCallback(async () => {
     if (!config?.workspacePath) return
     await Promise.all([
       refreshAgents(),
       refreshScripts(),
+      refreshRuntime(),
     ])
     const a = useProjectStore.getState().agents
     const s = useProjectStore.getState().scripts
+    const rt = useProjectStore.getState().runtime
     const outdated: string[] = []
     if (a.status === 'outdated' || a.status === 'missing') outdated.push('AGENTS.md')
     if (s.status === 'outdated' || s.status === 'missing') outdated.push('脚本区')
+    // 星火 Runtime 比编辑器内置新 = 网页侧过旧，只能刷新网页，不属于可更新项
+    if (rt.installedNewer) {
+      message.warning(`星火工程 Runtime（v${rt.installedVersion ?? '?'}）比当前编辑器内置（v${rt.expectedVersion ?? '?'}）更新，请刷新网页（Ctrl+F5）加载最新版编辑器`, 6)
+    } else if (rt.status === 'outdated' || rt.status === 'missing') {
+      outdated.push('星火工程 Runtime')
+    }
 
     if (outdated.length === 0) {
       const vParts: string[] = []
       if (a.latestVersion) vParts.push(`AGENTS v${a.latestVersion}`)
       if (s.latestVersion) vParts.push(`脚本 v${s.latestVersion}`)
-      message.success(`工作区全部最新（${vParts.join('，')}）`)
+      if (rt.expectedVersion) vParts.push(`Runtime v${rt.expectedVersion}`)
+      message.success(`工作区与星火工程全部最新（${vParts.join('，')}）`)
       return
     }
 
     // 有过期项：弹合并更新窗口
-    promptUpdateWorkspace(a, s, outdated)
-  }, [config?.workspacePath, refreshAgents, refreshScripts])
+    promptUpdateWorkspace(outdated)
+  }, [config?.workspacePath, refreshAgents, refreshScripts, refreshRuntime])
 
-  // 工作区合并更新弹窗
-  const promptUpdateWorkspace = (
-    a: typeof agents,
-    s: typeof scripts,
-    outdated: string[]
-  ) => {
+  // 合并更新弹窗（AGENTS.md + 脚本区 + 星火 Runtime 一键同步）
+  const promptUpdateWorkspace = (outdated: string[]) => {
     Modal.confirm({
-      title: '更新工作区配置',
+      title: '同步更新',
       content: (
         <div style={{ fontSize: 13 }}>
-          <p>检测到以下工作区文件已过期：</p>
+          <p>检测到以下内容落后于当前编辑器：</p>
           <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
-            {outdated.map(item => (
-              <li key={item}>
-                <strong>{item}</strong>
-                {item === 'AGENTS.md' && (
-                  <span>（{a.installedVersion ?? '旧版'} → v{a.latestVersion}）</span>
-                )}
-                {item === '脚本区' && (
-                  <span>（{s.installedVersion ?? '无'} → v{s.latestVersion}）</span>
-                )}
-              </li>
-            ))}
+            {outdated.map(item => {
+              const st = useProjectStore.getState()
+              if (item === 'AGENTS.md') {
+                return <li key={item}><strong>{item}</strong><span>（{st.agents.installedVersion ?? '旧版'} → v{st.agents.latestVersion}）</span></li>
+              }
+              if (item === '脚本区') {
+                return <li key={item}><strong>{item}</strong><span>（{st.scripts.installedVersion ?? '无'} → v{st.scripts.latestVersion}）</span></li>
+              }
+              const rt = st.runtime
+              return <li key={item}><strong>{item}</strong><span>（{rt.status === 'missing' ? '未安装' : `v${rt.installedVersion ?? '?'}`} → v{rt.expectedVersion ?? '?'}）</span></li>
+            })}
           </ul>
           <p style={{ color: '#888', fontSize: 12 }}>
-            点击「全部更新」会逐项覆盖（旧文件/目录备份为 <code>.bak</code>），素材目录不受影响。
+            点击「全部更新」会逐项覆盖（旧文件/目录备份为 <code>.bak</code>），素材目录不受影响；<br />
+            星火工程 Runtime 会更新 <code>src/DjuiRuntime/</code> 目录，游戏工程其余文件不动。
           </p>
         </div>
       ),
@@ -421,9 +482,17 @@ export default function TopBar(props: TopBarProps) {
           } catch (e) { results.push(`脚本区 失败: ${String(e)}`) }
           finally { setUpdatingScripts(false) }
         }
-        await Promise.all([refreshAgents(), refreshScripts()])
+        if (outdated.includes('星火工程 Runtime')) {
+          setUpdatingRuntime(true)
+          try {
+            const r = await api.initRuntime('')
+            results.push(r.ok ? `星火工程 Runtime → v${r.version}` : `星火工程 Runtime 失败: ${r.error}`)
+          } catch (e) { results.push(`星火工程 Runtime 失败: ${String(e)}`) }
+          finally { setUpdatingRuntime(false) }
+        }
+        await Promise.all([refreshAgents(), refreshScripts(), refreshRuntime()])
         Modal.success({
-          title: '工作区更新完成',
+          title: '更新完成',
           content: (
             <ul style={{ paddingLeft: 20 }}>
               {results.map((r, i) => <li key={i}>{r}</li>)}
@@ -554,7 +623,7 @@ export default function TopBar(props: TopBarProps) {
   const helpMenu: MenuProps['items'] = [
     {
       key: 'check-workspace',
-      label: '检查工作区更新（AGENTS + 脚本）',
+      label: '检查工作区更新（AGENTS + 脚本 + Runtime）',
       icon: workspaceOutdated
         ? <SyncOutlined style={{ color: '#ff8c42' }} />
         : <CheckCircleOutlined style={{ color: '#52c41a' }} />,
@@ -716,21 +785,22 @@ export default function TopBar(props: TopBarProps) {
               </Badge>
             </Tooltip>
           )}
-          {/* 工作区更新提醒（AGENTS.md 或 脚本区 任一过期） */}
+          {/* 工作区更新提醒（AGENTS.md / 脚本区 / 星火 Runtime 任一过期） */}
           {workspaceOutdated && (
             <Tooltip title={
               [
                 agentsOutdated ? `AGENTS.md ${agents.installedVersion ?? '旧版'} → v${agents.latestVersion}` : null,
                 scriptsOutdated ? `脚本区 ${scripts.installedVersion ?? '无'} → v${scripts.latestVersion}` : null,
+                runtimeOutdated ? `星火工程 Runtime ${runtime.status === 'missing' ? '未安装' : `v${runtime.installedVersion ?? '?'}`} → v${runtime.expectedVersion ?? '?'}` : null,
               ].filter(Boolean).join('；') + '（点击全部更新）'
             }>
               <Badge dot offset={[-2, 2]}>
                 <Button
                   icon={<SyncOutlined style={{ color: '#ff8c42' }} />}
-                  onClick={() => promptUpdateWorkspace(agents, scripts,
-                    [agentsOutdated ? 'AGENTS.md' : null, scriptsOutdated ? '脚本区' : null].filter(Boolean) as string[]
+                  onClick={() => promptUpdateWorkspace(
+                    [agentsOutdated ? 'AGENTS.md' : null, scriptsOutdated ? '脚本区' : null, runtimeOutdated ? '星火工程 Runtime' : null].filter(Boolean) as string[]
                   )}
-                  loading={updatingAgents || updatingScripts}
+                  loading={updatingAgents || updatingScripts || updatingRuntime}
                   type="text"
                   size="small"
                 />

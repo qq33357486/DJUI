@@ -18,12 +18,25 @@ export interface ScriptsState {
   message: string | null
 }
 
+// 星火工程 src/DjuiRuntime 的就绪状态。
+// 注意与 scripts（工作区脚本区）是两个对象：脚本区最新不代表星火 Runtime 已升级，
+// 发布前置检查依赖这里，避免「启动不提醒、发布才拦截」。
+export interface RuntimeState {
+  status: 'ok' | 'outdated' | 'missing' | 'invalid' | 'unknown'
+  installedVersion: string | null
+  expectedVersion: string | null
+  /** 星火工程已装版本比编辑器内置新（网页侧过旧），只能刷新网页解决，禁止引导覆盖安装 */
+  installedNewer: boolean
+  message: string | null
+}
+
 interface ProjectState {
   config: ProjectConfig | null
   handlesReady: boolean  // DirectoryHandle 权限是否已就绪
   lastPageId: string | null
   agents: AgentsState
   scripts: ScriptsState
+  runtime: RuntimeState
   fontVersion: number  // 字体注册完成后 bump，触发画布重渲染用真实字体
   fonts: string[]  // 可用字体列表（来自工程 fontref.txt，主流程集中加载）
   fontInfos: api.FontInfo[]  // 字体分类信息（标准/系统/封装/缺失）
@@ -39,6 +52,7 @@ interface ProjectState {
   setAgents: (s: AgentsState) => void
   refreshScripts: () => Promise<void>
   setScripts: (s: ScriptsState) => void
+  refreshRuntime: () => Promise<void>
   bumpFontVersion: () => void
   refreshFonts: () => Promise<void>
   setFontManagerOpen: (open: boolean) => void
@@ -59,12 +73,21 @@ const initialScripts: ScriptsState = {
   message: null,
 }
 
+const initialRuntime: RuntimeState = {
+  status: 'unknown',
+  installedVersion: null,
+  expectedVersion: null,
+  installedNewer: false,
+  message: null,
+}
+
 export const useProjectStore = create<ProjectState>((set) => ({
   config: null,
   handlesReady: false,
   lastPageId: null,
   agents: initialAgents,
   scripts: initialScripts,
+  runtime: initialRuntime,
   fontVersion: 0,
   fonts: [],
   fontInfos: [],
@@ -102,7 +125,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   clearConfig: () => {
     api.clearStoredConfig()
     projectContext.clear()
-    set({ config: null, handlesReady: false, agents: initialAgents, scripts: initialScripts, syncConflicts: [] })
+    set({ config: null, handlesReady: false, agents: initialAgents, scripts: initialScripts, runtime: initialRuntime, syncConflicts: [] })
   },
 
   setLastPage: (pageId) => {
@@ -143,6 +166,23 @@ export const useProjectStore = create<ProjectState>((set) => ({
       })
     } catch {
       set({ scripts: initialScripts })
+    }
+  },
+
+  refreshRuntime: async () => {
+    try {
+      const r = await api.checkRuntime('')
+      set({
+        runtime: {
+          status: r.status,
+          installedVersion: r.installedVersion ?? null,
+          expectedVersion: r.expectedVersion ?? null,
+          installedNewer: !!r.installedNewer,
+          message: r.message,
+        },
+      })
+    } catch {
+      set({ runtime: initialRuntime })
     }
   },
 

@@ -79,6 +79,7 @@ export default function TopBar(props: TopBarProps) {
   // 最近工程快捷切换(VS Code Recent 风格)与字体列表同区
   const [recentProjects] = useState<RecentProject[]>(() => getRecentProjects())
   const currentStar = useProjectStore(s => s.config?.starProjectPath ?? '')
+  const currentWs = useProjectStore(s => s.config?.workspacePath ?? '')
   const handleSwitchProject = async (p: RecentProject) => {
     try {
       const ok = await projectContext.switchTo(p.starName, p.wsName)
@@ -369,7 +370,8 @@ export default function TopBar(props: TopBarProps) {
       label: '最近打开的工程',
       children: recentProjects.map((p: RecentProject) => ({
         key: 'recent-' + p.id,
-        label: p.starName === currentStar ? p.starName + '(当前)' : p.starName + ' / ' + p.wsName,
+        // 当前工程必须星火目录+工作区都匹配；多个工程共用同一星火目录时只比 starName 会全部误标「当前」
+        label: `${p.starName} / ${p.wsName}${p.starName === currentStar && p.wsName === currentWs ? '（当前）' : ''}`,
         onClick: () => { void handleSwitchProject(p) },
       })),
     }] : []),

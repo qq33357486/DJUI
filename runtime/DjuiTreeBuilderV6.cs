@@ -1,6 +1,7 @@
 // DJUI Runtime - focused protocol v6 persistent authored-tree builder
 #if CLIENT
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using GameUI.Control;
 using GameUI.Control.Primitive;
@@ -40,6 +41,10 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     }
 
     public T? GetControl<T>(string nodeId) where T : Control => Session.GetControl<T>(nodeId);
+
+    // CloneControl 构建管线入口（BuildClone 使用）
+    internal DjuiImageVisualLayerV6 ImageVisuals => _imageVisuals;
+    internal DjuiButtonStateRegistryV6 ButtonStates => _buttonStates;
 
     public void Dispose()
     {
@@ -116,7 +121,7 @@ public static class DjuiTreeBuilderV6
         }
     }
 
-    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
+    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true)
     {
         if (string.Equals(node.StarType, "TemplateInstance", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"DJUI v6: template node '{node.Id}' was not expanded.");
@@ -139,14 +144,57 @@ public static class DjuiTreeBuilderV6
         ApplyInteraction(control, node.Interaction);
         ApplyEffects(control, node.Effects);
         session.Register(node.Id, control);
-        DjuiActionRouter.BindAction(control, node.Djui?.Action);
-        DjuiAudioSystem.BindClickSound(control, node.Djui?.ClickSoundId);
-        foreach (var binding in node.Djui?.Bindings ?? [])
-            bindingRegistrations.Add(DjuiBindingSystem.RegisterBinding(control, binding.Key, binding.Value));
-
-        foreach (var childNode in node.Children)
+        if (bindBehaviors)
         {
-            var child = BuildNode(childNode, session, defaultFont, imageVisuals, buttonStates, bindingRegistrations);
+            DjuiActionRouter.BindAction(control, node.Djui?.Action);
+            DjuiAudioSystem.BindClickSound(control, node.Djui?.ClickSoundId);
+            foreach (var binding in node.Djui?.Bindings ?? [])
+                bindingRegistrations.Add(DjuiBindingSystem.RegisterBinding(control, binding.Key, binding.Value));
+        }
+
+        if (recurse)
+            foreach (var childNode in node.Children)
+            {
+                var child = BuildNode(childNode, session, defaultFont, imageVisuals, buttonStates, bindingRegistrations);
+                child.Parent = control;
+            }
+        return control;
+    }
+
+    /// <summary>
+    /// CloneControl 构建核心：JSON 克隆源子树 → 全树 id 加防冲突后缀 → 逐节点走同一构建管线
+    /// （不绑 action/音效/数据绑定——克隆体无行为，如同 new）→ 按源子树解算矩形 ApplyRect
+    /// （局部矩形，克隆体初始与源完全重叠，父级/位置归调用方）。
+    /// 克隆节点以新 id 登记进布局会话：不参与 relayout，但树销毁时 ClearBehaviors/特效清理覆盖克隆体（R5 同款竞态防护）。
+    /// </summary>
+    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved)
+    {
+        var node = JsonSerializer.Deserialize<DjuiNodeV6>(JsonSerializer.Serialize(source, CloneJsonOptions), CloneJsonOptions)
+            ?? throw new InvalidOperationException("DJUI v6: clone JSON round-trip failed");
+        ApplyCloneIds(node, idSuffix);
+        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, buttonStates, solved, null);
+    }
+
+    private static readonly JsonSerializerOptions CloneJsonOptions = new();
+
+    private static void ApplyCloneIds(DjuiNodeV6 node, string idSuffix)
+    {
+        node.Id += idSuffix;
+        foreach (var child in node.Children) ApplyCloneIds(child, idSuffix);
+    }
+
+    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, DjuiRectV6? parentRect)
+    {
+        var control = BuildNode(node, session, defaultFont, imageVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false);
+        if (solved.TryGetValue(origin.Id, out var rect))
+        {
+            var local = parentRect is { } pr ? new DjuiRectV6(rect.X - pr.X, rect.Y - pr.Y, rect.Width, rect.Height) : rect;
+            DjuiLayoutSessionV6.ApplyRect(control, local);
+        }
+        DjuiRectV6? ownRect = solved.TryGetValue(origin.Id, out var own) ? own : null;
+        for (var i = 0; i < node.Children.Count; i++)
+        {
+            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, buttonStates, solved, ownRect);
             child.Parent = control;
         }
         return control;
@@ -154,6 +202,8 @@ public static class DjuiTreeBuilderV6
 
     private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates)
     {
+        // 控件 Name 取页面 JSON 的 name 字段——引擎 FindChild(name) / FindChildren(name) 的寻址依据（含克隆体）
+        if (!string.IsNullOrWhiteSpace(node.Name)) control.Name = node.Name;
         ApplyBasic(control, node.Basic);
         ApplyTransformFields(control, node.Transform);
         ApplyAppearance(control, node.Appearance);

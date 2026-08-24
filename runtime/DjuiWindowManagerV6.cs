@@ -127,6 +127,38 @@ public static class DjuiWindowManagerV6
         return PageInstances.TryGetValue(pageId, out var ids) ? ids.AsReadOnly() : Array.Empty<string>();
     }
 
+    private static ulong _nextCloneSeq;
+
+    /// <summary>
+    /// 复制窗口内一个节点子树，返回一份新构建的控件实例（不挂树、不绑 action/音效/数据绑定——如同 new）。
+    /// 克隆体沿用源子树当前解算矩形，初始与源完全重叠；父级/位置/显隐由调用方管理。
+    /// 克隆体登记进布局会话但 authored 树不变——relayout（转屏/缩放）不作用于克隆体，需要跟随重排时销毁重建。
+    /// 子控件寻址：控件 Name 取自页面 JSON 的 name 字段，用引擎 FindChild(name)/FindChildren(name)。
+    /// </summary>
+    public static Control CloneControl(string windowInstanceId, string nodeInstanceId)
+    {
+        var project = _project ?? throw new InvalidOperationException("DJUI v6: 请先 Initialize");
+        var instance = Instances.TryGetValue(windowInstanceId, out var tree)
+            ? tree
+            : throw new KeyNotFoundException($"DJUI v6: 窗口实例不存在: {windowInstanceId}");
+        var source = FindNode(instance.Session.CurrentPage.Root, nodeInstanceId)
+            ?? throw new KeyNotFoundException($"DJUI v6: 节点不存在: {nodeInstanceId}");
+        var solved = DjuiLayoutSolverV6.SolveV6(instance.Session.CurrentPage, instance.Session.CurrentPlan);
+        var suffix = "#c" + (++_nextCloneSeq).ToString();
+        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ButtonStates, suffix, solved);
+    }
+
+    private static DjuiNodeV6? FindNode(DjuiNodeV6 root, string id)
+    {
+        if (string.Equals(root.Id, id, StringComparison.Ordinal)) return root;
+        foreach (var child in root.Children)
+        {
+            var hit = FindNode(child, id);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
     public static void CloseWindow(string pageOrInstanceId)
     {
         var windowInstanceId = SingletonInstances.TryGetValue(pageOrInstanceId, out var singletonId) ? singletonId : pageOrInstanceId;

@@ -23,7 +23,7 @@ import DjuiWindowManager from '../../../../runtime/DjuiWindowManager.cs?raw'
 import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.7.18'
+export const RUNTIME_VERSION = '0.7.19'
 
 export interface BundledRuntimeFile {
   name: string

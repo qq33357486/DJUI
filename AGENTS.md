@@ -191,6 +191,18 @@ CHANGELOG 是**给用户看的更新公告**，会在 WhatsNewModal 里直接展
 - [ ] `CHANGELOG.md` 有对应版本的条目，分类和条目完整
 - [ ] `npx tsc --noEmit` 通过
 - [ ] `npm run build` 通过
-- [ ] 推送后等待 Docker 打包成功，再用 `C:\Users\limen\OneDrive\文档\服务器登录凭证\论坛.bat` 的论坛服务器凭证更新容器
+- [ ] 推送后等待 Docker 打包成功（`gh run watch`），再按下方「服务器更新」流程更新线上容器
+
+### 服务器更新（强制：容器编排模式）
+
+线上编辑器部署在腾讯云服务器，**由 docker compose 编排管理**（编排目录 `/soft/DJUI`，容器名 `djui`，网络 `djui_default`，端口 37241→80）。
+
+```bash
+ssh -i ~/.ssh/tencent_new_key root@106.55.180.108
+cd /soft/DJUI && docker compose pull && docker compose up -d
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:37241/   # 必须返回 200
+```
+
+**禁止裸 `docker run` 重建容器**——会脱离编排管理、丢失 `djui_default` 网络（2026-08-24 实证：裸起容器后网络退回默认 bridge，用户纠正后恢复）。
 
 > 此文件由人工维护，描述工具仓库本身。请随架构演进同步更新。

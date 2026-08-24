@@ -294,6 +294,130 @@ function NineSliceImage({ image, x, y, width, height, rotation, opacity, edges }
   )
 }
 
+type ProgressPreviewMode = 'LeftToRight' | 'RightToLeft' | 'TopToBottom' | 'BottomToTop' | 'Clockwise' | 'CounterClockwise'
+
+function drawRoundedClipPath(ctx: any, x: number, y: number, width: number, height: number, radius: number) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2))
+  const right = x + width
+  const bottom = y + height
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(right - r, y)
+  ctx.quadraticCurveTo(right, y, right, y + r)
+  ctx.lineTo(right, bottom - r)
+  ctx.quadraticCurveTo(right, bottom, right - r, bottom)
+  ctx.lineTo(x + r, bottom)
+  ctx.quadraticCurveTo(x, bottom, x, bottom - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, value, mode, progressRotation, imagePath, imageFit, sourceSize, focalX, focalY, sliceEdges, cornerRadius }: {
+  image: HTMLImageElement | null
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  value: number
+  mode: ProgressPreviewMode
+  progressRotation: number
+  imagePath?: string | null
+  imageFit: 'stretch' | 'contain' | 'cover'
+  sourceSize?: { width: number; height: number } | null
+  focalX: number
+  focalY: number
+  sliceEdges?: SliceEdges
+  cornerRadius?: number
+}) {
+  const progress = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+  if (progress <= 0 || width <= 0 || height <= 0) return null
+
+  const isRadial = mode === 'Clockwise' || mode === 'CounterClockwise'
+  const isHorizontal = mode === 'LeftToRight' || mode === 'RightToLeft'
+  const clipWidth = isHorizontal ? width * progress : width
+  const clipHeight = isHorizontal ? height : height * progress
+  const clipX = mode === 'RightToLeft' ? width - clipWidth : 0
+  const clipY = mode === 'BottomToTop' ? height - clipHeight : 0
+  // 进度条默认按胶囊形裁剪；显式填写 cornerRadius=0 时允许使用方形。
+  const radius = cornerRadius ?? Math.min(width, height) / 2
+
+  const fit = computeImageFit(
+    sourceSize?.width ?? image?.naturalWidth ?? image?.width ?? width,
+    sourceSize?.height ?? image?.naturalHeight ?? image?.height ?? height,
+    width,
+    height,
+    imageFit,
+    focalX,
+    focalY,
+  )
+  const useNineSlice = !!(image && imagePath && sliceEdges && (sliceEdges.left || sliceEdges.top || sliceEdges.right || sliceEdges.bottom))
+
+  return (
+    <Group
+      x={x}
+      y={y}
+      rotation={rotation}
+      opacity={opacity}
+      listening={false}
+      clipFunc={(ctx) => {
+        if (isRadial) {
+          const centerX = width / 2
+          const centerY = height / 2
+          const radialRadius = Math.min(width, height) / 2
+          const start = ((progressRotation - 90) * Math.PI) / 180
+          const end = start + (mode === 'CounterClockwise' ? -1 : 1) * Math.PI * 2 * progress
+          ctx.beginPath()
+          ctx.moveTo(centerX, centerY)
+          ctx.lineTo(centerX + Math.cos(start) * radialRadius, centerY + Math.sin(start) * radialRadius)
+          ctx.arc(centerX, centerY, radialRadius, start, end, mode === 'CounterClockwise')
+          ctx.closePath()
+          return
+        }
+        drawRoundedClipPath(ctx, clipX, clipY, clipWidth, clipHeight, radius)
+      }}
+    >
+      {useNineSlice && image && sliceEdges ? (
+        <NineSliceImage
+          image={image}
+          x={0}
+          y={0}
+          width={width}
+          height={height}
+          rotation={0}
+          opacity={1}
+          edges={sliceEdges}
+        />
+      ) : image ? (
+        <KImage
+          image={image}
+          x={fit.x}
+          y={fit.y}
+          width={fit.width}
+          height={fit.height}
+          cropX={fit.crop?.x}
+          cropY={fit.crop?.y}
+          cropWidth={fit.crop?.width}
+          cropHeight={fit.crop?.height}
+          listening={false}
+        />
+      ) : (
+        <Rect
+          x={clipX}
+          y={clipY}
+          width={clipWidth}
+          height={clipHeight}
+          fill="#5ab9ff"
+          opacity={0.65}
+          listening={false}
+        />
+      )}
+    </Group>
+  )
+}
+
 // === 辅助 ===
 function findNodeById(root: UiNode, id: string): UiNode | null {
   if (root.id === id) return root
@@ -890,6 +1014,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   }
 
   const hasImage = !!image
+  const isProgress = node.starType === 'Progress'
 
   // 禁用中的按钮：配置了禁用图则直接替换正常图；否则灰化兜底（降透明 + 灰罩 + 角标）
   const isButtonDisabled = node.starType === 'Button' && node.basic?.disabled === true
@@ -962,8 +1087,28 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           onTransformEnd(node)
         }}
       />
-      {/* 图片渲染：在 Rect 上层，铺满控件框 */}
-      {hasImage && effectiveImage && useNineSlice && sliceEdges ? (
+      {/* 图片渲染：在 Rect 上层，铺满控件框；Progress 使用真实裁剪预览 */}
+      {isProgress ? (
+        <ProgressImagePreview
+          image={effectiveImage}
+          x={displayX}
+          y={displayY}
+          width={width}
+          height={height}
+          rotation={rotation}
+          opacity={renderOpacity}
+          value={node.progress?.value ?? 0.5}
+          mode={node.progress?.progressionMode ?? 'LeftToRight'}
+          progressRotation={node.progress?.rotation ?? 0}
+          imagePath={effectiveImagePath}
+          imageFit={app.imageFit ?? 'stretch'}
+          sourceSize={app.sourceSize}
+          focalX={app.focalX ?? 0.5}
+          focalY={app.focalY ?? 0.5}
+          sliceEdges={sliceEdges}
+          cornerRadius={app.cornerRadius}
+        />
+      ) : hasImage && effectiveImage && useNineSlice && sliceEdges ? (
         <NineSliceImage
           image={effectiveImage}
           x={displayX}
@@ -1078,28 +1223,6 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           <Text text="禁" fontSize={10} width={26} height={16} align="center" verticalAlign="middle" fill="#ffffff" />
         </Group>
       )}
-      {/* 进度条预览（Progress 类型）*/}
-      {node.starType === 'Progress' && (() => {
-        const prog = node.progress ?? {}
-        const value = prog.value ?? 0.5
-        const mode = prog.progressionMode ?? 'LeftToRight'
-        // 计算进度遮罩区域
-        let clipX = displayX, clipY = displayY, clipW = width, clipH = height
-        if (mode === 'LeftToRight') { clipW = width * value }
-        else if (mode === 'RightToLeft') { clipX = displayX + width * (1 - value); clipW = width * value }
-        else if (mode === 'TopToBottom') { clipH = height * value }
-        else if (mode === 'BottomToTop') { clipY = displayY + height * (1 - value); clipH = height * value }
-        // Clockwise/CounterClockwise 暂用线性近似（后续可用 Arc 实现）
-        else if (mode === 'Clockwise' || mode === 'CounterClockwise') { clipW = width * value }
-        // 用半透明绿色遮罩表示进度区域
-        return (
-          <Rect
-            x={clipX} y={clipY} width={clipW} height={clipH}
-            fill={hasImage ? 'rgba(90,185,255,0.25)' : 'rgba(90,255,128,0.15)'}
-            listening={false}
-          />
-        )
-      })()}
       {/* 类型标签 */}
       {isSelected && (
         <Text

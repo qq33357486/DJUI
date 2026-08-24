@@ -471,7 +471,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                           options={PROG_MODES}
                         />
                       </FieldRow>
-                      <ScrubField label="进度" value={prog.value ?? 0.5} onChange={v => updateNodeField(node.id, 'progress.value', v)} step={0.01} min={0} max={1} />
+                      <ScrubField label="进度" value={prog.value ?? 0.5} onChange={v => updateNodeField(node.id, 'progress.value', v)} step={0.01} min={0} max={1} dragSensitivity={0.005} />
                       {isRotary && (
                         <ScrubField label="起始角" value={prog.rotation ?? 0} onChange={v => updateNodeField(node.id, 'progress.rotation', v)} suffix="°" />
                       )}
@@ -479,9 +479,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                     </>
                   )
                 })()}
-                <FieldRow label="背景图">
+                <FieldRow label={node.starType === 'Progress' ? '进度图' : '背景图'}>
                   <Button size="small" block onClick={() => openAssetPicker('appearance.image')}>
-                    {app.image ? `📷 ${app.image.split('/').pop()}` : '📷 选择图片'}
+                    {app.image ? `📷 ${app.image.split('/').pop()}` : `📷 选择${node.starType === 'Progress' ? '进度' : '背景'}图`}
                   </Button>
                 </FieldRow>
                 {app.image && (
@@ -1808,7 +1808,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // === NGUI 风格拖拽改值组件 ===
 // 标签可拖拽（左右滑动改值），InputNumber 可手动输入
-function ScrubField({ label, value, onChange, step = 1, min, max, suffix }: {
+function ScrubField({ label, value, onChange, step = 1, min, max, suffix, dragSensitivity }: {
   label: string
   value: number
   onChange: (v: number) => void
@@ -1816,6 +1816,7 @@ function ScrubField({ label, value, onChange, step = 1, min, max, suffix }: {
   min?: number
   max?: number
   suffix?: string
+  dragSensitivity?: number
 }) {
   const dragRef = useRef<{ startX: number; startVal: number } | null>(null)
   const inputRef = useRef<any>(null)
@@ -1828,9 +1829,9 @@ function ScrubField({ label, value, onChange, step = 1, min, max, suffix }: {
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return
       const dx = ev.clientX - dragRef.current.startX
-      let speed = 1
-      if (ev.shiftKey) speed = 0.1
-      else if (ev.ctrlKey || ev.metaKey) speed = 10
+      let speed = dragSensitivity ?? 1
+      if (ev.shiftKey) speed *= 0.1
+      else if (ev.ctrlKey || ev.metaKey) speed *= 10
       const raw = dragRef.current.startVal + dx * speed
       const rounded = step >= 1 ? Math.round(raw) : Math.round(raw * 100) / 100
       if (min !== undefined && rounded < min) { onChange(min); return }

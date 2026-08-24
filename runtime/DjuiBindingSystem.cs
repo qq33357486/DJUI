@@ -55,7 +55,11 @@ public static class DjuiBindingSystem
             "visible" => value => control.Visible = value is bool visible && visible,
             "disabled" => value => DjuiButtonState.SetDisabled(control, value is bool disabled && disabled),
             "text" when control is Label label => value => label.Text = value?.ToString() ?? "",
-            "value" when control is Progress progress => value => progress.Value = Convert.ToSingle(value ?? 0f),
+            "value" when control is Progress progress => value =>
+            {
+                progress.Value = Convert.ToSingle(value ?? 0f);
+                DjuiProgressVisualLayerV6.NotifyValueChanged(progress);
+            },
             _ => null,
         };
     }

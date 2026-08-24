@@ -145,7 +145,7 @@ public static class DjuiWindowManagerV6
             ?? throw new KeyNotFoundException($"DJUI v6: 节点不存在: {nodeInstanceId}");
         var solved = DjuiLayoutSolverV6.SolveV6(instance.Session.CurrentPage, instance.Session.CurrentPlan);
         var suffix = "#c" + (++_nextCloneSeq).ToString();
-        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ButtonStates, suffix, solved);
+        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.ButtonStates, suffix, solved);
     }
 
     private static DjuiNodeV6? FindNode(DjuiNodeV6 root, string id)

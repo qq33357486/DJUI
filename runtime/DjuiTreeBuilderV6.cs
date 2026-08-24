@@ -47,13 +47,27 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         _disposed = true;
         foreach (var registration in _bindingRegistrations) registration.Dispose();
         _bindingRegistrations.Clear();
+
+        // R5（0.7.18）：销毁树前提前清空 behaviors——控件进入 Dispose 后 IsValid 即失效，
+        // 引擎 DisposeManaged 仍会 ClearBehaviors，TouchBehavior.OnDetached 在失效态恢复按压
+        // 快照写 Oplicity 会抛 "Control is not valid"（关窗转场 FinalizeClose 路径必现一次）。
+        // 此处控件仍有效，OnDetached 在合法时机执行，从根上绕开竞态。
+        foreach (var control in Session.Controls.Values)
+        {
+            if (control.IsValid) control.ClearBehaviors();
+        }
+
         foreach (var control in Session.Controls.Values) DjuiEffectPlayer.Stop(control);
         Session.Dispose();
         _imageVisuals.Dispose();
         _buttonStates.Dispose();
-        Root.Dispose();
+
+        // R5 兜底：树销毁分步隔离——单步异常不阻断后续清理（Host 悬挂泄漏比一次可捕获异常更糟）
+        try { Root.Dispose(); }
+        catch (Exception ex) { Game.Logger.LogWarning("DJUI v6: Root.Dispose 异常（已隔离）：{Message}", ex.Message); }
         Host.RemoveFromVisualTreeAndParent();
-        Host.Dispose();
+        try { Host.Dispose(); }
+        catch (Exception ex) { Game.Logger.LogWarning("DJUI v6: Host.Dispose 异常（已隔离）：{Message}", ex.Message); }
     }
 }
 

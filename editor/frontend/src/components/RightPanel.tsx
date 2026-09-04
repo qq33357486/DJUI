@@ -1244,6 +1244,8 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
   const { allPages, pageUnderlays, setPageUnderlays } = useEditorStore()
   const { config } = useProjectStore()
   const underlaySaveRevision = useRef(0)
+  // Hooks 必须在下方 if (!page) 早退之前声明——页面有无选中时 hooks 数量必须一致
+  const [retainedSaving, setRetainedSaving] = useState(false)
   if (!page) {
     return <div style={{ padding: '16px' }}><Empty description="请选择窗口" image={Empty.PRESENTED_IMAGE_SIMPLE} /></div>
   }
@@ -1303,7 +1305,6 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
 
   // 常驻复用是工程级配置（project.json 的 retainedPages），与页面 JSON 解耦——勾选即写工程配置，不触发页面重建
   const retained = config?.retainedPages?.includes(page.pageId) ?? false
-  const [retainedSaving, setRetainedSaving] = useState(false)
   const toggleRetained = async (checked: boolean) => {
     const cfg = useProjectStore.getState().config
     if (!cfg) return

@@ -104,12 +104,14 @@ public static class DjuiWindowManagerV6
         Game.Logger.LogInformation("DJUI v6: 已严格加载 {Count} 个页面（窗口池容量 {Capacity}，钉住 {Pinned} 页）", Pages.Count, _poolCapacity, PinnedPages.Count);
     }
 
-    /// <summary>兼容业务页面语义：同一 pageId 只打开一个单例窗口。保留池命中时直接复用（不重建树）。</summary>
+    /// <summary>兼容业务页面语义：同一 pageId 只打开一个单例窗口。已开＝置顶聚焦（重挂视觉树末尾，命中序＝树序，ZIndex 不参与命中）。</summary>
     public static Panel OpenWindow(string pageId)
     {
         if (SingletonInstances.TryGetValue(pageId, out var existing) && Instances.TryGetValue(existing, out var open))
         {
             CancelClosing(existing);
+            open.Host.RemoveFromVisualTreeAndParent();   // 开窗＝聚焦置顶：防被后开的基础页盖住
+            open.Host.AddToVisualTree();
             return open.Root;
         }
         if (TryReusePooled(pageId, out var reused)) return reused;
@@ -117,6 +119,29 @@ public static class DjuiWindowManagerV6
         SingletonInstances[pageId] = id;
         SingletonOpened.Add(id);
         return Instances[id].Root;
+    }
+
+    /// <summary>把已开窗口移到窗口栈最前（重挂视觉树末尾）。先开的弹窗被后开的基础页盖住时用它恢复可点性。</summary>
+    public static void BringToFront(string pageId)
+    {
+        if (!SingletonInstances.TryGetValue(pageId, out var id) || !Instances.TryGetValue(id, out var instance)) return;
+        instance.Host.RemoveFromVisualTreeAndParent();
+        instance.Host.AddToVisualTree();
+    }
+
+    /// <summary>
+    /// 把已开窗口压到窗口栈最底：其余已开窗口逐个重挂到视觉树末尾（命中序＝树序，重挂后其余窗口都在目标之上）。
+    /// 场景类基础页专用——无论何时（重）开都不遮业务弹窗。
+    /// </summary>
+    public static void SendToBack(string pageId)
+    {
+        if (!SingletonInstances.TryGetValue(pageId, out var targetId)) return;
+        foreach (var pair in Instances)
+        {
+            if (pair.Key == targetId) continue;
+            pair.Value.Host.RemoveFromVisualTreeAndParent();
+            pair.Value.Host.AddToVisualTree();
+        }
     }
 
     /// <summary>保留池复用：按 pageId 找单例实例条目，取出挂树、回注册表、重解算、播 open 转场。</summary>

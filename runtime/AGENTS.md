@@ -139,6 +139,14 @@ DjuiWindowManagerV6.OnDestroy(页, () => { });       // 真正销毁前（极少
 - **不要跨关闭缓存控件引用**：关闭后重开可能拿到复用旧树或重建新树，一律 `GetSingletonControl` 现查现用
 - 事件回调异常会被隔离并记日志，不会阻断窗口状态机；`GetLifecycleStats()` 返回（建树/复用/销毁）计数，供验收排障
 
+### 窗口层序管理
+
+窗口默认按打开次序叠放（后开在上；**命中序＝视觉树序，ZIndex 不参与命中**）：
+
+- `OpenWindow` 已开页＝置顶聚焦（自动重挂树末尾），先开的弹窗不会被后开的基础页盖住
+- `BringToFront(pageId)`：把已开窗口手动移到最前（恢复被盖住弹窗的可点性）
+- `SendToBack(pageId)`：把已开窗口压到最底——场景类基础页专用，任何时刻（重）开都不遮业务弹窗
+
 ## 字体
 
 - 页面控件不写 `text.font` 时，用 `project.json` 的 `defaultFont`；`defaultFont` 为 `null` 时用**引擎默认字体**

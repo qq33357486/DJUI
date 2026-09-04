@@ -370,8 +370,8 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit', page
               name="retainedPages"
               label={
                 <Space>
-                  <strong>常驻复用页面</strong>
-                  <Tooltip title="勾选的页面关闭后不销毁、常驻隐藏池，重开时直接复用（适合确认框、弹窗等连开连关的高频页）。其余页面进入窗口池按容量先进先出复用。">
+                  <strong>常驻复用页面（清单）</strong>
+                  <Tooltip title="已开启常驻复用的页面清单（各页面右侧属性栏「窗口」分组也可单独勾选）。清单中的页面关闭后不销毁、常驻隐藏池，重开直接复用；其余页面进入窗口池按容量先进先出。">
                     <InfoCircleOutlined style={{ color: '#5b6378' }} />
                   </Tooltip>
                 </Space>
@@ -381,9 +381,13 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit', page
               <Select
                 mode="multiple"
                 allowClear
-                placeholder="选择关闭后需要常驻复用的页面"
+                placeholder="选择需要常驻复用的页面"
                 options={Array.from(new Set([...(pages ?? []), ...(config?.retainedPages ?? [])]))
-                  .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+                  .sort((a, b) => {
+                    const inA = (config?.retainedPages ?? []).includes(a) ? 0 : 1
+                    const inB = (config?.retainedPages ?? []).includes(b) ? 0 : 1
+                    return inA - inB || a.localeCompare(b, 'zh-Hans-CN')
+                  })
                   .map(page => ({ value: page, label: page }))}
               />
             </Form.Item>

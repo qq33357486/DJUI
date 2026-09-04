@@ -1301,6 +1301,25 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
     })
   }
 
+  // 常驻复用是工程级配置（project.json 的 retainedPages），与页面 JSON 解耦——勾选即写工程配置，不触发页面重建
+  const retained = config?.retainedPages?.includes(page.pageId) ?? false
+  const [retainedSaving, setRetainedSaving] = useState(false)
+  const toggleRetained = async (checked: boolean) => {
+    const cfg = useProjectStore.getState().config
+    if (!cfg) return
+    const list = new Set(cfg.retainedPages ?? [])
+    if (checked) list.add(page.pageId)
+    else list.delete(page.pageId)
+    setRetainedSaving(true)
+    try {
+      await useProjectStore.getState().setConfig({ ...cfg, retainedPages: [...list] })
+    } catch (error) {
+      message.error(error instanceof Error ? `保存常驻复用失败：${error.message}` : '保存常驻复用失败')
+    } finally {
+      setRetainedSaving(false)
+    }
+  }
+
   return (
     <div style={{ padding: '4px 8px 16px' }}>
       <Collapse
@@ -1379,6 +1398,17 @@ function PageInspector({ page, updatePageMeta, openAssetPicker }: {
                 </FieldRow>
                 <div style={{ fontSize: 10, color: '#5b6378' }}>
                   编辑此页时，后景页会以只读方式完整置于画布底层；该设置不发布到 Runtime。
+                </div>
+                <FieldRow label="常驻复用">
+                  <Switch
+                    size="small"
+                    checked={retained}
+                    loading={retainedSaving}
+                    onChange={checked => { void toggleRetained(checked) }}
+                  />
+                </FieldRow>
+                <div style={{ fontSize: 10, color: '#5b6378' }}>
+                  开启后本页关闭不销毁、常驻隐藏池，重开直接复用不重建（适合确认框等连开连关的高频页）。未开启的页面进入窗口池按容量先进先出复用。
                 </div>
               </Space>
             ),

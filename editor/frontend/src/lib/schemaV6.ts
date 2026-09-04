@@ -48,6 +48,13 @@ export function inspectProjectV6(raw: unknown): CompatibilityResult<ProjectFileV
     checkPositive(raw.responsive.wideRatio, '$.responsive.wideRatio', issues)
     if (typeof raw.responsive.wideRatio === 'number' && raw.responsive.wideRatio <= 1) issues.push({ path: '$.responsive.wideRatio', message: '必须大于 1' })
   }
+  // 0.8.0 可选字段：窗口保留池配置（存在才校验，老工程缺省通过）
+  if (raw.retainedPages !== undefined && (!Array.isArray(raw.retainedPages) || raw.retainedPages.some(page => typeof page !== 'string'))) {
+    issues.push({ path: '$.retainedPages', message: '必须是页面 ID 字符串数组' })
+  }
+  if (raw.poolCapacity !== undefined && (typeof raw.poolCapacity !== 'number' || !Number.isInteger(raw.poolCapacity) || raw.poolCapacity < 0 || raw.poolCapacity > 100)) {
+    issues.push({ path: '$.poolCapacity', message: '必须是 0~100 的整数' })
+  }
   return issues.length ? { ok: false, kind: 'invalid', issues } : { ok: true, value: raw as unknown as ProjectFileV6 }
 }
 

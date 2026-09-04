@@ -235,6 +235,10 @@ export interface ProjectConfig {
   wideRatio?: number
   /** 全局默认字体（未单独设字体的 Label/Input 使用） */
   defaultFont?: string | null
+  /** 窗口保留池钉住白名单（关闭后常驻复用、永不淘汰；发布到 project.json 的 retainedPages） */
+  retainedPages?: string[]
+  /** 窗口保留池容量（非钉住页面数上限，0＝纯钉住模式；发布到 project.json 的 poolCapacity） */
+  poolCapacity?: number
 }
 
 // 组件库定义

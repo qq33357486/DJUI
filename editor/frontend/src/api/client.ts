@@ -173,7 +173,7 @@ export type ProjectFileLoadResult =
   | { status: 'missing' }
   | { status: 'blocked'; kind: 'legacy' | 'future' | 'invalid'; issues: CompatibilityIssue[] }
 
-export function createProjectFileV6(config: Pick<ProjectConfig, 'orientation' | 'designWidth' | 'designHeight' | 'defaultFont' | 'canvasMode' | 'wideRatio'>): ProjectFileV6 {
+export function createProjectFileV6(config: Pick<ProjectConfig, 'orientation' | 'designWidth' | 'designHeight' | 'defaultFont' | 'canvasMode' | 'wideRatio' | 'retainedPages' | 'poolCapacity'>): ProjectFileV6 {
   return {
     protocolVersion: DJUI_PROTOCOL_VERSION,
     schemaVersion: DJUI_SCHEMA_VERSION,
@@ -185,6 +185,8 @@ export function createProjectFileV6(config: Pick<ProjectConfig, 'orientation' | 
     },
     responsive: { wideRatio: config.wideRatio ?? activeProjectFileV6?.responsive.wideRatio ?? DEFAULT_WIDE_RATIO },
     defaultFont: config.defaultFont ?? null,
+    retainedPages: config.retainedPages ?? activeProjectFileV6?.retainedPages ?? [],
+    poolCapacity: config.poolCapacity ?? activeProjectFileV6?.poolCapacity ?? 5,
   }
 }
 
@@ -202,6 +204,8 @@ export function projectConfigFromV6(project: ProjectFileV6): ProjectConfig {
     canvasMode: project.canvas.mode,
     wideRatio: project.responsive.wideRatio,
     defaultFont: project.defaultFont ?? null,
+    retainedPages: project.retainedPages ?? [],
+    poolCapacity: project.poolCapacity ?? 5,
   }
 }
 

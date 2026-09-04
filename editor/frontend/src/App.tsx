@@ -504,6 +504,7 @@ export default function App() {
         <ConfigModal
           open={configOpen}
           mode={configMode}
+          pages={pages}
           onClose={() => setConfigOpen(false)}
           onSave={handleConfigSaved}
         />
@@ -577,6 +578,7 @@ export default function App() {
       <ConfigModal
         open={configOpen}
         mode={configMode}
+        pages={pages}
         onClose={() => setConfigOpen(false)}
         onSave={handleConfigSaved}
       />

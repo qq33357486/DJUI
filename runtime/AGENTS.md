@@ -115,6 +115,30 @@ DjuiButtonState.SetDisabled(btn, false);
 
 旧的 target: image 仍可用于“只跟随图帧位置/边界”的普通容器，但它**不会**把绝对定位的子元素缩放；素材坐标场景必须升级为 sceneFrame。
 
+## 窗口池化与生命周期（0.8.0：关闭与销毁分离）
+
+`CloseWindow` 只做「摘栈＋隐藏」（`IsOpen` 立即 false，寻址注册表同步注销——语义与旧版一致）；控件树进入**保留池**待复用，不再同帧销毁：
+
+- **窗口池**：`OpenWindow` 单例路径的实例关闭后进 FIFO 池（默认容量 `project.json` 的 `poolCapacity`＝5）；重开命中池＝直接复用（不重建树、播 open 转场）；复用后再关闭重新排到最新＝高频页天然留池
+- **钉住白名单**：`project.json` 的 `retainedPages: [...]` 中的页面永不淘汰、常驻复用（通用确认框这类连弹页建议钉住）
+- **销毁缓冲**：池淘汰 / `OpenInstance` 多实例关闭 / `CloseAll` 统一经 250ms 缓冲再真正 `Dispose`——按压回弹动画在活树上自然播完，业务侧**不再需要延时关窗规避**（直接 `CloseWindow` 即可）
+- `OpenInstance` 显式多实例不入池不复用；`CloseAll`/`Initialize` 全清池（页面 JSON 更新后旧树绝不复用）
+
+### 生命周期事件（业务侧范式）
+
+```csharp
+// 模块初始化() 里注册一次（Initialize 之后；进程级，多订阅）：
+DjuiWindowManagerV6.OnCreate(页, () => 接线X页());   // 建树后（池淘汰后重开＝重建＝再次触发；DjuiActionRouter.On 为覆盖语义，重复接线安全）
+DjuiWindowManagerV6.OnOpen (页, () => 刷新X页());    // 每次显示（新建 / 池复用），OpenWindow 返回前同步触发
+DjuiWindowManagerV6.OnClose(页, () => 清理X页());   // 摘栈进池前——寻址仍可用，清回调引用/重置临时状态的最后机会
+DjuiWindowManagerV6.OnDestroy(页, () => { });       // 真正销毁前（极少用到；数据订阅挂模块初始化、勿挂此处）
+```
+
+- 打开方法瘦身成「**先存状态字段 → `OpenWindow(页)`**」，刷新逻辑放 `OnOpen`（等价于旧「打开后手动刷新」，二选一即可）
+- 关闭转场中途重开（`CancelClosing`）不触发任何事件——窗口从未真正关闭
+- **不要跨关闭缓存控件引用**：关闭后重开可能拿到复用旧树或重建新树，一律 `GetSingletonControl` 现查现用
+- 事件回调异常会被隔离并记日志，不会阻断窗口状态机；`GetLifecycleStats()` 返回（建树/复用/销毁）计数，供验收排障
+
 ## 字体
 
 - 页面控件不写 `text.font` 时，用 `project.json` 的 `defaultFont`；`defaultFont` 为 `null` 时用**引擎默认字体**

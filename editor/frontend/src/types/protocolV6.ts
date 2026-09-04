@@ -25,6 +25,10 @@ export interface ProjectFileV6 {
     wideRatio: number
   }
   defaultFont?: string | null
+  /** 窗口保留池钉住白名单（0.8.0 可选字段：这些页面关闭后常驻复用、永不淘汰） */
+  retainedPages?: string[]
+  /** 窗口保留池容量（非钉住页面数上限；0＝纯钉住模式；缺省 5） */
+  poolCapacity?: number
 }
 
 export interface PageLocalSizeV6 { width: number; height: number }

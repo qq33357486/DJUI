@@ -21,6 +21,10 @@ public sealed class DjuiProjectV6
     [JsonPropertyName("canvas")] public DjuiCanvasConfigV6 Canvas { get; set; } = new();
     [JsonPropertyName("responsive")] public DjuiResponsiveConfigV6 Responsive { get; set; } = new();
     [JsonPropertyName("defaultFont")] public string? DefaultFont { get; set; }
+
+    // 0.8.0 可选字段：关闭页面的保留池配置（缺省＝空名单＋默认容量，老工程零配置即享池化）
+    [JsonPropertyName("retainedPages")] public List<string>? RetainedPages { get; set; }
+    [JsonPropertyName("poolCapacity")] public int? PoolCapacity { get; set; }
 }
 
 public sealed class DjuiCanvasConfigV6

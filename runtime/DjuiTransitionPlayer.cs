@@ -42,7 +42,10 @@ public sealed class DjuiTransitionPlayer : IThinker
         for (var i = Animations.Count - 1; i >= 0; i--)
         {
             if (Animations[i].Id == id)
+            {
+                Animations[i].Restore();
                 Animations.RemoveAt(i);
+            }
         }
     }
 
@@ -51,7 +54,10 @@ public sealed class DjuiTransitionPlayer : IThinker
         for (var i = Animations.Count - 1; i >= 0; i--)
         {
             if (ReferenceEquals(Animations[i].Control, control))
+            {
+                Animations[i].Restore();
                 Animations.RemoveAt(i);
+            }
         }
     }
 
@@ -81,6 +87,7 @@ public sealed class DjuiTransitionPlayer : IThinker
             if (progress >= 1f)
             {
                 Animations.RemoveAt(i);
+                animation.Restore();   // 终帧归一：恢复转场前快照——close 转场终态（opacity=0 等）不能残留，窗口保留池复用时 open 转场会以当前值为快照初始
                 animation.OnComplete?.Invoke();
             }
             else
@@ -112,6 +119,15 @@ public sealed class DjuiTransitionPlayer : IThinker
         public DjuiTransitionSnapshot Snapshot { get; }
         public Action? OnComplete { get; }
         public float Elapsed { get; set; }
+
+        /// <summary>恢复转场前快照（转场完成/取消时归一控件状态，防止中途值或终态残留）。</summary>
+        public void Restore()
+        {
+            if (!Control.IsValid) return;
+            Control.Scale = Snapshot.Scale;
+            Control.Opacity = Snapshot.Opacity;
+            Control.Margin = Snapshot.Margin;
+        }
     }
 }
 

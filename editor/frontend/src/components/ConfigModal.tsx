@@ -19,6 +19,8 @@ interface ConfigModalProps {
   onClose: () => void
   onSave: () => void
   mode?: 'new' | 'open' | 'edit'
+  /** 工程页面清单（retainedPages 多选的候选；未加载时兜底显示已有配置值） */
+  pages?: string[]
 }
 
 const DEFAULT_PROJECT_CANVAS = { orientation: 'portrait' as const, width: 1080, height: 2400 }
@@ -27,7 +29,7 @@ const PROJECT_CANVAS_BY_ORIENTATION = {
   landscape: { width: 2400, height: 1080, ratio: '20:9' },
 } as const
 
-export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: ConfigModalProps) {
+export default function ConfigModal({ open, onClose, onSave, mode = 'edit', pages }: ConfigModalProps) {
   const { config, setConfig } = useProjectStore()
   const [form] = Form.useForm<ProjectConfig>()
   const [starDirName, setStarDirName] = useState('')
@@ -184,6 +186,8 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
         canvasMode: isNewProject ? 'Contain' : (values.canvasMode ?? config?.canvasMode ?? 'Contain'),
         wideRatio: isNewProject ? 1.25 : (values.wideRatio ?? config?.wideRatio ?? 1.25),
         defaultFont: config?.defaultFont,
+        retainedPages: isNewProject ? [] : (values.retainedPages ?? config?.retainedPages ?? []),
+        poolCapacity: isNewProject ? 5 : (values.poolCapacity ?? config?.poolCapacity ?? 5),
       }
       await setConfig(finalConfig)
       pushRecentProject(finalConfig.starProjectPath, finalConfig.workspacePath)
@@ -361,6 +365,41 @@ export default function ConfigModal({ open, onClose, onSave, mode = 'edit' }: Co
             </Form.Item>
             <Form.Item name="wideRatio" label={<strong>宽屏阈值</strong>} initialValue={config?.wideRatio ?? 1.25}>
               <InputNumber min={1.01} max={4} step={0.05} style={{ width: '100%' }} addonAfter="物理宽高比" />
+            </Form.Item>
+            <Form.Item
+              name="retainedPages"
+              label={
+                <Space>
+                  <strong>常驻复用页面</strong>
+                  <Tooltip title="勾选的页面关闭后不销毁、常驻隐藏池，重开时直接复用（适合确认框、弹窗等连开连关的高频页）。其余页面进入窗口池按容量先进先出复用。">
+                    <InfoCircleOutlined style={{ color: '#5b6378' }} />
+                  </Tooltip>
+                </Space>
+              }
+              initialValue={config?.retainedPages ?? []}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="选择关闭后需要常驻复用的页面"
+                options={Array.from(new Set([...(pages ?? []), ...(config?.retainedPages ?? [])]))
+                  .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+                  .map(page => ({ value: page, label: page }))}
+              />
+            </Form.Item>
+            <Form.Item
+              name="poolCapacity"
+              label={
+                <Space>
+                  <strong>窗口池容量</strong>
+                  <Tooltip title="非常驻页面关闭后保留在窗口池中待复用的数量上限（先进先出，池满淘汰最久未用的页面销毁）。0＝只有常驻复用页面会保留。">
+                    <InfoCircleOutlined style={{ color: '#5b6378' }} />
+                  </Tooltip>
+                </Space>
+              }
+              initialValue={config?.poolCapacity ?? 5}
+            >
+              <InputNumber min={0} max={100} precision={0} step={1} style={{ width: '100%' }} addonAfter="页" />
             </Form.Item>
           </>
         )}

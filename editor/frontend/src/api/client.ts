@@ -26,7 +26,7 @@ import {
   getDefaultSoundConfig,
   SOUND_CONFIG_VERSION,
 } from '@/lib/patches'
-import { normalizePage, normalizeDetectChanges } from '@/lib/normalize'
+import { normalizePage } from '@/lib/normalize'
 import { type PageUnderlayMap } from '@/lib/pageUnderlays'
 import { AGENTS_VERSION, readAgentsVersion, buildAgentsMd } from '@/lib/agentsTemplate'
 import { EFFECT_PRESETS } from '@/lib/effectsPresets'

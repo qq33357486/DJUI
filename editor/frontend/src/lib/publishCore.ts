@@ -4,10 +4,10 @@ import {
   type PatchRunResult,
   createRuntimePageSnapshot,
   getDefaultSoundConfig,
-  patchPageData,
+  patchPageNodeTree,
   sanitizeSoundConfig,
 } from './patches'
-import { normalizeDetectChanges } from './normalize'
+import { DJUI_PROTOCOL_VERSION } from '../types/protocolV6'
 import { RUNTIME_FILES, RUNTIME_VERSION, type BundledRuntimeFile } from './runtimeBundle'
 
 export type StoreEntry = { name: string; kind: 'file' | 'directory' }
@@ -180,25 +180,33 @@ export async function applyProjectPatchesCore(store: PublishStore): Promise<Patc
   }
 
   const pages = (await walkFiles(store, PAGES_DIR)).filter(file => file.toLowerCase().endsWith('.json'))
-  const normalizedFiles: string[] = []
   const migratedAnchorFiles: string[] = []
   const patchedButtonFiles: string[] = []
   let missingButtonSounds = 0
   for (const file of pages) {
+    const displayName = file.slice(PAGES_DIR.length + 1)
     const page = await store.readJson<unknown>(file)
-    if (page === null) { result.blockers.push(`页面 JSON 读取失败：${file.slice(PAGES_DIR.length + 1)}`); continue }
-    const needsNormalize = normalizeDetectChanges(page)
-    const patch = patchPageData(page, soundConfig.defaultButtonSoundId)
+    if (page === null) { result.blockers.push(`页面 JSON 读取失败：${displayName}`); continue }
+    // 协议分流：Runtime 只认 v6（严格反序列化），发布器绝不改写页面协议结构。
+    // 旧协议页面一律拒绝发布，由用户在编辑器中打开保存完成迁移。
+    const protocolVersion = isRecord(page) && typeof page.protocolVersion === 'number' ? page.protocolVersion : null
+    if (protocolVersion !== DJUI_PROTOCOL_VERSION) {
+      result.blockers.push(
+        `页面 ${displayName} 不是 v6 协议（protocolVersion=${protocolVersion ?? '缺失'}），发布器拒绝自动迁移；` +
+        `请在 DJUI 编辑器打开并保存该页面完成 v6 迁移后再发布`,
+      )
+      continue
+    }
+    // v6 页面只做节点级语义补丁（锚点/音效），顶层协议字段原样保留
+    const patch = patchPageNodeTree(page, soundConfig.defaultButtonSoundId)
     missingButtonSounds += patch.missingButtonSounds
-    if (patch.changed || needsNormalize) {
+    if (patch.changed) {
       await store.writeJson(file, page)
       result.changed = true
-      if (needsNormalize) normalizedFiles.push(file)
       if (patch.migratedAnchors > 0) migratedAnchorFiles.push(file)
       if (patch.patchedButtonSounds > 0) patchedButtonFiles.push(file)
     }
   }
-  if (normalizedFiles.length) result.patches.push({ id: 'page-structure-normalize', changedFiles: normalizedFiles, message: `已修复 ${normalizedFiles.length} 个页面的节点结构（补全缺失字段）` })
   if (migratedAnchorFiles.length) result.patches.push({ id: 'page-anchor-v4', changedFiles: migratedAnchorFiles, message: `已迁移 ${migratedAnchorFiles.length} 个页面的旧锚点数据` })
   if (patchedButtonFiles.length) result.patches.push({ id: 'button-default-click-sound', changedFiles: patchedButtonFiles, message: `已为 ${patchedButtonFiles.length} 个页面补齐 Button 默认点击音效` })
   result.soundSetup = {

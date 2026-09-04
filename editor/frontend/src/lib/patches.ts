@@ -1,7 +1,7 @@
 // 补丁/迁移逻辑（从后端 patches.ts 移植，改造为异步 DirectoryHandle 操作）
 
 import * as fs from '../fs/fsAccess'
-import { normalizePage, normalizeDetectChanges } from './normalize'
+import { normalizePage } from './normalize'
 
 export const SOUND_CONFIG_VERSION = 2
 export const PAGE_SCHEMA_VERSION = 5
@@ -62,34 +62,7 @@ function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-function jsonEquals(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
-function buildSoundSetupStatus(
-  hasSoundConfig: boolean,
-  config: DjuiSoundConfig,
-  missingButtonSounds: number
-): SoundSetupStatus {
-  let status: SoundSetupStatusKind = 'ok'
-  if (!hasSoundConfig) {
-    status = 'missing-config'
-  } else if (config.sounds.length === 0) {
-    status = 'no-sounds'
-  } else if (!config.defaultButtonSoundId) {
-    status = 'missing-default'
-  }
-
-  return {
-    status,
-    soundCount: config.sounds.length,
-    defaultButtonSoundId: config.defaultButtonSoundId,
-    missingButtonSounds,
-  }
-}
-
 // 页面/声音的编辑源位于 UI 工作区；发布时由 client.ts 镜像到星火工程。
-const PAGES_DIR = '.djui/layout/pages'
 const SOUNDS_FILE = '.djui/layout/sounds.json'
 
 export function getDefaultSoundConfig(): DjuiSoundConfig {
@@ -282,6 +255,23 @@ export function patchPageData(page: unknown, defaultButtonSoundId: string | null
   return result
 }
 
+/**
+ * v6 页面的节点级语义补丁：只修锚点格式与 Button 音效，绝不触碰页面顶层协议字段。
+ * v6 顶层（protocolVersion/kind/window/responsive 等）会被 Runtime 严格反序列化校验，
+ * 一旦被 v5 白名单重塑，Runtime 加载直接抛 UnmappedJsonProperty，页面加载失败。
+ */
+export function patchPageNodeTree(page: unknown, defaultButtonSoundId: string | null): PagePatchResult {
+  const result: PagePatchResult = {
+    changed: false,
+    migratedAnchors: 0,
+    patchedButtonSounds: 0,
+    missingButtonSounds: 0,
+  }
+  if (!isRecord(page) || !isRecord(page.root)) return result
+  patchNode(page.root, defaultButtonSoundId, result)
+  return result
+}
+
 // 递归注入 slicedEdges
 function injectSliceEdges(node: any, meta: Record<string, { left: number; top: number; right: number; bottom: number }>) {
   if (!node) return
@@ -341,114 +331,4 @@ export async function readSoundConfig(projectRoot: FileSystemDirectoryHandle): P
   const data = await fs.readFileJson<unknown>(projectRoot, SOUNDS_FILE)
   if (data === null) return getDefaultSoundConfig()
   return sanitizeSoundConfig(data)
-}
-
-// 异步版 applyProjectPatches：操作工程目录 handle
-export async function applyProjectPatches(projectRoot: FileSystemDirectoryHandle): Promise<PatchRunResult> {
-  const result: PatchRunResult = {
-    ok: true,
-    changed: false,
-    warnings: [],
-    blockers: [],
-    patches: [],
-    soundSetup: buildSoundSetupStatus(false, getDefaultSoundConfig(), 0),
-  }
-
-  // 1. 声音配置
-  let soundConfig: DjuiSoundConfig
-  const rawSound = await fs.readFileJson<unknown>(projectRoot, SOUNDS_FILE)
-  const hasSoundConfig = rawSound !== null
-  if (rawSound === null) {
-    soundConfig = getDefaultSoundConfig()
-  } else {
-    const config = sanitizeSoundConfig(rawSound)
-    if (!jsonEquals(rawSound, config)) {
-      await fs.writeFileJson(projectRoot, SOUNDS_FILE, config)
-      result.changed = true
-      result.patches.push({
-        id: 'sound-config-v2',
-        changedFiles: [normalizeSlashes(SOUNDS_FILE)],
-        message: `声音配置已升级到 v${SOUND_CONFIG_VERSION}`,
-      })
-    }
-    soundConfig = config
-  }
-  result.soundSetup = buildSoundSetupStatus(hasSoundConfig, soundConfig, 0)
-
-  // 2. 页面补丁
-  const pagesDir = await fs.getDirHandle(projectRoot, PAGES_DIR, false)
-  if (!pagesDir) return result
-
-  const jsonFiles = await fs.walkJsonFiles(pagesDir)
-  const migratedAnchorFiles: string[] = []
-  const patchedButtonFiles: string[] = []
-  const normalizedFiles: string[] = []
-  let totalMissingButtonSounds = 0
-
-  for (const file of jsonFiles) {
-    const page = await fs.readFileJson<unknown>(pagesDir, file)
-    if (page === null) {
-      result.blockers.push(`页面 JSON 读取失败：${file}`)
-      continue
-    }
-
-    // 检测是否需要结构归一化修复
-    const needsNormalize = normalizeDetectChanges(page)
-
-    const pagePatch = patchPageData(page, soundConfig.defaultButtonSoundId)
-    totalMissingButtonSounds += pagePatch.missingButtonSounds
-
-    if (pagePatch.changed || needsNormalize) {
-      await fs.writeFileJson(pagesDir, file, page)
-      result.changed = true
-      if (needsNormalize) normalizedFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
-      if (pagePatch.migratedAnchors > 0) migratedAnchorFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
-      if (pagePatch.patchedButtonSounds > 0) patchedButtonFiles.push(normalizeSlashes(`${PAGES_DIR}/${file}`))
-    }
-  }
-
-  if (normalizedFiles.length > 0) {
-    result.patches.push({
-      id: 'page-structure-normalize',
-      changedFiles: normalizedFiles,
-      message: `已修复 ${normalizedFiles.length} 个页面的节点结构（补全缺失字段）`,
-    })
-  }
-
-  if (migratedAnchorFiles.length > 0) {
-    result.patches.push({
-      id: 'page-anchor-v4',
-      changedFiles: migratedAnchorFiles,
-      message: `已迁移 ${migratedAnchorFiles.length} 个页面的旧锚点数据`,
-    })
-  }
-
-  if (patchedButtonFiles.length > 0) {
-    result.patches.push({
-      id: 'button-default-click-sound',
-      changedFiles: patchedButtonFiles,
-      message: `已为 ${patchedButtonFiles.length} 个页面补齐 Button 默认点击音效`,
-    })
-  }
-
-  result.soundSetup = buildSoundSetupStatus(hasSoundConfig, soundConfig, totalMissingButtonSounds)
-
-  return result
-}
-
-// 注入 slice edges 并清理编辑器字段后保存页面
-export async function patchAndSavePage(
-  projectRoot: FileSystemDirectoryHandle,
-  pageData: any,
-  sliceMeta: Record<string, { left: number; top: number; right: number; bottom: number }>,
-  defaultButtonSoundId: string | null
-): Promise<void> {
-  // ★ 深拷贝防止 immer 冻结对象在 patchPageData/injectSliceEdges/stripEditorFields
-  //   内 delete 属性时抛 "Cannot delete property" 错误
-  const data = JSON.parse(JSON.stringify(pageData))
-  patchPageData(data, defaultButtonSoundId)
-  applyRuntimeOnlyFields(data, sliceMeta)
-  const pageId = data.pageId
-  if (!pageId) throw new Error('页面数据缺少 pageId')
-  await fs.writeFileJson(projectRoot, `${PAGES_DIR}/${pageId}.json`, data)
 }

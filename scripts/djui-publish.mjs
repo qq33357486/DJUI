@@ -5,117 +5,9 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-// src/lib/normalize.ts
-var VALID_STAR_TYPES = [
-  "Panel",
-  "Button",
-  "Label",
-  "Input",
-  "Progress",
-  "SpacingPanel",
-  "PanelScrollable",
-  "TemplateInstance"
-];
-var fallbackIdCounter = 0;
-function generateFallbackId() {
-  return `_fallback_${Date.now()}_${++fallbackIdCounter}`;
-}
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function normalizeNode(raw) {
-  if (!isRecord(raw)) {
-    return { id: generateFallbackId(), starType: "Panel", name: "(\u5DF2\u4FEE\u590D)", children: [] };
-  }
-  const id = typeof raw.id === "string" && raw.id ? raw.id : generateFallbackId();
-  const rawStarType = typeof raw.starType === "string" ? raw.starType : "";
-  const starType = VALID_STAR_TYPES.includes(rawStarType) ? rawStarType : "Panel";
-  let children;
-  if (Array.isArray(raw.children)) {
-    children = raw.children.map(normalizeNode);
-  } else {
-    children = [];
-  }
-  const node = {
-    id,
-    starType,
-    children
-  };
-  if (typeof raw.name === "string") node.name = raw.name;
-  if (isRecord(raw.basic)) node.basic = raw.basic;
-  if (isRecord(raw.transform)) {
-    const t = { ...raw.transform };
-    if (typeof t.opacity === "number") {
-      t.opacity = Math.max(0, Math.min(1, t.opacity));
-    }
-    node.transform = t;
-  }
-  if (isRecord(raw.appearance)) node.appearance = raw.appearance;
-  if (isRecord(raw.layout)) node.layout = raw.layout;
-  if (isRecord(raw.interaction)) node.interaction = raw.interaction;
-  if (isRecord(raw.effects)) node.effects = raw.effects;
-  if (isRecord(raw.text)) node.text = raw.text;
-  if (isRecord(raw.button)) node.button = raw.button;
-  if (raw.progress !== void 0) node.progress = raw.progress;
-  if (raw.anchor !== void 0 && raw.anchor !== null) node.anchor = raw.anchor;
-  if (raw.stretch !== void 0 && raw.stretch !== null) node.stretch = raw.stretch;
-  if (raw.aspectRatio !== void 0 && raw.aspectRatio !== null) node.aspectRatio = raw.aspectRatio;
-  if (isRecord(raw.sceneFrame)) node.sceneFrame = raw.sceneFrame;
-  if (typeof raw.templateRef === "string" || raw.templateRef === null) node.templateRef = raw.templateRef;
-  if (raw.templateOverrides !== void 0) node.templateOverrides = raw.templateOverrides;
-  if (typeof raw.widthStretchRatio === "number" || raw.widthStretchRatio === null) node.widthStretchRatio = raw.widthStretchRatio;
-  if (typeof raw.heightStretchRatio === "number" || raw.heightStretchRatio === null) node.heightStretchRatio = raw.heightStretchRatio;
-  if (typeof raw.widthCompactRatio === "number" || raw.widthCompactRatio === null) node.widthCompactRatio = raw.widthCompactRatio;
-  if (typeof raw.heightCompactRatio === "number" || raw.heightCompactRatio === null) node.heightCompactRatio = raw.heightCompactRatio;
-  if (isRecord(raw.djui)) node.djui = raw.djui;
-  if (typeof raw.editorLocked === "boolean") node.editorLocked = raw.editorLocked;
-  if (typeof raw.editorHidden === "boolean") node.editorHidden = raw.editorHidden;
-  if (typeof raw.editorLockAspect === "boolean") node.editorLockAspect = raw.editorLockAspect;
-  return node;
-}
-function normalizePage(raw) {
-  if (!isRecord(raw)) return null;
-  const root = normalizeNode(raw.root);
-  const version = typeof raw.version === "number" ? raw.version : 5;
-  const pageId = typeof raw.pageId === "string" && raw.pageId ? raw.pageId : "unknown";
-  const designWidth = typeof raw.designWidth === "number" && raw.designWidth > 0 ? raw.designWidth : 1080;
-  const designHeight = typeof raw.designHeight === "number" && raw.designHeight > 0 ? raw.designHeight : 1920;
-  const nodeKind = raw.nodeKind === "template" ? "template" : "window";
-  const page = {
-    version,
-    pageId,
-    designWidth,
-    designHeight,
-    root,
-    nodeKind
-  };
-  if (typeof raw.referenceImage === "string" || raw.referenceImage === null) {
-    page.referenceImage = raw.referenceImage;
-  }
-  if (typeof raw.referenceOpacity === "number") page.referenceOpacity = raw.referenceOpacity;
-  if (typeof raw.referenceVisible === "boolean") page.referenceVisible = raw.referenceVisible;
-  if (raw.windowMode !== void 0) page.windowMode = raw.windowMode;
-  if (raw.transition !== void 0) page.transition = raw.transition;
-  return page;
-}
-function normalizeDetectChanges(raw) {
-  if (!isRecord(raw)) return true;
-  if (!isRecord(raw.root)) return true;
-  return detectNodeChanges(raw.root);
-}
-function detectNodeChanges(raw) {
-  if (!isRecord(raw)) return true;
-  if (typeof raw.id !== "string" || !raw.id) return true;
-  const rawStarType = typeof raw.starType === "string" ? raw.starType : "";
-  if (!VALID_STAR_TYPES.includes(rawStarType)) return true;
-  if (!Array.isArray(raw.children)) return true;
-  return raw.children.some(detectNodeChanges);
-}
-
 // src/lib/patches.ts
 var SOUND_CONFIG_VERSION = 2;
-var PAGE_SCHEMA_VERSION = 5;
-function isRecord2(value) {
+function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function normalizeSlashes(value) {
@@ -128,12 +20,12 @@ function soundAppliesToButton(sound) {
   return sound.controlTypes.length === 0 || sound.controlTypes.includes("Button");
 }
 function sanitizeSoundConfig(raw) {
-  const source = isRecord2(raw) ? raw : {};
+  const source = isRecord(raw) ? raw : {};
   const rawSounds = Array.isArray(source.sounds) ? source.sounds : [];
   const ids = /* @__PURE__ */ new Set();
   const sounds = [];
   for (const item of rawSounds) {
-    if (!isRecord2(item)) continue;
+    if (!isRecord(item)) continue;
     const id = String(item.id ?? "").trim();
     if (!id || ids.has(id) || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) continue;
     const name = String(item.name ?? id).trim() || id;
@@ -156,8 +48,8 @@ function migrateOldAnchor(anchor) {
   if (typeof anchor.side === "string" && anchor.side) {
     return { side: anchor.side, stretchStyle: "None" };
   }
-  const min = isRecord2(anchor.anchorMin) ? anchor.anchorMin : null;
-  const max = isRecord2(anchor.anchorMax) ? anchor.anchorMax : null;
+  const min = isRecord(anchor.anchorMin) ? anchor.anchorMin : null;
+  const max = isRecord(anchor.anchorMax) ? anchor.anchorMax : null;
   const minX = typeof min?.x === "number" ? min.x : null;
   const minY = typeof min?.y === "number" ? min.y : null;
   const maxX = typeof max?.x === "number" ? max.x : null;
@@ -189,9 +81,9 @@ function migrateOldAnchor(anchor) {
   return { side, stretchStyle };
 }
 function patchNode(node, defaultButtonSoundId, result) {
-  if (!isRecord2(node)) return;
-  const anchor = isRecord2(node.anchor) ? node.anchor : null;
-  if (anchor && isRecord2(anchor.anchorMin) && !anchor.side) {
+  if (!isRecord(node)) return;
+  const anchor = isRecord(node.anchor) ? node.anchor : null;
+  if (anchor && isRecord(anchor.anchorMin) && !anchor.side) {
     const migrated = migrateOldAnchor(anchor);
     anchor.side = migrated.side;
     if (migrated.stretchStyle !== "None") {
@@ -220,11 +112,11 @@ function patchNode(node, defaultButtonSoundId, result) {
     result.changed = true;
   }
   if (node.starType === "Button") {
-    const djui = isRecord2(node.djui) ? node.djui : {};
+    const djui = isRecord(node.djui) ? node.djui : {};
     const currentSound = typeof djui.clickSoundId === "string" ? djui.clickSoundId.trim() : "";
     if (!currentSound) {
       if (defaultButtonSoundId) {
-        if (!isRecord2(node.djui)) node.djui = djui;
+        if (!isRecord(node.djui)) node.djui = djui;
         djui.clickSoundId = defaultButtonSoundId;
         result.changed = true;
         result.patchedButtonSounds++;
@@ -238,31 +130,21 @@ function patchNode(node, defaultButtonSoundId, result) {
     for (const child of children) patchNode(child, defaultButtonSoundId, result);
   }
 }
-function patchPageData(page, defaultButtonSoundId) {
+function patchPageNodeTree(page, defaultButtonSoundId) {
   const result = {
     changed: false,
     migratedAnchors: 0,
     patchedButtonSounds: 0,
     missingButtonSounds: 0
   };
-  const normalized = normalizePage(page);
-  if (!normalized) return result;
-  const pageObj = page;
-  if (isRecord2(page)) {
-    Object.keys(pageObj).forEach((k) => delete pageObj[k]);
-    Object.assign(pageObj, normalized);
-  }
-  if (pageObj.version !== PAGE_SCHEMA_VERSION) {
-    pageObj.version = PAGE_SCHEMA_VERSION;
-    result.changed = true;
-  }
-  patchNode(pageObj.root, defaultButtonSoundId, result);
+  if (!isRecord(page) || !isRecord(page.root)) return result;
+  patchNode(page.root, defaultButtonSoundId, result);
   return result;
 }
 function injectSliceEdges(node, meta) {
   if (!node) return;
   const appearance = node.appearance;
-  if (isRecord2(appearance) && typeof appearance.image === "string" && appearance.image) {
+  if (isRecord(appearance) && typeof appearance.image === "string" && appearance.image) {
     const key = normalizeSlashes(appearance.image);
     const edges = meta[key];
     if (edges) {
@@ -277,7 +159,7 @@ function injectSliceEdges(node, meta) {
   }
 }
 function stripEditorFields(node) {
-  if (!isRecord2(node)) return;
+  if (!isRecord(node)) return;
   delete node.editorLocked;
   delete node.editorHidden;
   delete node.editorLockAspect;
@@ -296,6 +178,9 @@ function createRuntimePageSnapshot(pageData, sliceMeta) {
   applyRuntimeOnlyFields(data, sliceMeta);
   return data;
 }
+
+// src/types/protocolV6.ts
+var DJUI_PROTOCOL_VERSION = 6;
 
 // raw:D:\git\DJUI\runtime\DjuiActionRouter.cs
 var DjuiActionRouter_default = '// DJUI Runtime - Action \u8DEF\u7531\n\n#if CLIENT\n\nusing GameUI.Control;\nusing GameCore.Platform.SDL;\n\nnamespace DjuiRuntime;\n\n/// <summary>\n/// Action \u8DEF\u7531\u7CFB\u7EDF\u3002JSON \u4E2D\u58F0\u660E action\uFF0C\u8FD0\u884C\u65F6\u81EA\u52A8\u7ED1\u5B9A\u70B9\u51FB\u4E8B\u4EF6\u3002\n/// \u5F00\u53D1\u8005\u6CE8\u518C\u5904\u7406\u51FD\u6570\u5373\u53EF\u3002\n/// </summary>\npublic static class DjuiActionRouter\n{\n    private static readonly Dictionary<string, Action<Control, PointerEventArgs?>> _handlers = new();\n\n    /// <summary>\n    /// \u6CE8\u518C Action \u5904\u7406\u51FD\u6570\u3002\n    /// </summary>\n    public static void On(string actionName, Action handler)\n    {\n        _handlers[actionName] = (ctrl, args) => handler();\n    }\n\n    /// <summary>\n    /// \u6CE8\u518C Action \u5904\u7406\u51FD\u6570\uFF08\u5E26\u53C2\u6570\uFF09\u3002\n    /// </summary>\n    public static void On(string actionName, Action<Control, PointerEventArgs?> handler)\n    {\n        _handlers[actionName] = handler;\n    }\n\n    public static bool Trigger(string actionName)\n    {\n        if (!_handlers.TryGetValue(actionName, out var handler))\n            return false;\n\n        handler(null!, null);\n        return true;\n    }\n\n    /// <summary>\n    /// \u5185\u90E8\uFF1A\u5C06 action \u7ED1\u5B9A\u5230\u63A7\u4EF6\u7684\u70B9\u51FB\u4E8B\u4EF6\u3002\n    /// </summary>\n    internal static void BindAction(Control ctrl, string? actionName)\n    {\n        if (string.IsNullOrEmpty(actionName)) return;\n\n        ctrl.OnPointerClicked += (sender, args) =>\n        {\n            if (_handlers.TryGetValue(actionName, out var handler))\n            {\n                handler(ctrl, args);\n            }\n            else\n            {\n                Game.Logger.LogWarning("DJUI: \u672A\u6CE8\u518C\u7684 Action {Name}", actionName);\n            }\n        };\n    }\n}\n\n#endif\n';
@@ -1951,7 +1836,7 @@ var MANIFEST_PATH = "ui/.djui-publish-manifest.json";
 function joinPath(...parts) {
   return parts.filter(Boolean).join("/").replace(/\\/g, "/");
 }
-function isRecord3(value) {
+function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function jsonEquals(a, b) {
@@ -2029,28 +1914,32 @@ async function applyProjectPatchesCore(store) {
     result.patches.push({ id: "sound-config-v2", changedFiles: [SOUNDS_FILE], message: "\u58F0\u97F3\u914D\u7F6E\u5DF2\u5347\u7EA7\u5230 v2" });
   }
   const pages = (await walkFiles(store, PAGES_DIR)).filter((file) => file.toLowerCase().endsWith(".json"));
-  const normalizedFiles = [];
   const migratedAnchorFiles = [];
   const patchedButtonFiles = [];
   let missingButtonSounds = 0;
   for (const file of pages) {
+    const displayName = file.slice(PAGES_DIR.length + 1);
     const page = await store.readJson(file);
     if (page === null) {
-      result.blockers.push(`\u9875\u9762 JSON \u8BFB\u53D6\u5931\u8D25\uFF1A${file.slice(PAGES_DIR.length + 1)}`);
+      result.blockers.push(`\u9875\u9762 JSON \u8BFB\u53D6\u5931\u8D25\uFF1A${displayName}`);
       continue;
     }
-    const needsNormalize = normalizeDetectChanges(page);
-    const patch = patchPageData(page, soundConfig.defaultButtonSoundId);
+    const protocolVersion = isRecord2(page) && typeof page.protocolVersion === "number" ? page.protocolVersion : null;
+    if (protocolVersion !== DJUI_PROTOCOL_VERSION) {
+      result.blockers.push(
+        `\u9875\u9762 ${displayName} \u4E0D\u662F v6 \u534F\u8BAE\uFF08protocolVersion=${protocolVersion ?? "\u7F3A\u5931"}\uFF09\uFF0C\u53D1\u5E03\u5668\u62D2\u7EDD\u81EA\u52A8\u8FC1\u79FB\uFF1B\u8BF7\u5728 DJUI \u7F16\u8F91\u5668\u6253\u5F00\u5E76\u4FDD\u5B58\u8BE5\u9875\u9762\u5B8C\u6210 v6 \u8FC1\u79FB\u540E\u518D\u53D1\u5E03`
+      );
+      continue;
+    }
+    const patch = patchPageNodeTree(page, soundConfig.defaultButtonSoundId);
     missingButtonSounds += patch.missingButtonSounds;
-    if (patch.changed || needsNormalize) {
+    if (patch.changed) {
       await store.writeJson(file, page);
       result.changed = true;
-      if (needsNormalize) normalizedFiles.push(file);
       if (patch.migratedAnchors > 0) migratedAnchorFiles.push(file);
       if (patch.patchedButtonSounds > 0) patchedButtonFiles.push(file);
     }
   }
-  if (normalizedFiles.length) result.patches.push({ id: "page-structure-normalize", changedFiles: normalizedFiles, message: `\u5DF2\u4FEE\u590D ${normalizedFiles.length} \u4E2A\u9875\u9762\u7684\u8282\u70B9\u7ED3\u6784\uFF08\u8865\u5168\u7F3A\u5931\u5B57\u6BB5\uFF09` });
   if (migratedAnchorFiles.length) result.patches.push({ id: "page-anchor-v4", changedFiles: migratedAnchorFiles, message: `\u5DF2\u8FC1\u79FB ${migratedAnchorFiles.length} \u4E2A\u9875\u9762\u7684\u65E7\u951A\u70B9\u6570\u636E` });
   if (patchedButtonFiles.length) result.patches.push({ id: "button-default-click-sound", changedFiles: patchedButtonFiles, message: `\u5DF2\u4E3A ${patchedButtonFiles.length} \u4E2A\u9875\u9762\u8865\u9F50 Button \u9ED8\u8BA4\u70B9\u51FB\u97F3\u6548` });
   result.soundSetup = {
@@ -2063,7 +1952,7 @@ async function applyProjectPatchesCore(store) {
 }
 async function getSliceMeta(store) {
   const raw = await store.readJson(SLICE_META_FILE);
-  return isRecord3(raw) ? raw : {};
+  return isRecord2(raw) ? raw : {};
 }
 async function buildPublishWarnings(store) {
   const warnings = [];
@@ -2071,14 +1960,14 @@ async function buildPublishWarnings(store) {
   const soundIds = new Set(config.sounds.map((sound) => sound.id));
   const refs = /* @__PURE__ */ new Set();
   const collectRefs = (node) => {
-    if (!isRecord3(node)) return;
-    const djui = isRecord3(node.djui) ? node.djui : null;
+    if (!isRecord2(node)) return;
+    const djui = isRecord2(node.djui) ? node.djui : null;
     if (typeof djui?.clickSoundId === "string" && djui.clickSoundId) refs.add(djui.clickSoundId);
     if (Array.isArray(node.children)) node.children.forEach(collectRefs);
   };
   for (const file of (await walkFiles(store, PAGES_DIR)).filter((file2) => file2.endsWith(".json"))) {
     const page = await store.readJson(file);
-    if (isRecord3(page)) collectRefs(page.root);
+    if (isRecord2(page)) collectRefs(page.root);
   }
   for (const ref of refs) if (!soundIds.has(ref)) warnings.push(`\u97F3\u6548\u5F15\u7528 ${ref} \u5728 sounds.json \u4E2D\u4E0D\u5B58\u5728`);
   return warnings;

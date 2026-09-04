@@ -126,31 +126,3 @@ export function normalizePage(raw: unknown): UiPage | null {
 
   return page
 }
-
-// 检测归一化是否修改了数据（用于决定是否需要持久化修复）
-export function normalizeDetectChanges(raw: unknown): boolean {
-  if (!isRecord(raw)) return true
-
-  // 检查 root
-  if (!isRecord(raw.root)) return true
-
-  // 递归检查节点树
-  return detectNodeChanges(raw.root)
-}
-
-function detectNodeChanges(raw: unknown): boolean {
-  if (!isRecord(raw)) return true
-
-  // id 缺失
-  if (typeof raw.id !== 'string' || !raw.id) return true
-
-  // starType 不合法
-  const rawStarType = typeof raw.starType === 'string' ? raw.starType : ''
-  if (!(VALID_STAR_TYPES as readonly string[]).includes(rawStarType)) return true
-
-  // children 缺失或非数组
-  if (!Array.isArray(raw.children)) return true
-
-  // 递归检查子节点
-  return raw.children.some(detectNodeChanges)
-}

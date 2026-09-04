@@ -6,12 +6,14 @@ import {
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
   InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
   SoundOutlined, BellOutlined, SafetyCertificateOutlined, FileSyncOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { projectContext } from '@/fs/projectContext'
 import { getRecentProjects, pushRecentProject, type RecentProject } from '@/lib/recentProjects'
 import SoundConfigModal from './SoundConfigModal'
+import PoolConfigModal from './PoolConfigModal'
 import FontManagerModal from './FontManagerModal'
 import SyncConflictModal from './SyncConflictModal'
 import { buildFontSelectOptions, FONT_MANAGE_VALUE, ENGINE_DEFAULT_FONT_VALUE } from './RightPanel'
@@ -72,6 +74,7 @@ export default function TopBar(props: TopBarProps) {
   const [globalFontOpen, setGlobalFontOpen] = useState(false)
   const [unifyFontOpen, setUnifyFontOpen] = useState(false)
   const [soundConfigOpen, setSoundConfigOpen] = useState(false)
+  const [poolConfigOpen, setPoolConfigOpen] = useState(false)
   const [globalFontValue, setGlobalFontValue] = useState<string | null>(null)
   const [unifyFontValue, setUnifyFontValue] = useState<string | null>(null)
 
@@ -576,6 +579,12 @@ export default function TopBar(props: TopBarProps) {
       icon: <SoundOutlined />,
       onClick: () => setSoundConfigOpen(true),
     },
+    {
+      key: 'pool-config',
+      label: '窗口池配置',
+      icon: <AppstoreOutlined />,
+      onClick: () => setPoolConfigOpen(true),
+    },
   ]
 
   const viewMenu: MenuProps['items'] = [
@@ -837,6 +846,7 @@ export default function TopBar(props: TopBarProps) {
       </div>
 
       <SoundConfigModal open={soundConfigOpen} onClose={() => setSoundConfigOpen(false)} />
+      <PoolConfigModal open={poolConfigOpen} onClose={() => setPoolConfigOpen(false)} />
       <FontManagerModal />
 
       {/* 保存冲突裁决：覆盖保存 / 改用磁盘版本 / 取消 */}

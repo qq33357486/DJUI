@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Modal, InputNumber, Switch, Empty, Spin, message } from 'antd'
+import { Modal, InputNumber, Switch, Empty, Spin, message, theme } from 'antd'
 import { useProjectStore } from '@/store/projectStore'
 import { useEditorStore } from '@/store/editorStore'
 
@@ -10,6 +10,7 @@ import { useEditorStore } from '@/store/editorStore'
  * 与各页面属性栏「窗口」分组里的「常驻复用」开关同源。
  */
 export default function PoolConfigModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { token } = theme.useToken()
   const { config, setConfig } = useProjectStore()
   const allPages = useEditorStore(state => state.allPages)
   const [saving, setSaving] = useState(false)
@@ -51,7 +52,7 @@ export default function PoolConfigModal({ open, onClose }: { open: boolean; onCl
       width={540}
       destroyOnClose={false}
     >
-      <div style={{ fontSize: 12, color: '#5b6378', marginBottom: 16, lineHeight: 1.7 }}>
+      <div style={{ fontSize: 12, color: token.colorTextTertiary, marginBottom: 16, lineHeight: 1.7 }}>
         开启「常驻复用」的页面关闭后不销毁、常驻隐藏池，重开直接复用不重建（适合确认框等连开连关的高频页）。
         未开启的页面进入窗口池按容量先进先出复用，池满淘汰最久未用的页面。
       </div>
@@ -69,7 +70,7 @@ export default function PoolConfigModal({ open, onClose }: { open: boolean; onCl
             if (typeof value === 'number') void save({ poolCapacity: value })
           }}
         />
-        <span style={{ fontSize: 12, color: '#9aa3b4' }}>0＝只有常驻复用页面会保留</span>
+        <span style={{ fontSize: 12, color: token.colorTextTertiary }}>0＝只有常驻复用页面会保留</span>
       </div>
 
       <div style={{ fontWeight: 600, marginBottom: 8 }}>
@@ -79,7 +80,7 @@ export default function PoolConfigModal({ open, onClose }: { open: boolean; onCl
       {windowPages.length === 0 ? (
         <Empty description="暂无窗口页面" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
-        <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #e5e9f0', borderRadius: 8, padding: '4px 12px' }}>
+        <div style={{ maxHeight: 320, overflowY: 'auto', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8, padding: '4px 12px' }}>
           {windowPages.map(page => {
             const on = retained.includes(page.pageId)
             return (
@@ -87,10 +88,10 @@ export default function PoolConfigModal({ open, onClose }: { open: boolean; onCl
                 key={page.pageId}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '7px 0', borderBottom: '1px solid #f0f2f6',
+                  padding: '7px 0', borderBottom: `1px solid ${token.colorSplit}`,
                 }}
               >
-                <span style={{ fontSize: 13, color: on ? '#1f2733' : '#5b6378', fontWeight: on ? 600 : 400 }}>
+                <span style={{ fontSize: 13, color: on ? token.colorText : token.colorTextSecondary, fontWeight: on ? 600 : 400 }}>
                   {page.pageId}
                 </span>
                 <Switch size="small" checked={on} onChange={checked => toggleRetained(page.pageId, checked)} />
@@ -99,7 +100,7 @@ export default function PoolConfigModal({ open, onClose }: { open: boolean; onCl
           })}
         </div>
       )}
-      <div style={{ fontSize: 12, color: '#9aa3b4', marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 10 }}>
         也可以在各页面右侧属性栏「窗口」分组里单独勾选，两处配置同源。
       </div>
     </Modal>

@@ -146,7 +146,7 @@ public static class DjuiFlowBorder
         var w = canvas.Width - inset * 2;
         var h = canvas.Height - inset * 2;
         var radius = o.Radius ?? MathF.Min(20f, MathF.Min(w, h) * 0.3f);
-        radius = MathF.Clamp(radius, 0f, MathF.Min(w, h) / 2f);
+        radius = MathF.Max(0f, MathF.Min(radius, MathF.Min(w, h) / 2f));   // wasm BCL 无 MathF.Clamp
 
         canvas.ResetState();
         canvas.LineCap = LineCap.Round;
@@ -165,7 +165,7 @@ public static class DjuiFlowBorder
         const float trailInset = inset + 2.5f;
         var tw = canvas.Width - trailInset * 2;
         var th = canvas.Height - trailInset * 2;
-        var tr = MathF.Clamp(radius - 1.5f, 0f, MathF.Min(tw, th) / 2f);
+        var tr = MathF.Max(0f, MathF.Min(radius - 1.5f, MathF.Min(tw, th) / 2f));
         var basePhase = time * o.Speed + o.PhaseOffset;
         DrawTrail(canvas, Norm(basePhase), trailInset, trailInset, tw, th, tr, 1f, p);
         DrawTrail(canvas, Norm(basePhase + 0.34f), trailInset, trailInset, tw, th, tr, 0.7f, p);

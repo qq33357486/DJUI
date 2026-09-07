@@ -34,10 +34,15 @@ public sealed class DjuiFlowBorderOptions
 /// </summary>
 public static class DjuiFlowBorder
 {
-    // 常用主色预设（可直接传给 Attach）
+    // 常用主色预设（可直接传给 Attach；GM 配色轮选实机拍板 2026-09-08）
     public static readonly Color Gold = Color.FromArgb(255, 216, 158, 40);
     public static readonly Color Purple = Color.FromArgb(255, 178, 108, 255);
     public static readonly Color Blue = Color.FromArgb(255, 96, 160, 255);
+    public static readonly Color Cyan = Color.FromArgb(255, 64, 224, 208);
+    public static readonly Color Green = Color.FromArgb(255, 80, 220, 120);
+    public static readonly Color White = Color.FromArgb(255, 170, 200, 235);
+    public static readonly Color Orange = Color.FromArgb(255, 255, 130, 40);
+    public static readonly Color Red = Color.FromArgb(255, 240, 82, 82);
 
     private sealed record Entry(CanvasAnimated Canvas, DjuiFlowBorderOptions Options);
     private static readonly Dictionary<Control, Entry> _attached = new();
@@ -101,8 +106,8 @@ public static class DjuiFlowBorder
         var glowA = Color.FromArgb(150, glow.R, glow.G, glow.B);
         return new Palette(
             Frame: primary,
-            Trail: FromHsl(h, MathF.Min(1f, s * 0.9f), MathF.Min(0.85f, l + 0.25f)),
-            Head: FromHsl(h, MathF.Min(0.35f, s * 0.3f), 0.97f),
+            Trail: FromHsl(h, MathF.Min(1f, s * 0.9f), MathF.Min(0.85f, l + 0.27f)),
+            Head: FromHsl(h, MathF.Min(1f, s * 0.85f), 0.95f),   // 同色系高亮色（非白）——保持色系统一
             Glow: glowA);
     }
 
@@ -152,11 +157,15 @@ public static class DjuiFlowBorder
         canvas.LineCap = LineCap.Round;
         canvas.LineJoin = LineJoin.Round;
 
-        // 呼吸描边
+        // 呼吸描边三层（金属亮边结构）：宽辉光垫底＋主色主框＋白色中线
         var pulse = 0.5f + 0.5f * MathF.Sin(time * 2.4f);
-        canvas.Alpha = 0.7f + pulse * 0.3f;
-        canvas.StrokeWidth = 5f;
+        canvas.Alpha = 0.85f + pulse * 0.15f;
+        canvas.StrokeWidth = 7f;
         canvas.StrokePaint = p.Frame;
+        canvas.StrokeRoundedRectangle(inset, inset, w, h, radius);
+        canvas.Alpha = 1f;
+        canvas.StrokeWidth = 3f;
+        canvas.StrokePaint = p.Head;
         canvas.StrokeRoundedRectangle(inset, inset, w, h, radius);
 
         if (o.BreathOnly || o.Speed == 0f) return;
@@ -167,39 +176,92 @@ public static class DjuiFlowBorder
         var th = canvas.Height - trailInset * 2;
         var tr = MathF.Max(0f, MathF.Min(radius - 1.5f, MathF.Min(tw, th) / 2f));
         var basePhase = time * o.Speed + o.PhaseOffset;
-        DrawTrail(canvas, Norm(basePhase), trailInset, trailInset, tw, th, tr, 1f, p);
-        DrawTrail(canvas, Norm(basePhase + 0.34f), trailInset, trailInset, tw, th, tr, 0.7f, p);
-        DrawTrail(canvas, Norm(basePhase + 0.68f), trailInset, trailInset, tw, th, tr, 0.5f, p);
+        DrawSnake(canvas, basePhase, trailInset, trailInset, tw, th, tr, p);
     }
 
-    private static void DrawTrail(Canvas canvas, float phase, float x, float y, float w, float h, float r, float scale, Palette p)
+    /// <summary>
+    /// 蝌蚪光带（水滴形）：一条闭合路径画出整个形状——左右沿渐细收拢到尾尖、头端半圆弧封口，
+    /// 填充与描边共用同一路径，一体成形无接缝；内芯为同构缩窄的小水滴。
+    /// </summary>
+    private static void DrawSnake(Canvas canvas, float phase, float x, float y, float w, float h, float r, Palette p)
     {
-        const int tails = 9;
-        const float step = 0.015f;
-        for (var i = tails; i >= 1; i--)
+        const float tailPx = 180f;   // 拖尾总长（px）
+        const int samples = 44;      // 轮廓采样点数
+        const int capSteps = 10;     // 头部半圆封口弧采样数
+        var hw = w - 2 * r;
+        var vh = h - 2 * r;
+        var perimeter = 2 * (hw + vh) + 4 * (MathF.PI * r / 2f);
+        var stepPx = tailPx / samples;
+
+        var pts = new PointF[samples + 1];
+        for (var i = 0; i <= samples; i++)
+            pts[i] = RoundedPoint(Norm(phase - i * stepPx / perimeter), x, y, w, h, r);
+
+        // 法向（左）与切向（指向尾）
+        (PointF n, PointF t) Frame(int i)
         {
-            var k = 1f - (i - 1f) / tails;
-            var p1 = RoundedPoint(Norm(phase - (i - 1) * step), x, y, w, h, r);
-            var p2 = RoundedPoint(Norm(phase - i * step), x, y, w, h, r);
-            // 辉光衬底：宽而淡，营造泛光
-            canvas.Alpha = k * 0.25f * scale;
-            canvas.StrokeWidth = (4f + k * 10f) * scale;
-            canvas.StrokePaint = p.Glow;
-            canvas.DrawLine(p1.X, p1.Y, p2.X, p2.Y);
-            // 亮芯主线：不透明
-            canvas.Alpha = 1f;
-            canvas.StrokeWidth = (1.6f + k * 6f) * scale;
-            canvas.StrokePaint = p.Trail;
-            canvas.DrawLine(p1.X, p1.Y, p2.X, p2.Y);
+            var prev = pts[Math.Max(0, i - 1)];
+            var next = pts[Math.Min(samples, i + 1)];
+            var dx = next.X - prev.X; var dy = next.Y - prev.Y;
+            var len = MathF.Max(0.0001f, MathF.Sqrt(dx * dx + dy * dy));
+            return (new PointF(-dy / len, dx / len), new PointF(dx / len, dy / len));
         }
-        var head = RoundedPoint(phase, x, y, w, h, r);
-        // 头部：白亮芯＋主色晕
-        canvas.FillPaint = p.Glow;
-        canvas.Alpha = 0.35f * scale;
-        canvas.FillCircle(head.X, head.Y, 7.5f * scale);
-        canvas.FillPaint = p.Head;
+
+        PathF Waterdrop(float headHalf)
+        {
+            float Half(float t) => headHalf * MathF.Pow(1f - t, 0.55f);   // 逐渐变小，尾尖收到 0
+            var v = new List<PointF>(samples * 2 + capSteps);
+            for (var i = 0; i <= samples; i++)                    // 左沿：头→尾
+            {
+                var t = i / (float)samples;
+                var (n, _) = Frame(i);
+                var half = Half(t);
+                v.Add(new PointF(pts[i].X + n.X * half, pts[i].Y + n.Y * half));
+            }
+            for (var i = samples - 1; i >= 0; i--)                // 右沿：尾→头
+            {
+                var t = i / (float)samples;
+                var (n, _) = Frame(i);
+                var half = Half(t);
+                v.Add(new PointF(pts[i].X - n.X * half, pts[i].Y - n.Y * half));
+            }
+            var (n0, t0) = Frame(0);                               // 头部半圆封口：右沿端→前凸→左沿端
+            var r0 = Half(0);
+            for (var k = 1; k < capSteps; k++)
+            {
+                var a = MathF.PI * k / capSteps;
+                var dirX = -n0.X * MathF.Cos(a) - t0.X * MathF.Sin(a);   // -t0＝行进前向
+                var dirY = -n0.Y * MathF.Cos(a) - t0.Y * MathF.Sin(a);
+                v.Add(new PointF(pts[0].X + dirX * r0, pts[0].Y + dirY * r0));
+            }
+            // 闭合二次样条（中点法）：顶点为控制点、相邻中点为锚点——边缘平滑无锯齿
+            var 顶点数 = v.Count;
+            PointF Mid(PointF a, PointF b) => new((a.X + b.X) / 2f, (a.Y + b.Y) / 2f);
+            var path = new PathF();
+            path.MoveTo(Mid(v[顶点数 - 1], v[0]));
+            for (var i = 0; i < 顶点数; i++)
+                path.QuadTo(v[i], Mid(v[i], v[(i + 1) % 顶点数]));
+            path.Close();
+            return path;
+        }
+
+        canvas.LineCap = LineCap.Round;
+        canvas.LineJoin = LineJoin.Round;
+
+        // 主体水滴：同一路径先填充后描边（描边一半压在填充边上，无露底缝）
+        var body = Waterdrop(7f);
         canvas.Alpha = 1f;
-        canvas.FillCircle(head.X, head.Y, 4.2f * scale);
+        canvas.FillPaint = new SolidPaint(p.Trail);
+        canvas.FillPath(body);
+        canvas.Alpha = 0.9f;
+        canvas.StrokeWidth = 1.6f;
+        canvas.StrokePaint = p.Head;
+        canvas.DrawPath(body);
+
+        // 内芯：同构缩窄的小水滴（纯色高亮，不描边）
+        canvas.Alpha = 1f;
+        canvas.FillPaint = new SolidPaint(p.Head);
+        canvas.FillPath(Waterdrop(4f));
     }
 
     /// <summary>圆角矩形路径点：s∈[0,1) 沿周长匀速（直边＋四段 90° 圆弧），从左上角圆弧起点顺时针。</summary>

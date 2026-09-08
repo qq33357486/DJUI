@@ -323,7 +323,11 @@ public static class DjuiTreeBuilderV6
     {
         // 引擎 Button 的 ImageHover/ImagePressed 在 v6 下不可用（图片画在 visual 子 Panel，宿主 Image 为空，
         // 且引擎没有 ImageDisabled），四态换图与禁用灰化全部由 DjuiButtonStateV6 在 visual 层自管。
+        // 显式清空两态图（0.8.5）：无参构造走 DefaultTemplate，引擎默认 hover 图为蓝色高亮——
+        // DJUI 未接管时会叠加显示，造成"单项变蓝"的歧义（2026-09-08 业务验收问题2）。
         if (control is not Button target) return;
+        target.ImageHover = "";
+        target.ImagePressed = "";
         buttonStates.Attach(target, button, appearance?.Image, transform?.Opacity ?? 1f, appearance?.Desaturated ?? false);
     }
 

@@ -638,7 +638,7 @@ export async function initRuntime(_projectPath: string): Promise<InitRuntimeResu
 // ===== 工作区 =====
 
 const WORKSPACE_DIRS = ['原始素材', '成品素材', '临时文件', '文档', '脚本区']
-const FINISHED_SUBDIRS = ['backgrounds', 'buttons', 'frames', 'icons', 'lists', 'decorations', 'text', 'misc']
+export const FINISHED_SUBDIRS = ['backgrounds', 'buttons', 'frames', 'icons', 'lists', 'decorations', 'text', 'misc']
 
 export async function checkWorkspace(_workspacePath: string): Promise<WorkspaceStatus> {
   const ws = projectContext.ws

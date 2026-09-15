@@ -6,7 +6,7 @@ import {
   SettingOutlined, ZoomInOutlined, ZoomOutOutlined, ExpandOutlined,
   InfoCircleOutlined, SyncOutlined, CheckCircleOutlined, FontSizeOutlined,
   SoundOutlined, BellOutlined, SafetyCertificateOutlined, FileSyncOutlined,
-  AppstoreOutlined,
+  AppstoreOutlined, FileSearchOutlined,
 } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
@@ -36,6 +36,7 @@ interface TopBarProps {
   onNewProject: () => void   // 新建工程（清配置重开）
   onOpenProject: () => void  // 打开工程（选目录）
   onOpenAdaptationAudit: () => void
+  onOpenPublishPreview: () => void
 }
 
 // VS Code 风格菜单栏的单项样式
@@ -59,7 +60,7 @@ function menuLabel(text: string, shortcut?: string) {
 }
 
 export default function TopBar(props: TopBarProps) {
-  const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit } = props
+  const { soundSetup, onOpenConfig, onNewProject, onOpenProject, onOpenAdaptationAudit, onOpenPublishPreview } = props
   const { page, undo, redo, undoStack, redoStack, pendingHistory } = useEditorStore()
   const { config, agents, scripts, runtime, syncConflicts, refreshAgents, refreshScripts, refreshRuntime } = useProjectStore()
   const [publishing, setPublishing] = useState(false)
@@ -629,6 +630,15 @@ export default function TopBar(props: TopBarProps) {
     },
   ]
 
+  const checkMenu: MenuProps['items'] = [
+    {
+      key: 'publish-preview',
+      label: '发布素材预览',
+      icon: <FileSearchOutlined />,
+      onClick: onOpenPublishPreview,
+    },
+  ]
+
   const helpMenu: MenuProps['items'] = [
     {
       key: 'check-workspace',
@@ -755,6 +765,9 @@ export default function TopBar(props: TopBarProps) {
           </Dropdown>
           <Dropdown menu={{ items: publishMenu }} trigger={['click']} placement="bottomLeft">
             <div style={menuItemStyle} className="djui-menubar-item">发布</div>
+          </Dropdown>
+          <Dropdown menu={{ items: checkMenu }} trigger={['click']} placement="bottomLeft">
+            <div style={menuItemStyle} className="djui-menubar-item">检查</div>
           </Dropdown>
           <Dropdown menu={{ items: helpMenu }} trigger={['click']} placement="bottomLeft">
             <div style={menuItemStyle} className="djui-menubar-item">帮助</div>

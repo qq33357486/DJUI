@@ -9,6 +9,7 @@ import ConfigModal from './components/ConfigModal'
 import WhatsNewModal from './components/WhatsNewModal'
 import SyncConflictModal, { type ConflictResolution } from './components/SyncConflictModal'
 import AdaptationAuditPage from './components/AdaptationAuditPage'
+import PublishPreviewPage from './components/PublishPreviewPage'
 import { useProjectStore } from './store/projectStore'
 import { setDefaultButtonSoundId, setDefaultFontForNew, useEditorStore } from './store/editorStore'
 import { projectContext } from './fs/projectContext'
@@ -64,6 +65,7 @@ export default function App() {
   const [configMode, setConfigMode] = useState<'new' | 'open' | 'edit'>('edit')
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const [adaptationAuditOpen, setAdaptationAuditOpen] = useState(false)
+  const [publishPreviewOpen, setPublishPreviewOpen] = useState(false)
   const [auditDeviceReturn, setAuditDeviceReturn] = useState<{ presetId: string; variant: 'base' | 'wide' } | null>(null)
   const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
@@ -525,9 +527,12 @@ export default function App() {
             setConfigMode('open'); setConfigOpen(true)
           }}
           onOpenAdaptationAudit={() => setAdaptationAuditOpen(true)}
+          onOpenPublishPreview={() => setPublishPreviewOpen(true)}
         />
       </Header>
-      {adaptationAuditOpen ? (
+      {publishPreviewOpen ? (
+        <PublishPreviewPage onBack={() => setPublishPreviewOpen(false)} />
+      ) : adaptationAuditOpen ? (
         <AdaptationAuditPage
           onBack={() => setAdaptationAuditOpen(false)}
           onViewOnCanvas={(device: DevicePresetV6, wide) => {

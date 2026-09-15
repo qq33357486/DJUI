@@ -444,7 +444,7 @@ function findNodePath(root: UiNode, id: string): UiNode[] | null {
 function pickDragTarget(chain: UiNode[] | null, _selectedIds: string[]): string | null {
   if (!chain || chain.length === 0) return null
   const hit = chain[chain.length - 1]
-  return (!hit.editorLocked && !hit.editorHidden) ? hit.id : null
+  return (!hit.editorLocked && hit.basic?.visible !== false) ? hit.id : null
 }
 
 function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number, safeRect?: LayoutRect, imageFrame?: LayoutRect | null): LayoutRect {
@@ -512,7 +512,7 @@ function collectProxyEntries(
   out: ProxyEntry[],
   sceneSpace?: { frame: LayoutRect; scaleX: number; scaleY: number },
 ): void {
-  if (node.editorHidden) return
+  if (node.basic?.visible === false) return
   const { rect: authored } = solveLayout(node, parentRect, canvasWidth, canvasHeight)
   const solved = sceneSpace
     ? {
@@ -728,8 +728,6 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
   const imgUrl = useEngineImage(appPreview.image ?? null)
   const image = useImage(imgUrl)
 
-  if (node.editorHidden) return null
-
   const t = node.transform ?? {}
   const app = node.appearance ?? {}
   // 隐藏节点不渲染（与引擎运行时一致）
@@ -884,9 +882,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
   const disabledImgUrl = useEngineImage(node.starType === 'Button' ? (node.button?.imageDisabled ?? null) : null)
   const disabledImage = useImage(disabledImgUrl)
 
-  // 编辑器隐藏：不渲染（子节点也跟着隐藏）
-  if (node.editorHidden) return null
-  // basic.visible=false 与引擎运行时一致：节点（含子树）不渲染。
+  // basic.visible=false 与引擎运行时一致：节点（含子树）不渲染，也不参与画布交互。
   // 曾因漏掉此判断，隐藏的宽屏背景节点照常绘制并盖住竖屏背景，造成编辑器与引擎画面不一致。
   if (node.basic?.visible === false) return null
 
@@ -1680,7 +1676,8 @@ function computeRenderDims(
         if (!store.page) return
         for (const id of selectedIds) {
           const node = findNode(store.page.root, id)
-          if (node) store.updateNode(id, { editorHidden: !node.editorHidden })
+          // 显隐统一走 basic.visible（与左树眼睛、右侧「可见」开关同一条路径）
+          if (node) store.updateNodeField(id, 'basic.visible', node.basic?.visible !== false ? false : true)
         }
         return
       }
@@ -1708,7 +1705,7 @@ function computeRenderDims(
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
       const isCtrl = e.ctrlKey || e.metaKey
-      // Ctrl+Shift+H → 切换编辑器辅助渲染（不影响 editorHidden）
+      // Ctrl+Shift+H → 切换编辑器辅助渲染（不影响控件显隐）
       if (isCtrl && e.shiftKey && e.key.toLowerCase() === 'h') {
         e.preventDefault()
         setShowEditorOverlay(prev => !prev)
@@ -2095,7 +2092,7 @@ function computeRenderDims(
     for (const id of store.selectedIds) {
       const node = findNode(currentPage.root, id)
       const entry = proxyEntriesRef.current.find(item => item.id === id)
-      if (!node || !entry || node.editorLocked || node.editorHidden) continue
+      if (!node || !entry || node.editorLocked || node.basic?.visible === false) continue
       const parentRect = solveParentRectForNode(currentPage.root, id, actualW, actualH, safeRect, pageImageFrame)
       updatesById[id] = computeLayoutPatchFromRect(node, parentRect, actualW, actualH, {
         x: entry.baseLayoutRect.x + dx / entry.layoutScaleX,
@@ -2164,7 +2161,7 @@ function computeRenderDims(
   const proxyEntries: ProxyEntry[] = allEntries.filter(en => {
     if (!selectedSet.has(en.id)) return false
     const node = findNode(page.root, en.id)
-    return !!node && !node.editorLocked && !node.editorHidden
+    return !!node && !node.editorLocked && node.basic?.visible !== false
   })
   // 同步到 ref 供事件处理时查询拖动基准点（含未选中节点，支持拖动未选中节点）
   proxyEntriesRef.current = allEntries

@@ -379,7 +379,7 @@ function stretchUsesAxis(style: string | undefined, axis: 'width' | 'height') {
 }
 
 function isNodeVisibleForLayout(node: UiNode) {
-  return !node.editorHidden && node.basic?.visible !== false
+  return node.basic?.visible !== false
 }
 
 /**

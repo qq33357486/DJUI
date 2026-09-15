@@ -53,7 +53,7 @@ function buildControlTree(
   // 选中态只作用于当前活动页面：非当前页面的节点即使 id 命中也不显示选中
   const isSelected = pageId === activePageId && selectedIds.includes(node.id)
   const locked = node.editorLocked
-  const hidden = node.editorHidden
+  const hidden = node.basic?.visible === false
   const isRenaming = renamingId === node.id
   return {
     key: node.id,
@@ -118,7 +118,7 @@ function buildControlTree(
 const PAGE_KEY = (pageId: string) => `__page:${pageId}`
 
 export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage }: LeftPanelProps) {
-  const { allPages, activePageId, selectedIds, selectNode, setSelection, moveNode, setActivePage, updateNode, addNode, removeNode, duplicateNode, pasteNode } = useEditorStore()
+  const { allPages, activePageId, selectedIds, selectNode, setSelection, moveNode, setActivePage, updateNode, updateNodeField, addNode, removeNode, duplicateNode, pasteNode } = useEditorStore()
 
   // 记录树点击时的修饰键（antd onSelect 拿不到原生事件，用 title 的 mousedown 捕获）
   const clickModifier = useRef<'none' | 'ctrl' | 'shift'>('none')
@@ -132,9 +132,11 @@ export default function LeftPanel({ pages, onNewPage, onSwitchPage, onDeletePage
     const node = findNodeInAll(allPages, id)
     if (node) updateNode(id, { editorLocked: !node.editorLocked })
   }
+  // 显隐统一走 basic.visible（与右侧属性面板「可见」开关同一条路径）：
+  // 编辑期隐藏＝运行时隐藏，发布后游戏内同样不可见。
   const toggleHidden = (id: string) => {
     const node = findNodeInAll(allPages, id)
-    if (node) updateNode(id, { editorHidden: !node.editorHidden })
+    if (node) updateNodeField(id, 'basic.visible', node.basic?.visible !== false ? false : true)
   }
 
   // === 右键菜单 ===

@@ -664,7 +664,8 @@ export const useEditorStore = create<EditorState>()(
       if (!containerRect) return
 
       const spacing = parent.layout?.spacing ?? 0
-      const children = parent.children.filter(c => !c.editorHidden)
+      // 不可见子项不参与 Flex 布局测量（对齐 Runtime 行为）
+      const children = parent.children.filter(c => c.basic?.visible !== false)
       const flexRects = solveChildrenFlex(containerRect, flow, spacing, children, canvasW, canvasH)
 
       get().pushHistory()

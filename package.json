@@ -7,6 +7,6 @@
     "typecheck": "npm --prefix editor/frontend run typecheck",
     "build": "npm --prefix editor/frontend run build",
     "dev": "npm --prefix editor/frontend run dev",
-    "validate:pages": "node scripts/validate-pages.mjs"
+    "validate:pages": "node scripts/djui-publish.mjs validate --workspace"
   }
 }

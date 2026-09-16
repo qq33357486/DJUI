@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.7.4'
+export const AGENTS_VERSION = '0.7.5'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -146,6 +146,7 @@ backgrounds/bg_<场景>_wide.png       # 宽版
 **适配行为（为什么这样出图）**
 
 - 全屏背景控件用 \`cover\`（铺满、无黑边、可能裁切）；\`contain\`（完整显示、有留边）只用于立绘展示等需要完整构图的场合
+- 用了 \`cover\` / \`contain\` 的控件必须同时写 \`appearance.sourceSize\`（素材原始像素宽高）：运行时拿不到贴图尺寸，缺失会退化为拉伸变形；本地校验与发布都会直接拒绝
 - 焦点 \`focalX / focalY\` 默认 0.5 / 0.5（居中裁切）；主体构图偏移时按主体实际位置调整焦点
 - DJUI 页面按「基础层（竖）/ 宽屏层（横）」自动切换两套图：物理宽高比 ≥ 1.25（工程设置可调）时启用宽屏层
 
@@ -322,15 +323,13 @@ python trim_compress.py \\
 
 ### 6.1 本地校验（改完 JSON 必跑）
 
-无论人改还是脚本/AI 改 \`.djui/layout/pages/*.json\` 或 \`.djui/layout/project.json\`，保存后执行：
+无论人改还是脚本/AI 改 \`.djui/layout/pages/*.json\` 或 \`.djui/layout/project.json\`，保存后在 UI 工作区根目录执行：
 
 \`\`\`bash
-# 在 DJUI 仓库根目录(需 Node.js,无其他依赖)
-node scripts/validate-pages.mjs <星火工程根目录>
-# 或等价: cd <星火工程根目录> && node D:/git/DJUI/scripts/validate-pages.mjs
+node ./脚本区/djui-publish.mjs validate --json
 \`\`\`
 
-输出「全部通过 ✓」(退出码 0)才算改完；列出任何 ✗ 都必须先修复。校验规则与编辑器完全一致：协议版本、节点结构、safe 锚点声明、cover/contain 的 sourceSize、响应式覆盖的节点 ID 引用与字段封闭列表、音效引用存在性。
+返回 \`ok: true\`（退出码 0）才算改完；\`issues\` 里任何一条都必须先修复。校验规则与编辑器完全同一份（协议版本、节点结构、safe 锚点声明、cover/contain 的 sourceSize、响应式覆盖的节点 ID 引用与字段封闭列表）。音效引用缺失只进 \`warnings\`（⚠ 警告，不阻塞），建议顺手补齐。
 
 ### 6.2 AI / 命令行发布
 
@@ -353,7 +352,8 @@ node .\\脚本区\\djui-publish.mjs publish --json
 - \`publish\` 会严格镜像资源和页面，目标侧已不在工作区的旧文件会被删除
 - Runtime 缺失或过期时，\`publish\` 会返回 \`RUNTIME_NOT_READY\`（退出码 20）并阻止发布；AI 必须询问用户「是否允许更新 Runtime」，得到明确同意后才可执行 \`node .\\脚本区\\djui-publish.mjs upgrade-runtime --json\`，再重新发布
 - 若返回 \`PUBLISHER_OUTDATED\`（退出码 25），说明本地发布器比星火工程已装的 Runtime 旧（通常发生在用户已从网页更新 Runtime 之后）；此时**禁止**执行 \`upgrade-runtime\`（会把 Runtime 降级并损坏工程），必须停止发布，请用户在 DJUI 网页执行「检查工作区更新」同步脚本区后重试
-- 若返回 \`INVALID_WORKSPACE\` 且 error 提示「页面不是 v6 协议」，说明该页面缺 \`protocolVersion: 6\`，发布器拒绝自动迁移改写；必须请用户在 DJUI 编辑器打开该页面并保存（自动转为 v6）后重试。**禁止**手工给页面补版本号或改动协议字段冒充 v6
+- 若返回 \`INVALID_WORKSPACE\` 且 error 提示旧协议（如「旧协议文件必须显式迁移到 v6」），说明该页面 \`protocolVersion\` 低于 6，发布器拒绝自动迁移改写；必须请用户在 DJUI 编辑器打开该页面并保存（自动转为 v6）后重试。**禁止**手工给页面补版本号或改动协议字段冒充 v6
+- 若返回 \`INVALID_WORKSPACE\` 且 error 是「工作区结构校验未通过」问题清单（如 contain/cover 缺 sourceSize、节点 ID 重复、响应式覆盖引用了不存在的节点），必须逐条修复后重试；\`publish\` 与 \`validate\` 共用同一套校验，绕不过去
 - \`upgrade-runtime\` 与 \`publish\` 必须分开调用；不得自动覆盖星火工程的 Runtime
 - 当编辑器提示更新脚本区并执行同步时，会自动把旧星火工程内的布局源迁入工作区；迁移只在工作区尚无 \`.djui/layout/project.json\` 时执行，绝不会覆盖现有编辑源
 

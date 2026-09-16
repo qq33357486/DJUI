@@ -16,7 +16,7 @@
 
 1. editor/frontend 下执行 npx tsc --noEmit。
 2. editor/frontend 下执行 npm run build。
-3. 执行 node scripts/validate-pages.mjs <星火工程根目录>。
+3. 执行 node scripts/djui-publish.mjs validate --workspace <UI 工作区根目录>。
 4. 若页面包含 sceneFrame，校验器还会确认：背景引用存在且带图片、画板位于根下、画板填满 image 图帧、画板内未混用 screen/safe/image 锚点。
 
 自动门禁只证明协议、几何约束和构建成立；它不替代实际素材构图和触控体验验收。

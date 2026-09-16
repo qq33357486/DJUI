@@ -181,6 +181,230 @@ function createRuntimePageSnapshot(pageData, sliceMeta) {
 
 // src/types/protocolV6.ts
 var DJUI_PROTOCOL_VERSION = 6;
+var DJUI_SCHEMA_VERSION = 1;
+var RESPONSIVE_OVERRIDE_PATHS = [
+  "basic.visible",
+  "basic.disabled",
+  "transform.x",
+  "transform.y",
+  "transform.width",
+  "transform.height",
+  "appearance.image",
+  "appearance.background",
+  "appearance.imageFit",
+  "appearance.focalX",
+  "appearance.focalY",
+  "appearance.borderThickness",
+  "appearance.borderColor",
+  "text.text",
+  "text.fontSize",
+  "text.textColor",
+  "text.strokeSize",
+  "text.strokeColor",
+  "text.bold",
+  "text.font",
+  "text.textWrap",
+  "button.imageHover",
+  "button.imagePressed",
+  "button.imageDisabled",
+  "progress.value"
+];
+
+// src/lib/schemaV6.ts
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function versionKind(raw, issues) {
+  if (raw.protocolVersion === DJUI_PROTOCOL_VERSION && raw.schemaVersion === DJUI_SCHEMA_VERSION) return "ok";
+  const version = typeof raw.protocolVersion === "number" ? raw.protocolVersion : typeof raw.version === "number" ? raw.version : null;
+  if (version !== null && version < DJUI_PROTOCOL_VERSION) {
+    issues.push({ path: "$.protocolVersion", message: "\u65E7\u534F\u8BAE\u6587\u4EF6\u5FC5\u987B\u663E\u5F0F\u8FC1\u79FB\u5230 v6" });
+    return "legacy";
+  }
+  if (version !== null && version > DJUI_PROTOCOL_VERSION) {
+    issues.push({ path: "$.protocolVersion", message: "\u6587\u4EF6\u534F\u8BAE\u9AD8\u4E8E\u5F53\u524D\u7F16\u8F91\u5668\u652F\u6301\u7684 v6" });
+    return "future";
+  }
+  issues.push({ path: "$.protocolVersion", message: "\u7F3A\u5C11 protocolVersion=6 \u6216 schemaVersion=1" });
+  return "invalid";
+}
+function checkPositive(value, path, issues) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) issues.push({ path, message: "\u5FC5\u987B\u662F\u5927\u4E8E 0 \u7684\u6709\u9650\u6570\u5B57" });
+}
+function inspectProjectV6(raw) {
+  const issues = [];
+  if (!isRecord2(raw)) return { ok: false, kind: "invalid", issues: [{ path: "$", message: "\u9879\u76EE\u914D\u7F6E\u5FC5\u987B\u662F JSON \u5BF9\u8C61" }] };
+  const kind = versionKind(raw, issues);
+  if (kind !== "ok") return { ok: false, kind, issues };
+  if (raw.orientation !== "portrait" && raw.orientation !== "landscape") issues.push({ path: "$.orientation", message: "\u5FC5\u987B\u662F portrait \u6216 landscape" });
+  if (!isRecord2(raw.canvas)) issues.push({ path: "$.canvas", message: "\u7F3A\u5C11 Canvas \u914D\u7F6E" });
+  else {
+    checkPositive(raw.canvas.referenceWidth, "$.canvas.referenceWidth", issues);
+    checkPositive(raw.canvas.referenceHeight, "$.canvas.referenceHeight", issues);
+    if (!["Contain", "MatchWidth", "MatchHeight"].includes(String(raw.canvas.mode))) issues.push({ path: "$.canvas.mode", message: "\u4E0D\u652F\u6301\u7684 Canvas \u6A21\u5F0F" });
+  }
+  if (!isRecord2(raw.responsive)) issues.push({ path: "$.responsive", message: "\u7F3A\u5C11\u54CD\u5E94\u5F0F\u914D\u7F6E" });
+  else {
+    checkPositive(raw.responsive.wideRatio, "$.responsive.wideRatio", issues);
+    if (typeof raw.responsive.wideRatio === "number" && raw.responsive.wideRatio <= 1) issues.push({ path: "$.responsive.wideRatio", message: "\u5FC5\u987B\u5927\u4E8E 1" });
+  }
+  if (raw.retainedPages !== void 0 && (!Array.isArray(raw.retainedPages) || raw.retainedPages.some((page) => typeof page !== "string"))) {
+    issues.push({ path: "$.retainedPages", message: "\u5FC5\u987B\u662F\u9875\u9762 ID \u5B57\u7B26\u4E32\u6570\u7EC4" });
+  }
+  if (raw.poolCapacity !== void 0 && (typeof raw.poolCapacity !== "number" || !Number.isInteger(raw.poolCapacity) || raw.poolCapacity < 0 || raw.poolCapacity > 100)) {
+    issues.push({ path: "$.poolCapacity", message: "\u5FC5\u987B\u662F 0~100 \u7684\u6574\u6570" });
+  }
+  return issues.length ? { ok: false, kind: "invalid", issues } : { ok: true, value: raw };
+}
+function inspectPageV6(raw) {
+  const issues = [];
+  if (!isRecord2(raw)) return { ok: false, kind: "invalid", issues: [{ path: "$", message: "\u9875\u9762\u5FC5\u987B\u662F JSON \u5BF9\u8C61" }] };
+  const kind = versionKind(raw, issues);
+  if (kind !== "ok") return { ok: false, kind, issues };
+  if (typeof raw.pageId !== "string" || !raw.pageId.trim()) issues.push({ path: "$.pageId", message: "\u9875\u9762 ID \u4E0D\u80FD\u4E3A\u7A7A" });
+  if (raw.kind !== "window" && raw.kind !== "template") issues.push({ path: "$.kind", message: "\u5FC5\u987B\u662F window \u6216 template" });
+  if (raw.kind === "window" && !isRecord2(raw.window)) issues.push({ path: "$.window", message: "Window \u9875\u9762\u7F3A\u5C11 window \u914D\u7F6E" });
+  if (raw.kind === "template") {
+    if (!isRecord2(raw.localSize)) issues.push({ path: "$.localSize", message: "Template \u7F3A\u5C11 localSize" });
+    else {
+      checkPositive(raw.localSize.width, "$.localSize.width", issues);
+      checkPositive(raw.localSize.height, "$.localSize.height", issues);
+    }
+  }
+  const nodeIds = /* @__PURE__ */ new Set();
+  if (!isRecord2(raw.root) || !Array.isArray(raw.root.children)) issues.push({ path: "$.root", message: "\u7F3A\u5C11\u7ED3\u6784\u6839\u6216 root.children" });
+  else {
+    validateNode(raw.root, "$.root", issues, nodeIds);
+    validateSceneFrames(raw.root, "$.root", issues);
+  }
+  validateOverrideMaps(raw.responsive, "$.responsive", issues, nodeIds);
+  return issues.length ? { ok: false, kind: "invalid", issues } : { ok: true, value: raw };
+}
+function validateSceneFrames(root, rootPath, issues) {
+  const rootChildren = Array.isArray(root.children) ? root.children : [];
+  const rootById = /* @__PURE__ */ new Map();
+  rootChildren.forEach((child) => {
+    if (isRecord2(child) && typeof child.id === "string") rootById.set(child.id, child);
+  });
+  const walk = (node, path, insideScene, isRootChild) => {
+    const frame = isRecord2(node.sceneFrame) ? node.sceneFrame : null;
+    const nowInsideScene = insideScene || !!frame;
+    if (frame) {
+      if (!isRootChild) issues.push({ path: path + ".sceneFrame", message: "\u573A\u666F\u753B\u677F\u53EA\u80FD\u653E\u5728\u9875\u9762\u6839\u8282\u70B9\u4E0B" });
+      const backgroundId = typeof frame.backgroundId === "string" ? frame.backgroundId : "";
+      const background = rootById.get(backgroundId);
+      if (!background) issues.push({ path: path + ".sceneFrame.backgroundId", message: "\u5F15\u7528\u7684\u80CC\u666F\u5FC5\u987B\u662F\u9875\u9762\u6839\u4E0B\u8282\u70B9" });
+      else if (!isRecord2(background.appearance) || typeof background.appearance.image !== "string" || !background.appearance.image) {
+        issues.push({ path: path + ".sceneFrame.backgroundId", message: "\u5F15\u7528\u8282\u70B9\u5FC5\u987B\u662F\u5E26\u56FE\u7247\u7684\u80CC\u666F" });
+      }
+      if (!isRecord2(node.anchor) || node.anchor.target !== "image") {
+        issues.push({ path: path + ".anchor.target", message: "\u573A\u666F\u753B\u677F\u5BB9\u5668\u5FC5\u987B\u951A\u5B9A image \u56FE\u5E27" });
+      }
+      if (!isRecord2(node.stretch) || node.stretch.style !== "Both") {
+        issues.push({ path: path + ".stretch.style", message: "\u573A\u666F\u753B\u677F\u5BB9\u5668\u5FC5\u987B\u4F7F\u7528 Both \u62C9\u4F38\u586B\u6EE1\u56FE\u5E27" });
+      }
+    } else if (insideScene && isRecord2(node.anchor) && node.anchor.target !== void 0 && node.anchor.target !== "parent") {
+      issues.push({ path: path + ".anchor.target", message: "\u573A\u666F\u753B\u677F\u5185\u8282\u70B9\u53EA\u80FD\u951A\u5B9A parent" });
+    }
+    if (!Array.isArray(node.children)) return;
+    node.children.forEach((child, index) => {
+      if (isRecord2(child)) walk(child, path + ".children[" + index + "]", nowInsideScene, false);
+    });
+  };
+  rootChildren.forEach((child, index) => {
+    if (isRecord2(child)) walk(child, rootPath + ".children[" + index + "]", false, true);
+  });
+}
+function validateNode(value, path, issues, nodeIds) {
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  if (!id) issues.push({ path: path + ".id", message: "\u8282\u70B9 ID \u4E0D\u80FD\u4E3A\u7A7A" });
+  else if (nodeIds.has(id)) issues.push({ path: path + ".id", message: "\u8282\u70B9 ID \u5FC5\u987B\u5728\u9875\u9762\u5185\u552F\u4E00" });
+  else nodeIds.add(id);
+  const starTypes = ["Panel", "Button", "Label", "Input", "Progress", "SpacingPanel", "PanelScrollable", "TemplateInstance"];
+  if (!starTypes.includes(String(value.starType))) issues.push({ path: path + ".starType", message: "\u4E0D\u652F\u6301\u7684\u63A7\u4EF6\u7C7B\u578B" });
+  if (isRecord2(value.anchor)) {
+    if (!["parent", "screen", "safe", "image"].includes(String(value.anchor.target ?? "parent"))) issues.push({ path: path + ".anchor.target", message: "\u5FC5\u987B\u662F parent\u3001screen\u3001safe \u6216 image" });
+    const sides = ["None", "TopLeft", "Top", "TopRight", "Left", "Center", "Right", "BottomLeft", "Bottom", "BottomRight"];
+    if (!sides.includes(String(value.anchor.side ?? "TopLeft"))) issues.push({ path: path + ".anchor.side", message: "\u4E0D\u652F\u6301\u7684\u951A\u70B9\u4F4D\u7F6E" });
+    if (value.anchor.target === "safe") {
+      const edges = value.anchor.safeEdges;
+      if (!Array.isArray(edges) || edges.length === 0) issues.push({ path: path + ".anchor.safeEdges", message: "\u5B89\u5168\u533A\u951A\u70B9\u81F3\u5C11\u9009\u62E9\u4E00\u6761\u8FB9" });
+      else {
+        const legal = /* @__PURE__ */ new Set(["left", "top", "right", "bottom"]);
+        if (edges.some((edge) => typeof edge !== "string" || !legal.has(edge))) issues.push({ path: path + ".anchor.safeEdges", message: "\u5305\u542B\u975E\u6CD5\u5B89\u5168\u8FB9" });
+        if (new Set(edges).size !== edges.length) issues.push({ path: path + ".anchor.safeEdges", message: "\u5B89\u5168\u8FB9\u4E0D\u80FD\u91CD\u590D" });
+      }
+    }
+  }
+  if (isRecord2(value.appearance)) {
+    const fit = value.appearance.imageFit;
+    if (fit !== void 0 && !["stretch", "contain", "cover"].includes(String(fit))) issues.push({ path: path + ".appearance.imageFit", message: "\u56FE\u7247\u94FA\u653E\u65B9\u5F0F\u65E0\u6548" });
+    if (fit === "contain" || fit === "cover") {
+      const size = value.appearance.sourceSize;
+      if (!isRecord2(size)) issues.push({ path: path + ".appearance.sourceSize", message: "contain/cover \u5FC5\u987B\u8BB0\u5F55\u7D20\u6750\u539F\u59CB\u5C3A\u5BF8" });
+      else {
+        checkPositive(size.width, path + ".appearance.sourceSize.width", issues);
+        checkPositive(size.height, path + ".appearance.sourceSize.height", issues);
+      }
+    }
+    for (const key of ["focalX", "focalY"]) {
+      const n = value.appearance[key];
+      if (n !== void 0 && (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1)) issues.push({ path: path + ".appearance." + key, message: "\u5FC5\u987B\u662F 0 \u5230 1 \u7684\u6709\u9650\u6570\u5B57" });
+    }
+  }
+  if (value.sceneFrame !== void 0 && value.sceneFrame !== null) {
+    if (!isRecord2(value.sceneFrame)) {
+      issues.push({ path: path + ".sceneFrame", message: "\u573A\u666F\u753B\u677F\u5FC5\u987B\u662F\u5BF9\u8C61" });
+    } else {
+      if (typeof value.sceneFrame.backgroundId !== "string" || !value.sceneFrame.backgroundId.trim()) {
+        issues.push({ path: path + ".sceneFrame.backgroundId", message: "\u5FC5\u987B\u5F15\u7528\u80CC\u666F\u8282\u70B9 ID" });
+      }
+      if (!isRecord2(value.sceneFrame.artboard)) {
+        issues.push({ path: path + ".sceneFrame.artboard", message: "\u7F3A\u5C11\u573A\u666F\u753B\u677F\u5C3A\u5BF8" });
+      } else {
+        checkPositive(value.sceneFrame.artboard.width, path + ".sceneFrame.artboard.width", issues);
+        checkPositive(value.sceneFrame.artboard.height, path + ".sceneFrame.artboard.height", issues);
+      }
+    }
+  }
+  if (isRecord2(value.interaction)) {
+    const routed = value.interaction.routedEvents;
+    if (routed !== void 0 && routed !== null && typeof routed !== "string") issues.push({ path: path + ".interaction.routedEvents", message: "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6216 null" });
+    for (const key of ["allowDrag", "allowDrop"]) if (value.interaction[key] !== void 0 && typeof value.interaction[key] !== "boolean") issues.push({ path: path + ".interaction." + key, message: "\u5FC5\u987B\u662F\u5E03\u5C14\u503C" });
+    const behaviors = value.interaction.behaviors;
+    if (behaviors !== void 0) {
+      if (!Array.isArray(behaviors)) issues.push({ path: path + ".interaction.behaviors", message: "\u5FC5\u987B\u662F\u6570\u7EC4" });
+      else behaviors.forEach((behavior, index) => {
+        if (!isRecord2(behavior) || behavior.type !== "TouchBehavior") issues.push({ path: path + ".interaction.behaviors[" + index + "]", message: "\u53EA\u652F\u6301 TouchBehavior" });
+        else if (behavior.scaleFactor !== void 0 && (typeof behavior.scaleFactor !== "number" || !Number.isFinite(behavior.scaleFactor) || behavior.scaleFactor <= 0)) issues.push({ path: path + ".interaction.behaviors[" + index + "].scaleFactor", message: "\u5FC5\u987B\u5927\u4E8E 0" });
+      });
+    }
+  }
+  if (isRecord2(value.effects) && value.effects.preset !== void 0 && value.effects.preset !== null && typeof value.effects.preset !== "string") issues.push({ path: path + ".effects.preset", message: "\u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6216 null" });
+  if (!Array.isArray(value.children)) issues.push({ path: path + ".children", message: "children \u5FC5\u987B\u662F\u6570\u7EC4" });
+  else value.children.forEach((child, index) => {
+    if (!isRecord2(child)) issues.push({ path: path + ".children[" + index + "]", message: "\u8282\u70B9\u5FC5\u987B\u662F\u5BF9\u8C61" });
+    else validateNode(child, path + ".children[" + index + "]", issues, nodeIds);
+  });
+}
+function validateOverrideMaps(value, path, issues, nodeIds) {
+  if (value === void 0) return;
+  if (!isRecord2(value) || !isRecord2(value.wide) || !isRecord2(value.wide.overrides)) {
+    issues.push({ path, message: "\u54CD\u5E94\u5F0F\u8986\u76D6\u5FC5\u987B\u4F7F\u7528 wide.overrides \u7ED3\u6784" });
+    return;
+  }
+  const legal = new Set(RESPONSIVE_OVERRIDE_PATHS);
+  for (const [nodeId, map] of Object.entries(value.wide.overrides)) {
+    if (!nodeIds.has(nodeId)) issues.push({ path: path + ".wide.overrides." + nodeId, message: "\u8986\u76D6\u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u8282\u70B9 ID" });
+    if (!isRecord2(map)) {
+      issues.push({ path: path + ".wide.overrides." + nodeId, message: "\u8282\u70B9\u8986\u76D6\u5FC5\u987B\u662F\u5BF9\u8C61" });
+      continue;
+    }
+    for (const field of Object.keys(map)) {
+      if (!legal.has(field)) issues.push({ path: path + ".wide.overrides." + nodeId + "." + field, message: "\u5B57\u6BB5\u4E0D\u5141\u8BB8\u88AB\u54CD\u5E94\u5F0F\u8986\u76D6" });
+    }
+  }
+}
 
 // raw:D:\git\DJUI\runtime\DjuiActionRouter.cs
 var DjuiActionRouter_default = '// DJUI Runtime - Action \u8DEF\u7531\n\n#if CLIENT\n\nusing GameUI.Control;\nusing GameCore.Platform.SDL;\n\nnamespace DjuiRuntime;\n\n/// <summary>\n/// Action \u8DEF\u7531\u7CFB\u7EDF\u3002JSON \u4E2D\u58F0\u660E action\uFF0C\u8FD0\u884C\u65F6\u81EA\u52A8\u7ED1\u5B9A\u70B9\u51FB\u4E8B\u4EF6\u3002\n/// \u5F00\u53D1\u8005\u6CE8\u518C\u5904\u7406\u51FD\u6570\u5373\u53EF\u3002\n/// </summary>\npublic static class DjuiActionRouter\n{\n    private static readonly Dictionary<string, Action<Control, PointerEventArgs?>> _handlers = new();\n\n    /// <summary>\n    /// \u6CE8\u518C Action \u5904\u7406\u51FD\u6570\u3002\n    /// </summary>\n    public static void On(string actionName, Action handler)\n    {\n        _handlers[actionName] = (ctrl, args) => handler();\n    }\n\n    /// <summary>\n    /// \u6CE8\u518C Action \u5904\u7406\u51FD\u6570\uFF08\u5E26\u53C2\u6570\uFF09\u3002\n    /// </summary>\n    public static void On(string actionName, Action<Control, PointerEventArgs?> handler)\n    {\n        _handlers[actionName] = handler;\n    }\n\n    public static bool Trigger(string actionName)\n    {\n        if (!_handlers.TryGetValue(actionName, out var handler))\n            return false;\n\n        handler(null!, null);\n        return true;\n    }\n\n    /// <summary>\n    /// \u5185\u90E8\uFF1A\u5C06 action \u7ED1\u5B9A\u5230\u63A7\u4EF6\u7684\u70B9\u51FB\u4E8B\u4EF6\u3002\n    /// </summary>\n    internal static void BindAction(Control ctrl, string? actionName)\n    {\n        if (string.IsNullOrEmpty(actionName)) return;\n\n        ctrl.OnPointerClicked += (sender, args) =>\n        {\n            if (_handlers.TryGetValue(actionName, out var handler))\n            {\n                handler(ctrl, args);\n            }\n            else\n            {\n                Game.Logger.LogWarning("DJUI: \u672A\u6CE8\u518C\u7684 Action {Name}", actionName);\n            }\n        };\n    }\n}\n\n#endif\n';
@@ -1844,7 +2068,7 @@ var MANIFEST_PATH = "ui/.djui-publish-manifest.json";
 function joinPath(...parts) {
   return parts.filter(Boolean).join("/").replace(/\\/g, "/");
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function jsonEquals(a, b) {
@@ -1932,7 +2156,7 @@ async function applyProjectPatchesCore(store) {
       result.blockers.push(`\u9875\u9762 JSON \u8BFB\u53D6\u5931\u8D25\uFF1A${displayName}`);
       continue;
     }
-    const protocolVersion = isRecord2(page) && typeof page.protocolVersion === "number" ? page.protocolVersion : null;
+    const protocolVersion = isRecord3(page) && typeof page.protocolVersion === "number" ? page.protocolVersion : null;
     if (protocolVersion !== DJUI_PROTOCOL_VERSION) {
       result.blockers.push(
         `\u9875\u9762 ${displayName} \u4E0D\u662F v6 \u534F\u8BAE\uFF08protocolVersion=${protocolVersion ?? "\u7F3A\u5931"}\uFF09\uFF0C\u53D1\u5E03\u5668\u62D2\u7EDD\u81EA\u52A8\u8FC1\u79FB\uFF1B\u8BF7\u5728 DJUI \u7F16\u8F91\u5668\u6253\u5F00\u5E76\u4FDD\u5B58\u8BE5\u9875\u9762\u5B8C\u6210 v6 \u8FC1\u79FB\u540E\u518D\u53D1\u5E03`
@@ -1960,25 +2184,54 @@ async function applyProjectPatchesCore(store) {
 }
 async function getSliceMeta(store) {
   const raw = await store.readJson(SLICE_META_FILE);
-  return isRecord2(raw) ? raw : {};
+  return isRecord3(raw) ? raw : {};
 }
-async function buildPublishWarnings(store) {
-  const warnings = [];
-  const config = sanitizeSoundConfig(await store.readJson(SOUNDS_FILE));
-  const soundIds = new Set(config.sounds.map((sound) => sound.id));
-  const refs = /* @__PURE__ */ new Set();
-  const collectRefs = (node) => {
-    if (!isRecord2(node)) return;
-    const djui = isRecord2(node.djui) ? node.djui : null;
-    if (typeof djui?.clickSoundId === "string" && djui.clickSoundId) refs.add(djui.clickSoundId);
-    if (Array.isArray(node.children)) node.children.forEach(collectRefs);
-  };
-  for (const file of (await walkFiles(store, PAGES_DIR)).filter((file2) => file2.endsWith(".json"))) {
-    const page = await store.readJson(file);
-    if (isRecord2(page)) collectRefs(page.root);
+function collectSoundRefs(node, refs) {
+  if (!isRecord3(node)) return;
+  const djui = isRecord3(node.djui) ? node.djui : null;
+  if (typeof djui?.clickSoundId === "string" && djui.clickSoundId) refs.add(djui.clickSoundId);
+  if (Array.isArray(node.children)) node.children.forEach((child) => collectSoundRefs(child, refs));
+}
+async function validateWorkspaceCore(store) {
+  const issues = [];
+  if (!await store.dirExists(UI_LAYOUT_DIR)) {
+    issues.push({ file: UI_LAYOUT_DIR, path: "$", message: "\u5DE5\u4F5C\u533A\u7F3A\u5C11 .djui/layout\uFF1A\u5DE5\u7A0B\u672A\u521D\u59CB\u5316\uFF0C\u6216\u65E7\u5DE5\u7A0B\u5C1A\u672A\u8FC1\u79FB\uFF1B\u8BF7\u5148\u5728 DJUI \u7F51\u9875\u6253\u5F00\u5DE5\u7A0B\u5B8C\u6210\u521D\u59CB\u5316/\u540C\u6B65" });
+    return { ok: false, issues, warnings: [] };
   }
+  const projectRaw = await store.readText(PROJECT_FILE);
+  if (projectRaw === null) {
+    issues.push({ file: PROJECT_FILE, path: "$", message: "\u7F3A\u5C11\u9879\u76EE\u914D\u7F6E project.json\uFF08\u6216\u4E0D\u53EF\u8BFB\u53D6\uFF09" });
+  } else {
+    try {
+      const inspected = inspectProjectV6(JSON.parse(projectRaw.replace(/^\uFEFF/, "")));
+      if (!inspected.ok) for (const issue of inspected.issues) issues.push({ file: PROJECT_FILE, ...issue });
+    } catch (error) {
+      issues.push({ file: PROJECT_FILE, path: "$", message: `JSON \u89E3\u6790\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+  const soundIds = new Set(sanitizeSoundConfig(await store.readJson(SOUNDS_FILE)).sounds.map((sound) => sound.id));
+  const refs = /* @__PURE__ */ new Set();
+  if (!await store.dirExists(PAGES_DIR)) issues.push({ file: PAGES_DIR, path: "$", message: "\u9875\u9762\u76EE\u5F55\u4E0D\u5B58\u5728" });
+  for (const file of (await walkFiles(store, PAGES_DIR)).filter((file2) => file2.toLowerCase().endsWith(".json"))) {
+    const raw = await store.readText(file);
+    if (raw === null) {
+      issues.push({ file, path: "$", message: "\u9875\u9762 JSON \u8BFB\u53D6\u5931\u8D25" });
+      continue;
+    }
+    let page;
+    try {
+      page = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    } catch (error) {
+      issues.push({ file, path: "$", message: `JSON \u89E3\u6790\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    const inspected = inspectPageV6(page);
+    if (!inspected.ok) for (const issue of inspected.issues) issues.push({ file, ...issue });
+    if (isRecord3(page)) collectSoundRefs(page.root, refs);
+  }
+  const warnings = [];
   for (const ref of refs) if (!soundIds.has(ref)) warnings.push(`\u97F3\u6548\u5F15\u7528 ${ref} \u5728 sounds.json \u4E2D\u4E0D\u5B58\u5728`);
-  return warnings;
+  return { ok: issues.length === 0, issues, warnings };
 }
 async function migrateLegacyLayoutCore(workspace, star) {
   if (await workspace.fileExists(PROJECT_FILE) || !await star.fileExists(STAR_PROJECT_FILE)) {
@@ -2070,6 +2323,15 @@ async function publishCore(workspace, star) {
       userAction: `DJUI Runtime \u72B6\u6001\u4E3A ${runtime.status}\uFF08\u5DF2\u5B89\u88C5 ${runtime.installedVersion ?? "\u65E0"}\uFF0C\u9700\u8981 ${runtime.expectedVersion ?? RUNTIME_VERSION}\uFF09\u3002\u8BF7\u8BE2\u95EE\u7528\u6237\u662F\u5426\u5141\u8BB8\u6267\u884C upgrade-runtime\u3002`
     };
   }
+  const validation = await validateWorkspaceCore(workspace);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      code: "INVALID_WORKSPACE",
+      error: ["\u5DE5\u4F5C\u533A\u7ED3\u6784\u6821\u9A8C\u672A\u901A\u8FC7\uFF0C\u53D1\u5E03\u5DF2\u963B\u6B62\uFF1A", ...validation.issues.map((issue) => `${issue.file}${issue.path}: ${issue.message}`)].join("\n"),
+      userAction: "\u6309 error \u6E05\u5355\u9010\u6761\u4FEE\u590D\u540E\u91CD\u8BD5\uFF1B\u53EF\u5148\u5728 UI \u5DE5\u4F5C\u533A\u6267\u884C node \u811A\u672C\u533A/djui-publish.mjs validate \u81EA\u68C0\u3002"
+    };
+  }
   const patches = await applyProjectPatchesCore(workspace);
   if (!patches.ok || patches.blockers.length) return { ok: false, code: "INVALID_WORKSPACE", error: patches.blockers.join("\n") || "\u8865\u4E01\u5E94\u7528\u5931\u8D25" };
   if (!await workspace.dirExists("\u6210\u54C1\u7D20\u6750")) return { ok: false, code: "INVALID_WORKSPACE", error: "\u6210\u54C1\u7D20\u6750\u76EE\u5F55\u4E0D\u5B58\u5728" };
@@ -2102,7 +2364,7 @@ async function publishCore(workspace, star) {
     await star.writeText(CLIENT_DJUI_DIR + "/sounds.json", sounds);
     copiedSoundsConfig = true;
   }
-  warnings.push(...await buildPublishWarnings(workspace));
+  warnings.push(...validation.warnings);
   return {
     ok: true,
     copiedAssets: new Array(assets.total).fill(""),
@@ -2217,6 +2479,7 @@ function usage() {
   return [
     "DJUI \u672C\u5730\u53D1\u5E03\u5668",
     "node \u811A\u672C\u533A/djui-publish.mjs configure --star-project <\u661F\u706B\u5DE5\u7A0B\u76EE\u5F55> --json",
+    "node \u811A\u672C\u533A/djui-publish.mjs validate --json",
     "node \u811A\u672C\u533A/djui-publish.mjs status --json",
     "node \u811A\u672C\u533A/djui-publish.mjs runtime-status --json",
     "node \u811A\u672C\u533A/djui-publish.mjs publish --json",
@@ -2249,6 +2512,18 @@ async function main() {
       output({ ok: false, code: "INVALID_STAR_PROJECT", error: error instanceof Error ? error.message : String(error) }, asJson);
       return 2;
     }
+  }
+  if (command === "validate") {
+    const validation = await validateWorkspaceCore(workspace);
+    if (asJson) {
+      output({ ok: validation.ok, issues: validation.issues, warnings: validation.warnings }, asJson);
+      return validation.ok ? 0 : 1;
+    }
+    console.log(`DJUI \u5DE5\u4F5C\u533A\u6821\u9A8C \u2014 ${resolve(workspacePath)}`);
+    for (const issue of validation.issues) console.error(`  \u2717 ${issue.file}${issue.path}: ${issue.message}`);
+    for (const warning of validation.warnings) console.error(`  \u26A0 ${warning}`);
+    console.log(validation.ok ? "\u68C0\u67E5\u5B8C\u6210: \u5168\u90E8\u901A\u8FC7 \u2713" : `\u68C0\u67E5\u5B8C\u6210: ${validation.issues.length} \u4E2A\u95EE\u9898 \u2717\uFF08\u97F3\u6548\u5F15\u7528\u7F3A\u5931\u4EC5 \u26A0 \u8B66\u544A\uFF09`);
+    return validation.ok ? 0 : 1;
   }
   const config = await workspace.readJson(PUBLISH_CONFIG_FILE);
   if (!config || config.version !== 1 || !config.starProjectPath) {

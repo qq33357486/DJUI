@@ -8,6 +8,7 @@ import {
   sanitizeSoundConfig,
 } from './patches'
 import { DJUI_PROTOCOL_VERSION } from '../types/protocolV6'
+import { inspectPageV6, inspectProjectV6 } from './schemaV6'
 import { RUNTIME_FILES, RUNTIME_VERSION, type BundledRuntimeFile } from './runtimeBundle'
 
 export type StoreEntry = { name: string; kind: 'file' | 'directory' }
@@ -223,23 +224,73 @@ async function getSliceMeta(store: PublishStore): Promise<Record<string, { left:
   return isRecord(raw) ? raw as Record<string, { left: number; top: number; right: number; bottom: number }> : {}
 }
 
-async function buildPublishWarnings(store: PublishStore): Promise<string[]> {
-  const warnings: string[] = []
-  const config = sanitizeSoundConfig(await store.readJson<unknown>(SOUNDS_FILE))
-  const soundIds = new Set(config.sounds.map(sound => sound.id))
+function collectSoundRefs(node: unknown, refs: Set<string>): void {
+  if (!isRecord(node)) return
+  const djui = isRecord(node.djui) ? node.djui : null
+  if (typeof djui?.clickSoundId === 'string' && djui.clickSoundId) refs.add(djui.clickSoundId)
+  if (Array.isArray(node.children)) node.children.forEach(child => collectSoundRefs(child, refs))
+}
+
+export interface WorkspaceValidationIssue {
+  /** 工作区内相对路径，如 .djui/layout/pages/main.json */
+  file: string
+  /** JSON 内部定位，如 $.root.children[0].appearance.sourceSize */
+  path: string
+  message: string
+}
+
+export interface WorkspaceValidationResult {
+  ok: boolean
+  issues: WorkspaceValidationIssue[]
+  /** 不阻塞发布的提醒（音效引用对账等） */
+  warnings: string[]
+}
+
+/**
+ * 发布与本地自检（CLI validate）共用的结构校验关卡，纯读不写。
+ * 规则唯一来源是 schemaV6 —— 与编辑器加载/保存拦截同一套。音效引用缺失只算警告：
+ * 补丁只会写入经 sanitizeSoundConfig 校验的默认音效 ID，发布前对账的结果与补丁后一致。
+ */
+export async function validateWorkspaceCore(store: PublishStore): Promise<WorkspaceValidationResult> {
+  const issues: WorkspaceValidationIssue[] = []
+  if (!(await store.dirExists(UI_LAYOUT_DIR))) {
+    issues.push({ file: UI_LAYOUT_DIR, path: '$', message: '工作区缺少 .djui/layout：工程未初始化，或旧工程尚未迁移；请先在 DJUI 网页打开工程完成初始化/同步' })
+    return { ok: false, issues, warnings: [] }
+  }
+
+  const projectRaw = await store.readText(PROJECT_FILE)
+  if (projectRaw === null) {
+    issues.push({ file: PROJECT_FILE, path: '$', message: '缺少项目配置 project.json（或不可读取）' })
+  } else {
+    try {
+      const inspected = inspectProjectV6(JSON.parse(projectRaw.replace(/^\uFEFF/, '')))
+      if (!inspected.ok) for (const issue of inspected.issues) issues.push({ file: PROJECT_FILE, ...issue })
+    } catch (error) {
+      issues.push({ file: PROJECT_FILE, path: '$', message: `JSON 解析失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  }
+
+  const soundIds = new Set(sanitizeSoundConfig(await store.readJson<unknown>(SOUNDS_FILE)).sounds.map(sound => sound.id))
   const refs = new Set<string>()
-  const collectRefs = (node: unknown) => {
-    if (!isRecord(node)) return
-    const djui = isRecord(node.djui) ? node.djui : null
-    if (typeof djui?.clickSoundId === 'string' && djui.clickSoundId) refs.add(djui.clickSoundId)
-    if (Array.isArray(node.children)) node.children.forEach(collectRefs)
+  if (!(await store.dirExists(PAGES_DIR))) issues.push({ file: PAGES_DIR, path: '$', message: '页面目录不存在' })
+  for (const file of (await walkFiles(store, PAGES_DIR)).filter(file => file.toLowerCase().endsWith('.json'))) {
+    const raw = await store.readText(file)
+    if (raw === null) { issues.push({ file, path: '$', message: '页面 JSON 读取失败' }); continue }
+    let page: unknown
+    try {
+      page = JSON.parse(raw.replace(/^\uFEFF/, ''))
+    } catch (error) {
+      issues.push({ file, path: '$', message: `JSON 解析失败：${error instanceof Error ? error.message : String(error)}` })
+      continue
+    }
+    const inspected = inspectPageV6(page)
+    if (!inspected.ok) for (const issue of inspected.issues) issues.push({ file, ...issue })
+    if (isRecord(page)) collectSoundRefs(page.root, refs)
   }
-  for (const file of (await walkFiles(store, PAGES_DIR)).filter(file => file.endsWith('.json'))) {
-    const page = await store.readJson<unknown>(file)
-    if (isRecord(page)) collectRefs(page.root)
-  }
+
+  const warnings: string[] = []
   for (const ref of refs) if (!soundIds.has(ref)) warnings.push(`音效引用 ${ref} 在 sounds.json 中不存在`)
-  return warnings
+  return { ok: issues.length === 0, issues, warnings }
 }
 
 /**
@@ -325,6 +376,15 @@ export async function publishCore(workspace: PublishStore, star: PublishStore): 
       userAction: `DJUI Runtime 状态为 ${runtime.status}（已安装 ${runtime.installedVersion ?? '无'}，需要 ${runtime.expectedVersion ?? RUNTIME_VERSION}）。请询问用户是否允许执行 upgrade-runtime。`,
     }
   }
+  // 结构校验关卡：先验证后打补丁，规则与编辑器加载/保存拦截同一套（schemaV6）
+  const validation = await validateWorkspaceCore(workspace)
+  if (!validation.ok) {
+    return {
+      ok: false, code: 'INVALID_WORKSPACE',
+      error: ['工作区结构校验未通过，发布已阻止：', ...validation.issues.map(issue => `${issue.file}${issue.path}: ${issue.message}`)].join('\n'),
+      userAction: '按 error 清单逐条修复后重试；可先在 UI 工作区执行 node 脚本区/djui-publish.mjs validate 自检。',
+    }
+  }
   const patches = await applyProjectPatchesCore(workspace)
   if (!patches.ok || patches.blockers.length) return { ok: false, code: 'INVALID_WORKSPACE', error: patches.blockers.join('\n') || '补丁应用失败' }
   if (!(await workspace.dirExists('成品素材'))) return { ok: false, code: 'INVALID_WORKSPACE', error: '成品素材目录不存在' }
@@ -359,7 +419,7 @@ export async function publishCore(workspace: PublishStore, star: PublishStore): 
     await star.writeText(CLIENT_DJUI_DIR + '/sounds.json', sounds)
     copiedSoundsConfig = true
   }
-  warnings.push(...await buildPublishWarnings(workspace))
+  warnings.push(...validation.warnings)
   return {
     ok: true,
     copiedAssets: new Array(assets.total).fill(''), copiedPages: new Array(serverPages.total).fill(''), copiedClientPages: new Array(clientPages.total).fill(''),

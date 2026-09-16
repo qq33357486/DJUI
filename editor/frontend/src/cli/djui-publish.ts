@@ -7,6 +7,7 @@ import {
   checkRuntimeCore,
   publishCore,
   upgradeRuntimeCore,
+  validateWorkspaceCore,
   type PublishStore,
   type StoreEntry,
 } from '../lib/publishCore'
@@ -103,6 +104,7 @@ function usage(): string {
   return [
     'DJUI 本地发布器',
     'node 脚本区/djui-publish.mjs configure --star-project <星火工程目录> --json',
+    'node 脚本区/djui-publish.mjs validate --json',
     'node 脚本区/djui-publish.mjs status --json',
     'node 脚本区/djui-publish.mjs runtime-status --json',
     'node 脚本区/djui-publish.mjs publish --json',
@@ -130,6 +132,20 @@ async function main(): Promise<number> {
     } catch (error) {
       output({ ok: false, code: 'INVALID_STAR_PROJECT', error: error instanceof Error ? error.message : String(error) }, asJson); return 2
     }
+  }
+
+  // validate 只读工作区，不要求已 configure 星火工程目录
+  if (command === 'validate') {
+    const validation = await validateWorkspaceCore(workspace)
+    if (asJson) {
+      output({ ok: validation.ok, issues: validation.issues, warnings: validation.warnings }, asJson)
+      return validation.ok ? 0 : 1
+    }
+    console.log(`DJUI 工作区校验 — ${resolve(workspacePath)}`)
+    for (const issue of validation.issues) console.error(`  ✗ ${issue.file}${issue.path}: ${issue.message}`)
+    for (const warning of validation.warnings) console.error(`  ⚠ ${warning}`)
+    console.log(validation.ok ? '检查完成: 全部通过 ✓' : `检查完成: ${validation.issues.length} 个问题 ✗（音效引用缺失仅 ⚠ 警告）`)
+    return validation.ok ? 0 : 1
   }
 
   const config = await workspace.readJson<PublishTargetConfig>(PUBLISH_CONFIG_FILE)

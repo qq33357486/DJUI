@@ -639,6 +639,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   <FontSelect node={node} updateNodeField={updateNodeField} />
                 </FieldRow>
                 <ScrubField label="字号" value={txt.fontSize ?? 16} onChange={v => updateNodeField(node.id, 'text.fontSize', v)} min={1} />
+                <TextAlignGrid node={node} batchUpdateNode={batchUpdateNode} />
                 <FieldRow label="颜色">
                   <PaletteColorPicker
                     value={txt.textColor || '#FFFFFF'}
@@ -2063,6 +2064,62 @@ function FlexLayoutPanel({ node, updateNodeField }: {
         </div>
       )}
     </Space>
+  )
+}
+
+// === 文本对齐九宫格（layout.horizontal/verticalContentAlignment）===
+// 同一容器的两个字段在容器侧管子控件对齐（AlignmentEditor 下拉），在文本侧管文字在控件内的对齐
+function TextAlignGrid({ node, batchUpdateNode }: {
+  node: any
+  batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
+}) {
+  const layout = node.layout ?? {}
+  // 未设置（null）或 Stretch 时引擎按居中渲染，九宫格高亮中格
+  const hToCol = (v?: string | null) => v === 'Left' ? 0 : v === 'Right' ? 2 : 1
+  const vToRow = (v?: string | null) => v === 'Top' ? 0 : v === 'Bottom' ? 2 : 1
+  const activeCol = hToCol(layout.horizontalContentAlignment)
+  const activeRow = vToRow(layout.verticalContentAlignment)
+  const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
+
+  const setAlign = (row: number, col: number) => {
+    const h = col === 0 ? 'Left' : col === 2 ? 'Right' : 'Center'
+    const v = row === 0 ? 'Top' : row === 2 ? 'Bottom' : 'Center'
+    batchUpdateNode(node.id, { 'layout.horizontalContentAlignment': h, 'layout.verticalContentAlignment': v })
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: '#9aa3b4', marginBottom: 4 }}>对齐 · 文字在控件内的位置</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 14px)', gridTemplateRows: 'repeat(3, 14px)', gap: 2 }}>
+          {Array.from({ length: 9 }, (_, i) => {
+            const row = Math.floor(i / 3)
+            const col = i % 3
+            const active = activeRow === row && activeCol === col
+            const hovered = hoverCell && hoverCell[0] === row && hoverCell[1] === col
+            return (
+              <div
+                key={i}
+                onMouseEnter={() => setHoverCell([row, col])}
+                onMouseLeave={() => setHoverCell(null)}
+                onClick={() => setAlign(row, col)}
+                title={['左', '中', '右'][col] + ['上', '中', '下'][row]}
+                style={{
+                  cursor: 'pointer',
+                  transition: 'all 0.1s',
+                  background: active ? '#5ab9ff' : hovered ? '#2a5a8a' : '#1d2230',
+                  border: active ? '1px solid #5ab9ff' : '1px solid #2a3142',
+                  borderRadius: 2,
+                }}
+              />
+            )
+          })}
+        </div>
+        <div style={{ fontSize: 10, color: '#5b6378' }}>
+          {['左', '中', '右'][activeCol]}{['上', '中', '下'][activeRow]}
+        </div>
+      </div>
+    </div>
   )
 }
 

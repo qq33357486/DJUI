@@ -162,6 +162,68 @@ const SOUNDS_FILE_V6 = UI_LAYOUT_DIR + '/sounds.json'
 // 编辑器专用的画布后景关联，刻意位于 layout/ 之外，发布时不会镜像给 Runtime。
 const PAGE_UNDERLAYS_FILE = '.djui/editor/page-underlays.json'
 let pageUnderlaySaveQueue: Promise<void> = Promise.resolve()
+
+// ===== 页面参考图配置（编辑器私有，不进页面协议 JSON） =====
+// referenceImage/referenceOpacity/referenceVisible 属于编辑器体验配置：写进页面 JSON 顶层会被
+// Runtime 严格反序列化（UnmappedMemberHandling.Disallow）直接拒绝，因此与 page-underlays 同款
+// 落到 .djui/editor/ 私有文件（该目录不进发布链路），savePage/loadPage 自动抽取与合并。
+const PAGE_REFERENCE_FILE = '.djui/editor/page-reference.json'
+interface PageReferenceEntry {
+  image: string
+  opacity?: number
+  visible?: boolean
+}
+type PageReferenceMap = Record<string, PageReferenceEntry>
+let pageReferenceCache: PageReferenceMap | null = null
+let pageReferenceCacheWs = ''
+let pageReferenceSaveQueue: Promise<void> = Promise.resolve()
+
+/** 工作区目录名变化（同会话换工作区的极端场景）时强制重读磁盘，防止跨工程串数据。 */
+async function loadPageReferenceMeta(): Promise<PageReferenceMap> {
+  const ws = projectContext.ws
+  if (!ws) return {}
+  const wsName = projectContext.wsName
+  if (pageReferenceCache && pageReferenceCacheWs === wsName) return pageReferenceCache
+  const raw = await fs.readFileJson<unknown>(ws, PAGE_REFERENCE_FILE)
+  const pages: PageReferenceMap = {}
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const source = (raw as Record<string, unknown>).pages
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      for (const [pageId, entry] of Object.entries(source as Record<string, unknown>)) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+        const e = entry as Record<string, unknown>
+        if (typeof e.image !== 'string' || !e.image) continue
+        pages[pageId] = {
+          image: e.image,
+          opacity: typeof e.opacity === 'number' ? Math.min(1, Math.max(0, e.opacity)) : undefined,
+          visible: typeof e.visible === 'boolean' ? e.visible : undefined,
+        }
+      }
+    }
+  }
+  pageReferenceCache = pages
+  pageReferenceCacheWs = wsName
+  return pages
+}
+
+/** 串行落盘当前缓存快照；配置全空时删除文件，避免残留无意义文件。 */
+function persistPageReferenceMeta(): Promise<void> {
+  const ws = projectContext.ws
+  if (!ws) return Promise.resolve()
+  const snapshot: PageReferenceMap = {}
+  for (const [pageId, entry] of Object.entries(pageReferenceCache ?? {})) {
+    snapshot[pageId] = { ...entry }
+  }
+  const write = async () => {
+    if (Object.keys(snapshot).length === 0) {
+      try { await fs.removeFile(ws, PAGE_REFERENCE_FILE) } catch { /* 文件本就不存在 */ }
+      return
+    }
+    await fs.writeFileJson(ws, PAGE_REFERENCE_FILE, { version: 1, pages: snapshot })
+  }
+  pageReferenceSaveQueue = pageReferenceSaveQueue.catch(() => {}).then(write)
+  return pageReferenceSaveQueue
+}
 const STAR_LAYOUT_DIR = 'ui/djui'
 const STAR_PROJECT_FILE_V6 = STAR_LAYOUT_DIR + '/project.json'
 const STAR_PAGES_DIR = STAR_LAYOUT_DIR + '/pages'
@@ -371,6 +433,13 @@ export async function loadPage(pageId: string): Promise<UiPage | null> {
   // v6 仍经过结构边界归一化，但不再运行旧协议补丁或静默写回。
   const page = normalizePage(uiPageFromV6(result.value))
   if (!page) return null
+  // 参考图配置从编辑器私有 meta 恢复（visible 无记录时留空，画布端回退 localStorage 旧偏好）
+  const refMeta = (await loadPageReferenceMeta())[pageId]
+  if (refMeta) {
+    page.referenceImage = refMeta.image
+    if (typeof refMeta.opacity === 'number') page.referenceOpacity = refMeta.opacity
+    if (typeof refMeta.visible === 'boolean') page.referenceVisible = refMeta.visible
+  }
   recordBaseline(pageId, rawText ?? '', page)
   return page
 }
@@ -384,7 +453,23 @@ export async function savePage(page: UiPage): Promise<void> {
     const detail = result.issues.map(issue => issue.path + ': ' + issue.message).join('；')
     throw new Error('拒绝保存非 v6 页面：' + detail)
   }
+  // 参考图配置抽离到编辑器私有 meta：页面协议 JSON 不携带（Runtime 严格反序列化会拒绝未知顶层字段）
+  const refMeta = await loadPageReferenceMeta()
+  if (typeof page.referenceImage === 'string' && page.referenceImage) {
+    refMeta[page.pageId] = {
+      image: page.referenceImage,
+      opacity: typeof page.referenceOpacity === 'number' ? page.referenceOpacity : undefined,
+      visible: typeof page.referenceVisible === 'boolean' ? page.referenceVisible : undefined,
+    }
+  } else {
+    delete refMeta[page.pageId]
+  }
+  // meta 落盘失败不阻塞页面本身保存（参考图属辅助配置，下次保存会再次尝试）
+  const refMetaPersist = persistPageReferenceMeta().catch((e) => {
+    console.warn('参考图配置保存失败：', e)
+  })
   await fs.writeFileJson(ws, `${PAGES_DIR}/${page.pageId}.json`, result.value)
+  await refMetaPersist
   // 基线磁盘文本必须与 writeFileJson 落盘格式逐字一致（同为 2 空格缩进序列化）
   recordBaseline(page.pageId, JSON.stringify(result.value, null, 2), page)
 }
@@ -394,6 +479,13 @@ export async function deletePage(pageId: string): Promise<void> {
   if (!ws) return
   await fs.removeFile(ws, `${PAGES_DIR}/${pageId}.json`)
   pageBaselines.delete(pageId)
+  const refMeta = await loadPageReferenceMeta()
+  if (refMeta[pageId]) {
+    delete refMeta[pageId]
+    await persistPageReferenceMeta().catch((e) => {
+      console.warn('参考图配置清理失败：', e)
+    })
+  }
 }
 
 // ===== 页面基线（外部修改检测） =====

@@ -329,11 +329,8 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
         </div>
       )}
 
-      {filterItems([
-          {
-            key: 'common', label: <GroupLabel color={GROUP_COLORS.common} title="常用" />,
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <ModuleCard color={MODULE_COLORS.base} title="基础" sub="名称 · 可见性">
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <FieldRow label="名称">
                   <Input size="small" value={node.name ?? ''} onChange={e => updateNodeField(node.id, 'name', e.target.value)} />
                 </FieldRow>
@@ -347,15 +344,12 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   <Switch size="small" checked={basic.isStatic ?? false} onChange={v => updateNodeField(node.id, 'basic.isStatic', v)} />
                 </FieldRow>
               </Space>
-            ),
-          },
-          {
-            key: 'transform', label: <GroupLabel color={GROUP_COLORS.transform} title="变换" />,
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <SectionTitle color={GROUP_COLORS.transform}>锚点</SectionTitle>
+      </ModuleCard>
+      <ModuleCard color={MODULE_COLORS.transform} title="变换" sub="锚点 · 偏移 · 拉伸 · 尺寸 · 弹性">
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+                <SectionTitle color={MODULE_COLORS.transform}>锚点</SectionTitle>
                 <AnchorEditor node={node} selectedIds={selectedIds} />
-                <SectionTitle color={GROUP_COLORS.transform}>偏移</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.transform}>偏移</SectionTitle>
                 <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
                 <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
                 {(stretchWidth || stretchHeight) && (
@@ -363,9 +357,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                     拉伸轴的位置由边距决定（见下方「拉伸」）；画布拖拽和缩放会自动更新边距。
                   </div>
                 )}
-                <SectionTitle color={GROUP_COLORS.transform}>拉伸</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.transform}>拉伸</SectionTitle>
                 <StretchEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle color={GROUP_COLORS.transform}>尺寸</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.transform}>尺寸</SectionTitle>
                 <ScrubField
                   label={(autoWidth || stretchWidth) ? '基准宽' : '宽'}
                   value={t.width ?? 100}
@@ -417,18 +411,17 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   </div>
                 )}
                 <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle color={GROUP_COLORS.transform}>旋转与轴心</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.transform}>旋转与轴心</SectionTitle>
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
                 <PivotEditor node={node} updateNodeField={updateNodeField} />
+                <SectionTitle color={MODULE_COLORS.transform}>弹性尺寸（Flex）</SectionTitle>
+                <FlexLayoutPanel node={node} updateNodeField={updateNodeField} />
               </Space>
-            ),
-          },
-          {
-            key: 'appearance', label: <GroupLabel color={GROUP_COLORS.appearance} title="外观" />,
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <SectionTitle color={GROUP_COLORS.appearance}>图片</SectionTitle>
+      </ModuleCard>
+      <ModuleCard color={MODULE_COLORS.appearance} title="外观" sub="图片 · 颜色 · 边框与形状">
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <SectionTitle color={MODULE_COLORS.appearance}>图片</SectionTitle>
                 <FieldRow label={node.starType === 'Progress' ? '进度图' : '背景图'}>
                   <Space.Compact style={{ width: '100%' }}>
                     <Button
@@ -509,7 +502,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="灰度">
                   <Switch size="small" checked={app.desaturated ?? false} onChange={v => updateNodeField(node.id, 'appearance.desaturated', v)} />
                 </FieldRow>
-                <SectionTitle color={GROUP_COLORS.appearance}>颜色</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.appearance}>颜色</SectionTitle>
                 <FieldRow label="背景色">
                   <PaletteColorPicker
                     value={app.background || '#00000000'}
@@ -519,7 +512,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="透明度">
                   <OpacitySlider value={(t.opacity ?? 1)} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} />
                 </FieldRow>
-                <SectionTitle color={GROUP_COLORS.appearance}>边框与形状</SectionTitle>
+                <SectionTitle color={MODULE_COLORS.appearance}>边框与形状</SectionTitle>
                 {canUseBorder && (
                   <>
                     <ScrubField label="边框" value={borderThickness} onChange={v => updateNodeField(node.id, 'appearance.borderThickness', v)} min={0} />
@@ -543,12 +536,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
                 </FieldRow>
               </Space>
-            ),
-          },
-          {
-            key: 'interaction', label: <GroupLabel color={GROUP_COLORS.interaction} title="交互" />,
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
+      </ModuleCard>
+      <ModuleCard color={MODULE_COLORS.behavior} title="行为" sub="事件 · 拖拽 · Action · 反馈">
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <FieldRow label="事件路由">
                   <Select
                     size="small" style={{ width: '100%' }}
@@ -571,13 +561,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="Action">
                   <Input size="small" placeholder="home.openFilming" value={node.djui?.action ?? ''} onChange={e => updateNodeField(node.id, 'djui.action', e.target.value || null)} />
                 </FieldRow>
-              </Space>
-            ),
-          },
-          {
-            key: 'feedback', label: <GroupLabel color={GROUP_COLORS.feedback} title="反馈效果" />,
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <SectionTitle color={MODULE_COLORS.behavior}>反馈效果</SectionTitle>
                 <FieldRow label="动效">
                   <Select
                     size="small" style={{ width: '100%' }} allowClear placeholder="选择动效"
@@ -602,26 +586,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   <div style={{ fontSize: 10, color: '#5b6378' }}>可在“编辑 / 声音配置”中添加适用于当前控件的音效。</div>
                 )}
               </Space>
-            ),
-          },
-          {
-            key: 'flex', label: <GroupLabel color={GROUP_COLORS.flex} title="弹性尺寸" />,
-            children: (
-              <FlexLayoutPanel node={node} updateNodeField={updateNodeField} />
-            ),
-          },
-        ]).map((group, index) => (
-          <div key={String(group.key)} style={{ marginTop: index > 0 ? 6 : 0 }}>
-            <Collapse ghost size="small" defaultActiveKey={group.key === 'feedback' ? [] : [String(group.key)]} items={[group]} />
-          </div>
-        ))}
-      {/* 类型专属区：以控件类型命名的独立卡片，与通用区形成整块视觉隔离 */}
-      <div style={{ marginTop: 12, background: 'rgba(90, 185, 255, 0.04)', border: '1px solid rgba(90, 185, 255, 0.25)', borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ padding: '5px 10px', background: '#152a41', borderBottom: '1px solid rgba(90, 185, 255, 0.25)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontSize: 12, color: '#5ab9ff', fontWeight: 600 }}>{TYPE_ZONE_LABELS[node.starType] ?? node.starType}</span>
-          <span style={{ fontSize: 10, color: '#5b6378' }}>{node.starType}</span>
-        </div>
-        <div style={{ padding: '2px 0 6px' }}>
+      </ModuleCard>
+      {/* 类型专属区：以控件类型命名的模块卡片 */}
+      <ModuleCard color="#5ab9ff" title={TYPE_ZONE_LABELS[node.starType] ?? node.starType} sub={node.starType}>
           <Collapse
             defaultActiveKey={['text', 'buttonStates', 'progress', 'container', 'template']}
             ghost
@@ -801,8 +768,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
           } : null,
         ])}
           />
-        </div>
-      </div>
+      </ModuleCard>
     </div>
   )
 }
@@ -1892,22 +1858,35 @@ function TypeGroupLabel({ title, types }: { title: string; types: string }) {
   )
 }
 
-// 通用区分组主题色：每个分组一个专属色，扫一眼即可定位（橙=变换、绿=外观…）
-const GROUP_COLORS: Record<string, string> = {
-  common: '#8ca0bf',      // 常用 · 蓝灰
-  transform: '#ffa940',   // 变换 · 橙
-  appearance: '#6ee787',  // 外观 · 绿
-  interaction: '#b37feb', // 交互 · 紫
-  feedback: '#ffd666',    // 反馈效果 · 黄
-  flex: '#5cdbd3',        // 弹性尺寸 · 青
+// 通用区模块主题色：每个模块一个专属色
+const MODULE_COLORS = {
+  base: '#8ca0bf',       // 基础 · 蓝灰
+  transform: '#ffa940',  // 变换 · 橙
+  appearance: '#6ee787', // 外观 · 绿
+  behavior: '#b37feb',   // 行为 · 紫
 }
 
-function GroupLabel({ color, title }: { color: string; title: string }) {
+// 模块卡片：彩色标题栏（点击整块折叠）+ 同色微染正文，右侧属性面板的统一分区块容器
+function ModuleCard({ color, title, sub, children }: {
+  color: string
+  title: string
+  sub?: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(true)
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 4, height: 14, borderRadius: 2, background: color, flexShrink: 0 }} />
-      <span style={{ color, fontSize: 12, fontWeight: 600 }}>{title}</span>
-    </span>
+    <div style={{ marginTop: 10, borderRadius: 6, overflow: 'hidden', border: `1px solid ${color}44`, background: `${color}0A` }}>
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{ padding: '6px 10px', background: `${color}1F`, borderBottom: open ? `1px solid ${color}33` : 'none', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
+      >
+        <span style={{ width: 4, height: 14, borderRadius: 2, background: color, flexShrink: 0 }} />
+        <span style={{ fontSize: 12, color, fontWeight: 600 }}>{title}</span>
+        <span style={{ fontSize: 10, color: '#5b6378', flex: 1 }}>{sub}</span>
+        <span style={{ fontSize: 10, color: '#5b6378' }}>{open ? '▾' : '▸'}</span>
+      </div>
+      {open && <div style={{ padding: '6px 8px 10px' }}>{children}</div>}
+    </div>
   )
 }
 

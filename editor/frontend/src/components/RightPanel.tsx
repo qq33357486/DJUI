@@ -2068,7 +2068,8 @@ function FlexLayoutPanel({ node, updateNodeField }: {
 }
 
 // === 文本对齐九宫格（layout.horizontal/verticalContentAlignment）===
-// 同一容器的两个字段在容器侧管子控件对齐（AlignmentEditor 下拉），在文本侧管文字在控件内的对齐
+// 同一字段两副面孔：容器侧管子控件对齐（AlignmentEditor 下拉），文本侧管文字在控件内的对齐
+// 视觉语言与 AnchorEditor 一致：外框盒子 + 3×3 大格子点选 + 当前值回显
 function TextAlignGrid({ node, batchUpdateNode }: {
   node: any
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
@@ -2087,37 +2088,62 @@ function TextAlignGrid({ node, batchUpdateNode }: {
     batchUpdateNode(node.id, { 'layout.horizontalContentAlignment': h, 'layout.verticalContentAlignment': v })
   }
 
+  const currentLabel = activeCol === 1 && activeRow === 1 ? '居中' : `${['左', '中', '右'][activeCol]}${['上', '中', '下'][activeRow]}`
+
   return (
-    <div>
-      <div style={{ fontSize: 11, color: '#9aa3b4', marginBottom: 4 }}>对齐 · 文字在控件内的位置</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 14px)', gridTemplateRows: 'repeat(3, 14px)', gap: 2 }}>
-          {Array.from({ length: 9 }, (_, i) => {
-            const row = Math.floor(i / 3)
-            const col = i % 3
-            const active = activeRow === row && activeCol === col
-            const hovered = hoverCell && hoverCell[0] === row && hoverCell[1] === col
-            return (
-              <div
-                key={i}
-                onMouseEnter={() => setHoverCell([row, col])}
-                onMouseLeave={() => setHoverCell(null)}
-                onClick={() => setAlign(row, col)}
-                title={['左', '中', '右'][col] + ['上', '中', '下'][row]}
-                style={{
-                  cursor: 'pointer',
-                  transition: 'all 0.1s',
-                  background: active ? '#5ab9ff' : hovered ? '#2a5a8a' : '#1d2230',
-                  border: active ? '1px solid #5ab9ff' : '1px solid #2a3142',
-                  borderRadius: 2,
-                }}
-              />
-            )
-          })}
-        </div>
-        <div style={{ fontSize: 10, color: '#5b6378' }}>
-          {['左', '中', '右'][activeCol]}{['上', '中', '下'][activeRow]}
-        </div>
+    <div style={{ padding: 10, background: '#0f1117', border: '1px solid #2a3142', borderRadius: 6 }}>
+      <div style={{ fontSize: 10, color: '#5b6378', marginBottom: 8, textAlign: 'center' }}>
+        对齐 · 文字在控件内的位置
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateRows: 'repeat(3, 1fr)',
+        gap: 4,
+        width: '100%',
+        maxWidth: 150,
+        margin: '0 auto',
+      }}>
+        {Array.from({ length: 9 }, (_, i) => {
+          const row = Math.floor(i / 3)
+          const col = i % 3
+          const active = activeRow === row && activeCol === col
+          const hovered = hoverCell && hoverCell[0] === row && hoverCell[1] === col
+          const bg = active ? '#15293d' : hovered ? '#1d2a3f' : 'transparent'
+          const border = active ? '#5ab9ff' : '#2a3142'
+          const fg = active ? '#5ab9ff' : hovered ? '#9aa3b4' : '#5b6378'
+          // 格内图标：控件外框 + 文字条，条的位置即该格对应的方向
+          const barX = col === 0 ? 3 : col === 1 ? 4.5 : 6
+          const barY = row === 0 ? 3 : row === 1 ? 6.75 : 10.5
+          return (
+            <div
+              key={i}
+              onMouseEnter={() => setHoverCell([row, col])}
+              onMouseLeave={() => setHoverCell(null)}
+              onClick={() => setAlign(row, col)}
+              title={['左', '中', '右'][col] + ['上', '中', '下'][row]}
+              style={{
+                aspectRatio: '1 / 1',
+                cursor: 'pointer',
+                transition: 'all 0.1s',
+                background: bg,
+                border: `1px solid ${border}`,
+                borderRadius: 3,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 16 16" style={{ display: 'block' }}>
+                <rect x={2} y={2} width={12} height={12} fill="none" stroke={fg} strokeWidth="0.8" opacity="0.5" />
+                <rect x={barX} y={barY} width={7} height={2.5} rx={1} fill={fg} />
+              </svg>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: 11, color: '#5ab9ff', textAlign: 'center', marginTop: 6 }}>
+        {currentLabel}
       </div>
     </div>
   )

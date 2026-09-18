@@ -329,13 +329,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
         </div>
       )}
 
-      <Collapse
-        defaultActiveKey={['common', 'transform', 'appearance', 'interaction', 'flex']}
-        ghost
-        size="small"
-        items={filterItems([
+      {filterItems([
           {
-            key: 'common', label: '常用',
+            key: 'common', label: <GroupLabel color={GROUP_COLORS.common} title="常用" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <FieldRow label="名称">
@@ -354,12 +350,12 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'transform', label: '变换',
+            key: 'transform', label: <GroupLabel color={GROUP_COLORS.transform} title="变换" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <SectionTitle>锚点</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.transform}>锚点</SectionTitle>
                 <AnchorEditor node={node} selectedIds={selectedIds} />
-                <SectionTitle>偏移</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.transform}>偏移</SectionTitle>
                 <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
                 <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
                 {(stretchWidth || stretchHeight) && (
@@ -367,9 +363,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                     拉伸轴的位置由边距决定（见下方「拉伸」）；画布拖拽和缩放会自动更新边距。
                   </div>
                 )}
-                <SectionTitle>拉伸</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.transform}>拉伸</SectionTitle>
                 <StretchEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle>尺寸</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.transform}>尺寸</SectionTitle>
                 <ScrubField
                   label={(autoWidth || stretchWidth) ? '基准宽' : '宽'}
                   value={t.width ?? 100}
@@ -421,7 +417,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   </div>
                 )}
                 <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
-                <SectionTitle>旋转与轴心</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.transform}>旋转与轴心</SectionTitle>
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
                 <PivotEditor node={node} updateNodeField={updateNodeField} />
@@ -429,10 +425,10 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'appearance', label: '外观',
+            key: 'appearance', label: <GroupLabel color={GROUP_COLORS.appearance} title="外观" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <SectionTitle>图片</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.appearance}>图片</SectionTitle>
                 <FieldRow label={node.starType === 'Progress' ? '进度图' : '背景图'}>
                   <Space.Compact style={{ width: '100%' }}>
                     <Button
@@ -513,7 +509,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="灰度">
                   <Switch size="small" checked={app.desaturated ?? false} onChange={v => updateNodeField(node.id, 'appearance.desaturated', v)} />
                 </FieldRow>
-                <SectionTitle>颜色</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.appearance}>颜色</SectionTitle>
                 <FieldRow label="背景色">
                   <PaletteColorPicker
                     value={app.background || '#00000000'}
@@ -523,7 +519,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="透明度">
                   <OpacitySlider value={(t.opacity ?? 1)} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} />
                 </FieldRow>
-                <SectionTitle>边框与形状</SectionTitle>
+                <SectionTitle color={GROUP_COLORS.appearance}>边框与形状</SectionTitle>
                 {canUseBorder && (
                   <>
                     <ScrubField label="边框" value={borderThickness} onChange={v => updateNodeField(node.id, 'appearance.borderThickness', v)} min={0} />
@@ -550,7 +546,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'interaction', label: '交互',
+            key: 'interaction', label: <GroupLabel color={GROUP_COLORS.interaction} title="交互" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <FieldRow label="事件路由">
@@ -579,7 +575,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'feedback', label: '反馈效果',
+            key: 'feedback', label: <GroupLabel color={GROUP_COLORS.feedback} title="反馈效果" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <FieldRow label="动效">
@@ -609,13 +605,16 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'flex', label: '弹性尺寸',
+            key: 'flex', label: <GroupLabel color={GROUP_COLORS.flex} title="弹性尺寸" />,
             children: (
               <FlexLayoutPanel node={node} updateNodeField={updateNodeField} />
             ),
           },
-        ])}
-      />
+        ]).map((group, index) => (
+          <div key={String(group.key)} style={{ marginTop: index > 0 ? 6 : 0 }}>
+            <Collapse ghost size="small" defaultActiveKey={group.key === 'feedback' ? [] : [String(group.key)]} items={[group]} />
+          </div>
+        ))}
       {/* 类型专属区：以控件类型命名的独立卡片，与通用区形成整块视觉隔离 */}
       <div style={{ marginTop: 12, background: 'rgba(90, 185, 255, 0.04)', border: '1px solid rgba(90, 185, 255, 0.25)', borderRadius: 6, overflow: 'hidden' }}>
         <div style={{ padding: '5px 10px', background: '#152a41', borderBottom: '1px solid rgba(90, 185, 255, 0.25)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -1875,9 +1874,9 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({ color, children }: { color?: string; children: React.ReactNode }) {
   return (
-    <div style={{ borderTop: '1px solid #2a3142', paddingTop: 8, fontSize: 11, color: '#9aa3b4' }}>
+    <div style={{ borderTop: '1px solid #2a3142', paddingTop: 8, fontSize: 11, color: color ?? '#9aa3b4' }}>
       {children}
     </div>
   )
@@ -1889,6 +1888,25 @@ function TypeGroupLabel({ title, types }: { title: string; types: string }) {
     <span>
       {title}
       <span style={{ fontSize: 10, color: '#5b6378', marginLeft: 6 }}>{types}</span>
+    </span>
+  )
+}
+
+// 通用区分组主题色：每个分组一个专属色，扫一眼即可定位（橙=变换、绿=外观…）
+const GROUP_COLORS: Record<string, string> = {
+  common: '#8ca0bf',      // 常用 · 蓝灰
+  transform: '#ffa940',   // 变换 · 橙
+  appearance: '#6ee787',  // 外观 · 绿
+  interaction: '#b37feb', // 交互 · 紫
+  feedback: '#ffd666',    // 反馈效果 · 黄
+  flex: '#5cdbd3',        // 弹性尺寸 · 青
+}
+
+function GroupLabel({ color, title }: { color: string; title: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ width: 4, height: 14, borderRadius: 2, background: color, flexShrink: 0 }} />
+      <span style={{ color, fontSize: 12, fontWeight: 600 }}>{title}</span>
     </span>
   )
 }

@@ -318,7 +318,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
       )}
 
       <Collapse
-        defaultActiveKey={['common', 'transform', 'appearance', 'interaction', 'flex', 'text', 'buttonStates', 'progress', 'container', 'template']}
+        defaultActiveKey={['common', 'transform', 'appearance', 'interaction', 'flex']}
         ghost
         size="small"
         items={filterItems([
@@ -602,6 +602,19 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
               <FlexLayoutPanel node={node} updateNodeField={updateNodeField} />
             ),
           },
+        ])}
+      />
+      {/* 通用区 / 类型专属区分界横幅 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 2px' }}>
+        <span style={{ width: 3, height: 12, background: '#5ab9ff', borderRadius: 2, flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: '#5ab9ff', letterSpacing: 1, flexShrink: 0 }}>类型专属</span>
+        <div style={{ flex: 1, height: 1, background: '#2a3142' }} />
+      </div>
+      <Collapse
+        defaultActiveKey={['text', 'buttonStates', 'progress', 'container', 'template']}
+        ghost
+        size="small"
+        items={filterItems([
           (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
             key: 'text', label: <TypeGroupLabel title="文本" types="Label · Input · Button" />,
             children: (
@@ -1854,10 +1867,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-// 类型专属分组标题：主标题 + 适用类型标注，让「通用区 / 专属区」边界一眼可辨
+// 类型专属分组标题：蓝色竖条 + 主标题 + 适用类型标注，让「通用区 / 专属区」边界一眼可辨
 function TypeGroupLabel({ title, types }: { title: string; types: string }) {
   return (
     <span>
+      <span style={{ display: 'inline-block', width: 3, height: 12, background: '#5ab9ff', borderRadius: 2, marginRight: 6, verticalAlign: 'middle' }} />
       {title}
       <span style={{ fontSize: 10, color: '#5b6378', marginLeft: 6 }}>{types}</span>
     </span>

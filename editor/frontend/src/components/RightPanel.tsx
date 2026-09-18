@@ -28,6 +28,18 @@ const PROG_MODES = [
   { value: 'CounterClockwise', label: '逆时针' },
 ]
 
+// 类型专属区的区块标题：按控件类型命名（NGUI 式），后跟实际 starType
+const TYPE_ZONE_LABELS: Record<string, string> = {
+  Label: '文本',
+  Button: '按钮',
+  Input: '输入框',
+  Progress: '进度',
+  Panel: '容器',
+  SpacingPanel: '容器',
+  PanelScrollable: '滚动容器',
+  TemplateInstance: '模板',
+}
+
 const WINDOW_MODE_OPTIONS = [
   { value: 'fullscreen', label: '全屏窗口（默认淡入/淡出）' },
   { value: 'popup', label: '弹窗（默认弹入/弹出）' },
@@ -604,17 +616,18 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
           },
         ])}
       />
-      {/* 通用区 / 类型专属区分界横幅 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 2px' }}>
-        <span style={{ width: 3, height: 12, background: '#5ab9ff', borderRadius: 2, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, color: '#5ab9ff', letterSpacing: 1, flexShrink: 0 }}>类型专属</span>
-        <div style={{ flex: 1, height: 1, background: '#2a3142' }} />
-      </div>
-      <Collapse
-        defaultActiveKey={['text', 'buttonStates', 'progress', 'container', 'template']}
-        ghost
-        size="small"
-        items={filterItems([
+      {/* 类型专属区：以控件类型命名的独立卡片，与通用区形成整块视觉隔离 */}
+      <div style={{ marginTop: 12, background: 'rgba(90, 185, 255, 0.04)', border: '1px solid rgba(90, 185, 255, 0.25)', borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ padding: '5px 10px', background: '#152a41', borderBottom: '1px solid rgba(90, 185, 255, 0.25)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#5ab9ff', fontWeight: 600 }}>{TYPE_ZONE_LABELS[node.starType] ?? node.starType}</span>
+          <span style={{ fontSize: 10, color: '#5b6378' }}>{node.starType}</span>
+        </div>
+        <div style={{ padding: '2px 0 6px' }}>
+          <Collapse
+            defaultActiveKey={['text', 'buttonStates', 'progress', 'container', 'template']}
+            ghost
+            size="small"
+            items={filterItems([
           (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
             key: 'text', label: <TypeGroupLabel title="文本" types="Label · Input · Button" />,
             children: (
@@ -787,7 +800,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           } : null,
         ])}
-      />
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -1867,11 +1882,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-// 类型专属分组标题：蓝色竖条 + 主标题 + 适用类型标注，让「通用区 / 专属区」边界一眼可辨
+// 类型专属分组标题：主标题 + 适用类型标注（区块级视觉隔离由外层卡片承担）
 function TypeGroupLabel({ title, types }: { title: string; types: string }) {
   return (
     <span>
-      <span style={{ display: 'inline-block', width: 3, height: 12, background: '#5ab9ff', borderRadius: 2, marginRight: 6, verticalAlign: 'middle' }} />
       {title}
       <span style={{ fontSize: 10, color: '#5b6378', marginLeft: 6 }}>{types}</span>
     </span>

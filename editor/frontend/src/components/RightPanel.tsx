@@ -19,6 +19,15 @@ const TEXT_OVERFLOW_OPTIONS = [
   { value: 'Shrink', label: '缩放适配' },
 ]
 
+const PROG_MODES = [
+  { value: 'LeftToRight', label: '←→' },
+  { value: 'RightToLeft', label: '→←' },
+  { value: 'TopToBottom', label: '↑↓' },
+  { value: 'BottomToTop', label: '↓↑' },
+  { value: 'Clockwise', label: '顺时针' },
+  { value: 'CounterClockwise', label: '逆时针' },
+]
+
 const WINDOW_MODE_OPTIONS = [
   { value: 'fullscreen', label: '全屏窗口（默认淡入/淡出）' },
   { value: 'popup', label: '弹窗（默认弹入/弹出）' },
@@ -309,7 +318,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
       )}
 
       <Collapse
-        defaultActiveKey={['common', 'template', 'geometry', 'anchor', 'appearance', 'buttonStates', 'text', 'interaction']}
+        defaultActiveKey={['common', 'transform', 'appearance', 'interaction', 'flex', 'text', 'buttonStates', 'progress', 'container', 'template']}
         ghost
         size="small"
         items={filterItems([
@@ -332,59 +341,23 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
               </Space>
             ),
           },
-          node.starType === 'TemplateInstance' ? {
-            key: 'template', label: '模板引用',
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <FieldRow label="模板">
-                  <Select
-                    size="small"
-                    style={{ width: '100%' }}
-                    allowClear
-                    placeholder="选择模板"
-                    value={node.templateRef ?? undefined}
-                    options={templateOptions}
-                    onChange={v => {
-                      updateNodeField(node.id, 'templateRef', v ?? null)
-                      if (v && !node.templateRef) {
-                        const tpl = allPages[v]
-                        if (tpl) {
-                          updateNodeField(node.id, 'transform.width', tpl.designWidth)
-                          updateNodeField(node.id, 'transform.height', tpl.designHeight)
-                        }
-                      }
-                    }}
-                  />
-                </FieldRow>
-                {currentTemplate && (
-                  <FieldRow label="源尺寸">
-                    <span style={{ fontSize: 12, color: '#9aa3b4' }}>
-                      {currentTemplate.designWidth} × {currentTemplate.designHeight}
-                    </span>
-                  </FieldRow>
-                )}
-                <Button
-                  size="small"
-                  block
-                  disabled={!node.templateRef || !allPages[node.templateRef]}
-                  onClick={() => node.templateRef && setActivePage(node.templateRef)}
-                >
-                  进入模板编辑
-                </Button>
-                <TemplateOverridesEditor
-                  nodeId={node.id}
-                  overrides={node.templateOverrides ?? {}}
-                  updateNodeField={updateNodeField}
-                />
-              </Space>
-            ),
-          } : null,
           {
-            key: 'geometry', label: '位置尺寸',
+            key: 'transform', label: '变换',
             children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
+              <Space direction="vertical" style={{ width: '100%' }} size={10}>
+                <SectionTitle>锚点</SectionTitle>
+                <AnchorEditor node={node} selectedIds={selectedIds} />
+                <SectionTitle>偏移</SectionTitle>
                 <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
                 <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
+                {(stretchWidth || stretchHeight) && (
+                  <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
+                    拉伸轴的位置由边距决定（见下方「拉伸」）；画布拖拽和缩放会自动更新边距。
+                  </div>
+                )}
+                <SectionTitle>拉伸</SectionTitle>
+                <StretchEditor node={node} updateNodeField={updateNodeField} />
+                <SectionTitle>尺寸</SectionTitle>
                 <ScrubField
                   label={(autoWidth || stretchWidth) ? '基准宽' : '宽'}
                   value={t.width ?? 100}
@@ -430,16 +403,13 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                   }}
                   min={1}
                 />
-                {(stretchWidth || stretchHeight) && (
-                  <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
-                    拉伸轴由边距控制；画布拖拽和缩放会更新「锚点与拉伸」里的边距。
-                  </div>
-                )}
                 {(autoWidth || autoHeight) && (
                   <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
                     自适应轴会按子控件边界计算；这里的数值作为空容器或冲突回退尺寸。
                   </div>
                 )}
+                <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
+                <SectionTitle>旋转与轴心</SectionTitle>
                 <ScrubField label="旋转" value={t.rotation ?? 0} onChange={v => updateNodeField(node.id, 'transform.rotation', v)} />
                 <ScrubField label="Z层级" value={t.zIndex ?? 0} onChange={v => updateNodeField(node.id, 'transform.zIndex', v)} />
                 <PivotEditor node={node} updateNodeField={updateNodeField} />
@@ -450,39 +420,25 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             key: 'appearance', label: '外观',
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size="small">
-                {node.starType === 'Progress' && (() => {
-                  const prog = node.progress ?? {}
-                  const PROG_MODES = [
-                    { value: 'LeftToRight', label: '←→' },
-                    { value: 'RightToLeft', label: '→←' },
-                    { value: 'TopToBottom', label: '↑↓' },
-                    { value: 'BottomToTop', label: '↓↑' },
-                    { value: 'Clockwise', label: '顺时针' },
-                    { value: 'CounterClockwise', label: '逆时针' },
-                  ]
-                  const isRotary = prog.progressionMode === 'Clockwise' || prog.progressionMode === 'CounterClockwise'
-                  return (
-                    <>
-                      <FieldRow label="方向">
-                        <Select
-                          size="small" style={{ width: '100%' }}
-                          value={prog.progressionMode ?? 'LeftToRight'}
-                          onChange={v => updateNodeField(node.id, 'progress.progressionMode', v)}
-                          options={PROG_MODES}
-                        />
-                      </FieldRow>
-                      <ScrubField label="进度" value={prog.value ?? 0.5} onChange={v => updateNodeField(node.id, 'progress.value', v)} step={0.01} min={0} max={1} dragSensitivity={0.005} />
-                      {isRotary && (
-                        <ScrubField label="起始角" value={prog.rotation ?? 0} onChange={v => updateNodeField(node.id, 'progress.rotation', v)} suffix="°" />
-                      )}
-                      <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
-                    </>
-                  )
-                })()}
+                <SectionTitle>图片</SectionTitle>
                 <FieldRow label={node.starType === 'Progress' ? '进度图' : '背景图'}>
-                  <Button size="small" block onClick={() => openAssetPicker('appearance.image')}>
-                    {app.image ? `📷 ${app.image.split('/').pop()}` : `📷 选择${node.starType === 'Progress' ? '进度' : '背景'}图`}
-                  </Button>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Button
+                      size="small"
+                      style={{ flex: 1, textAlign: 'left', overflow: 'hidden' }}
+                      onClick={() => openAssetPicker('appearance.image')}
+                    >
+                      {app.image ? `📷 ${app.image.split('/').pop()}` : `📷 选择${node.starType === 'Progress' ? '进度' : '背景'}图`}
+                    </Button>
+                    {app.image && (
+                      <Button
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        title="清除"
+                        onClick={() => updateNodeField(node.id, 'appearance.image', null)}
+                      />
+                    )}
+                  </Space.Compact>
                 </FieldRow>
                 {app.image && (
                   <FieldRow label="图片铺放">
@@ -524,6 +480,28 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                     </Button>
                   </FieldRow>
                 )}
+                {app.image && (
+                  <FieldRow label="九宫格">
+                    <Button
+                      size="small"
+                      block
+                      onClick={onOpenSliceEditor}
+                      style={sliceMeta[app.image] ? { color: '#5ab9ff', borderColor: '#5ab9ff' } : {}}
+                    >
+                      {sliceMeta[app.image] ? '✂ 已设置切片' : '✂ 编辑九宫格'}
+                    </Button>
+                  </FieldRow>
+                )}
+                <FieldRow label="翻转X">
+                  <Switch size="small" checked={app.imageFlipX ?? false} onChange={v => updateNodeField(node.id, 'appearance.imageFlipX', v)} />
+                </FieldRow>
+                <FieldRow label="翻转Y">
+                  <Switch size="small" checked={app.imageFlipY ?? false} onChange={v => updateNodeField(node.id, 'appearance.imageFlipY', v)} />
+                </FieldRow>
+                <FieldRow label="灰度">
+                  <Switch size="small" checked={app.desaturated ?? false} onChange={v => updateNodeField(node.id, 'appearance.desaturated', v)} />
+                </FieldRow>
+                <SectionTitle>颜色</SectionTitle>
                 <FieldRow label="背景色">
                   <PaletteColorPicker
                     value={app.background || '#00000000'}
@@ -533,6 +511,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="透明度">
                   <OpacitySlider value={(t.opacity ?? 1)} onChange={v => updateNodeField(node.id, 'transform.opacity', v)} />
                 </FieldRow>
+                <SectionTitle>边框与形状</SectionTitle>
                 {canUseBorder && (
                   <>
                     <ScrubField label="边框" value={borderThickness} onChange={v => updateNodeField(node.id, 'appearance.borderThickness', v)} min={0} />
@@ -555,121 +534,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
                 <FieldRow label="裁剪">
                   <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
                 </FieldRow>
-                <FieldRow label="灰度">
-                  <Switch size="small" checked={app.desaturated ?? false} onChange={v => updateNodeField(node.id, 'appearance.desaturated', v)} />
-                </FieldRow>
-                <FieldRow label="翻转X">
-                  <Switch size="small" checked={app.imageFlipX ?? false} onChange={v => updateNodeField(node.id, 'appearance.imageFlipX', v)} />
-                </FieldRow>
-                <FieldRow label="翻转Y">
-                  <Switch size="small" checked={app.imageFlipY ?? false} onChange={v => updateNodeField(node.id, 'appearance.imageFlipY', v)} />
-                </FieldRow>
-                {app.image && (
-                  <FieldRow label="九宫格">
-                    <Button
-                      size="small"
-                      block
-                      onClick={onOpenSliceEditor}
-                      style={sliceMeta[app.image] ? { color: '#5ab9ff', borderColor: '#5ab9ff' } : {}}
-                    >
-                      {sliceMeta[app.image] ? '✂ 已设置切片' : '✂ 编辑九宫格'}
-                    </Button>
-                  </FieldRow>
-                )}
               </Space>
             ),
           },
-          node.starType === 'Button' ? {
-            key: 'buttonStates', label: '按钮状态',
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <ButtonStatePreview node={node} />
-                {(() => {
-                  const btn = node.button ?? {}
-                  const rows = [
-                    { label: '悬停图', field: 'button.imageHover', value: btn.imageHover },
-                    { label: '按下图', field: 'button.imagePressed', value: btn.imagePressed },
-                    { label: '禁用图', field: 'button.imageDisabled', value: btn.imageDisabled },
-                  ] as const
-                  return rows.map(row => (
-                    <FieldRow key={row.field} label={row.label}>
-                      <Space.Compact style={{ width: '100%' }}>
-                        <Button size="small" style={{ flex: 1, textAlign: 'left', overflow: 'hidden' }} onClick={() => openAssetPicker(row.field)}>
-                          {row.value ? `📷 ${String(row.value).split('/').pop()}` : '📷 选择图片'}
-                        </Button>
-                        {row.value && (
-                          <Button size="small" icon={<DeleteOutlined />} title="清除" onClick={() => updateNodeField(node.id, row.field, null)} />
-                        )}
-                      </Space.Compact>
-                    </FieldRow>
-                  ))
-                })()}
-                <div style={{ fontSize: 10, color: '#5b6378', lineHeight: 1.6 }}>
-                  悬停/按下未设置图时保持正常图；禁用未设置图时运行时自动灰化变淡。素材建议按 btn_功能_状态 同尺寸成套。
-                </div>
-              </Space>
-            ),
-          } : null,
-          (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
-            key: 'text', label: '文本',
-            children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
-                <FieldRow label="文本">
-                  <Input size="small" value={txt.text ?? ''} onChange={e => updateNodeField(node.id, 'text.text', e.target.value)} />
-                </FieldRow>
-                <FieldRow label="字体">
-                  <FontSelect node={node} updateNodeField={updateNodeField} />
-                </FieldRow>
-                <ScrubField label="字号" value={txt.fontSize ?? 16} onChange={v => updateNodeField(node.id, 'text.fontSize', v)} min={1} />
-                <FieldRow label="颜色">
-                  <PaletteColorPicker
-                    value={txt.textColor || '#FFFFFF'}
-                    onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
-                  />
-                </FieldRow>
-                <FieldRow label="透明度">
-                  <AlphaSlider value={txt.textColor || '#FFFFFF'} onChange={hex => updateNodeField(node.id, 'text.textColor', hex)} />
-                </FieldRow>
-                {canUseTextStroke && (
-                  <>
-                    <ScrubField label="描边" value={textStrokeSize} onChange={v => updateNodeField(node.id, 'text.strokeSize', v)} min={0} />
-                    {textStrokeSize > 0 && (
-                      <>
-                        <FieldRow label="描边色">
-                          <PaletteColorPicker
-                            value={txt.strokeColor || '#000000FF'}
-                            onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)}
-                          />
-                        </FieldRow>
-                        <FieldRow label="描边透明">
-                          <AlphaSlider value={txt.strokeColor || '#000000FF'} onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)} />
-                        </FieldRow>
-                      </>
-                    )}
-                  </>
-                )}
-                <FieldRow label="粗体">
-                  <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
-                </FieldRow>
-                {node.starType === 'Label' && (
-                  <>
-                    <FieldRow label="自动换行">
-                      <Switch size="small" checked={txt.textWrap ?? false} onChange={v => updateNodeField(node.id, 'text.textWrap', v)} />
-                    </FieldRow>
-                    <FieldRow label="超出处理">
-                      <Select
-                        size="small"
-                        style={{ width: '100%' }}
-                        value={txt.textOverflow ?? 'Shrink'}
-                        onChange={v => updateNodeField(node.id, 'text.textOverflow', v)}
-                        options={TEXT_OVERFLOW_OPTIONS}
-                      />
-                    </FieldRow>
-                  </>
-                )}
-              </Space>
-            ),
-          } : null,
           {
             key: 'interaction', label: '交互',
             children: (
@@ -730,32 +597,182 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
             ),
           },
           {
-            key: 'anchor', label: '锚点与拉伸',
+            key: 'flex', label: '弹性尺寸',
             children: (
-              <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <AnchorEditor node={node} selectedIds={selectedIds} />
-                <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
-                <StretchEditor node={node} updateNodeField={updateNodeField} />
-              </Space>
+              <FlexLayoutPanel node={node} updateNodeField={updateNodeField} />
             ),
           },
-          {
-            key: 'autoLayout', label: '自动布局',
+          (node.starType === 'Label' || node.starType === 'Button' || node.starType === 'Input') ? {
+            key: 'text', label: <TypeGroupLabel title="文本" types="Label · Input · Button" />,
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <FieldRow label="文本">
+                  <Input size="small" value={txt.text ?? ''} onChange={e => updateNodeField(node.id, 'text.text', e.target.value)} />
+                </FieldRow>
+                <FieldRow label="字体">
+                  <FontSelect node={node} updateNodeField={updateNodeField} />
+                </FieldRow>
+                <ScrubField label="字号" value={txt.fontSize ?? 16} onChange={v => updateNodeField(node.id, 'text.fontSize', v)} min={1} />
+                <FieldRow label="颜色">
+                  <PaletteColorPicker
+                    value={txt.textColor || '#FFFFFF'}
+                    onChange={hex => updateNodeField(node.id, 'text.textColor', hex)}
+                  />
+                </FieldRow>
+                <FieldRow label="透明度">
+                  <AlphaSlider value={txt.textColor || '#FFFFFF'} onChange={hex => updateNodeField(node.id, 'text.textColor', hex)} />
+                </FieldRow>
+                {canUseTextStroke && (
+                  <>
+                    <ScrubField label="描边" value={textStrokeSize} onChange={v => updateNodeField(node.id, 'text.strokeSize', v)} min={0} />
+                    {textStrokeSize > 0 && (
+                      <>
+                        <FieldRow label="描边色">
+                          <PaletteColorPicker
+                            value={txt.strokeColor || '#000000FF'}
+                            onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)}
+                          />
+                        </FieldRow>
+                        <FieldRow label="描边透明">
+                          <AlphaSlider value={txt.strokeColor || '#000000FF'} onChange={hex => updateNodeField(node.id, 'text.strokeColor', hex)} />
+                        </FieldRow>
+                      </>
+                    )}
+                  </>
+                )}
+                <FieldRow label="粗体">
+                  <Switch size="small" checked={txt.bold ?? false} onChange={v => updateNodeField(node.id, 'text.bold', v)} />
+                </FieldRow>
+                {node.starType === 'Label' && (
+                  <>
+                    <FieldRow label="自动换行">
+                      <Switch size="small" checked={txt.textWrap ?? false} onChange={v => updateNodeField(node.id, 'text.textWrap', v)} />
+                    </FieldRow>
+                    <FieldRow label="超出处理">
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        value={txt.textOverflow ?? 'Shrink'}
+                        onChange={v => updateNodeField(node.id, 'text.textOverflow', v)}
+                        options={TEXT_OVERFLOW_OPTIONS}
+                      />
+                    </FieldRow>
+                  </>
+                )}
+              </Space>
+            ),
+          } : null,
+          node.starType === 'Button' ? {
+            key: 'buttonStates', label: <TypeGroupLabel title="按钮状态" types="Button" />,
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <ButtonStatePreview node={node} />
+                {(() => {
+                  const btn = node.button ?? {}
+                  const rows = [
+                    { label: '悬停图', field: 'button.imageHover', value: btn.imageHover },
+                    { label: '按下图', field: 'button.imagePressed', value: btn.imagePressed },
+                    { label: '禁用图', field: 'button.imageDisabled', value: btn.imageDisabled },
+                  ] as const
+                  return rows.map(row => (
+                    <FieldRow key={row.field} label={row.label}>
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Button size="small" style={{ flex: 1, textAlign: 'left', overflow: 'hidden' }} onClick={() => openAssetPicker(row.field)}>
+                          {row.value ? `📷 ${String(row.value).split('/').pop()}` : '📷 选择图片'}
+                        </Button>
+                        {row.value && (
+                          <Button size="small" icon={<DeleteOutlined />} title="清除" onClick={() => updateNodeField(node.id, row.field, null)} />
+                        )}
+                      </Space.Compact>
+                    </FieldRow>
+                  ))
+                })()}
+                <div style={{ fontSize: 10, color: '#5b6378', lineHeight: 1.6 }}>
+                  悬停/按下未设置图时保持正常图；禁用未设置图时运行时自动灰化变淡。素材建议按 btn_功能_状态 同尺寸成套。
+                </div>
+              </Space>
+            ),
+          } : null,
+          node.starType === 'Progress' ? {
+            key: 'progress', label: <TypeGroupLabel title="进度" types="Progress" />,
+            children: (() => {
+              const prog = node.progress ?? {}
+              const isRotary = prog.progressionMode === 'Clockwise' || prog.progressionMode === 'CounterClockwise'
+              return (
+                <Space direction="vertical" style={{ width: '100%' }} size="small">
+                  <FieldRow label="方向">
+                    <Select
+                      size="small" style={{ width: '100%' }}
+                      value={prog.progressionMode ?? 'LeftToRight'}
+                      onChange={v => updateNodeField(node.id, 'progress.progressionMode', v)}
+                      options={PROG_MODES}
+                    />
+                  </FieldRow>
+                  <ScrubField label="进度" value={prog.value ?? 0.5} onChange={v => updateNodeField(node.id, 'progress.value', v)} step={0.01} min={0} max={1} dragSensitivity={0.005} />
+                  {isRotary && (
+                    <ScrubField label="起始角" value={prog.rotation ?? 0} onChange={v => updateNodeField(node.id, 'progress.rotation', v)} suffix="°" />
+                  )}
+                </Space>
+              )
+            })(),
+          } : null,
+          ['Panel', 'SpacingPanel', 'PanelScrollable'].includes(node.starType) ? {
+            key: 'container', label: <TypeGroupLabel title="容器布局" types="Panel · SpacingPanel · PanelScrollable" />,
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <AutoLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
-                <div style={{ borderTop: '1px solid #2a3142', margin: '2px 0' }} />
+                <ContainerLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
                 <SectionTitle>对齐</SectionTitle>
                 <AlignmentEditor node={node} updateNodeField={updateNodeField} />
               </Space>
             ),
-          },
-          {
-            key: 'aspectRatio', label: '宽高比',
+          } : null,
+          node.starType === 'TemplateInstance' ? {
+            key: 'template', label: <TypeGroupLabel title="模板实例" types="TemplateInstance" />,
             children: (
-              <AspectRatioEditor node={node} updateNodeField={updateNodeField} />
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <FieldRow label="模板">
+                  <Select
+                    size="small"
+                    style={{ width: '100%' }}
+                    allowClear
+                    placeholder="选择模板"
+                    value={node.templateRef ?? undefined}
+                    options={templateOptions}
+                    onChange={v => {
+                      updateNodeField(node.id, 'templateRef', v ?? null)
+                      if (v && !node.templateRef) {
+                        const tpl = allPages[v]
+                        if (tpl) {
+                          updateNodeField(node.id, 'transform.width', tpl.designWidth)
+                          updateNodeField(node.id, 'transform.height', tpl.designHeight)
+                        }
+                      }
+                    }}
+                  />
+                </FieldRow>
+                {currentTemplate && (
+                  <FieldRow label="源尺寸">
+                    <span style={{ fontSize: 12, color: '#9aa3b4' }}>
+                      {currentTemplate.designWidth} × {currentTemplate.designHeight}
+                    </span>
+                  </FieldRow>
+                )}
+                <Button
+                  size="small"
+                  block
+                  disabled={!node.templateRef || !allPages[node.templateRef]}
+                  onClick={() => node.templateRef && setActivePage(node.templateRef)}
+                >
+                  进入模板编辑
+                </Button>
+                <TemplateOverridesEditor
+                  nodeId={node.id}
+                  overrides={node.templateOverrides ?? {}}
+                  updateNodeField={updateNodeField}
+                />
+              </Space>
             ),
-          },
+          } : null,
         ])}
       />
     </div>
@@ -1837,6 +1854,16 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
+// 类型专属分组标题：主标题 + 适用类型标注，让「通用区 / 专属区」边界一眼可辨
+function TypeGroupLabel({ title, types }: { title: string; types: string }) {
+  return (
+    <span>
+      {title}
+      <span style={{ fontSize: 10, color: '#5b6378', marginLeft: 6 }}>{types}</span>
+    </span>
+  )
+}
+
 // === NGUI 风格拖拽改值组件 ===
 // 标签可拖拽（左右滑动改值），InputNumber 可手动输入
 function ScrubField({ label, value, onChange, step = 1, min, max, suffix, dragSensitivity }: {
@@ -1913,14 +1940,13 @@ function filterItems(items: any[]) {
   return items.filter(Boolean)
 }
 
-// === 自动布局编辑器（FlowOrientation + Spacing + Flex）===
-function AutoLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
+// === 容器布局编辑器（仅容器类型：自适应 / 流向 / 间距）===
+function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
   applyFlexLayout: (parentId: string) => void
 }) {
   const layout = node.layout ?? {}
-  const isContainer = ['Panel', 'SpacingPanel', 'PanelScrollable'].includes(node.starType)
   const autoSize = layout.autoSize ?? 'None'
   const autoSizeConflicts = autoSize === 'None' ? [] : collectAutoSizeConflicts(node)
 
@@ -1947,55 +1973,58 @@ function AutoLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="small">
-      {isContainer ? (
-        <>
-          <FieldRow label="自适应">
-            <Select
-              size="small" style={{ width: '100%' }}
-              value={autoSize}
-              onChange={handleAutoSizeChange}
-              options={[
-                { value: 'None', label: '固定宽高' },
-                { value: 'Width', label: '自动宽' },
-                { value: 'Height', label: '自动高' },
-                { value: 'Both', label: '自动宽高' },
-              ]}
-            />
-          </FieldRow>
-          {autoSize !== 'None' && (
-            <div style={{ fontSize: 10, color: autoSizeConflicts.length ? '#d89614' : '#5b6378' }}>
-              {autoSizeConflicts.length
-                ? `检测到 ${autoSizeConflicts.length} 个依赖父尺寸的布局，冲突轴会回退到基准尺寸。`
-                : '自动尺寸按可见子控件边界计算，隐藏节点不参与。'}
-            </div>
-          )}
-          <FieldRow label="布局模式">
-            <Select
-              size="small" style={{ width: '100%' }}
-              value={layout.flowOrientation ?? 'None'}
-              onChange={handleFlowChange}
-              options={[
-                { value: 'None', label: '无（手动定位）' },
-                { value: 'Vertical', label: '垂直堆叠 ↓' },
-                { value: 'Horizontal', label: '水平堆叠 →' },
-              ]}
-            />
-          </FieldRow>
-          {layout.flowOrientation && layout.flowOrientation !== 'None' && (
-            <>
-              <ScrubField label="间距" value={layout.spacing ?? 0} onChange={handleSpacingChange} min={0} />
-              <Button size="small" block onClick={() => applyFlexLayout(node.id)}>
-                重新排列子控件
-              </Button>
-            </>
-          )}
-        </>
-      ) : (
-        <div style={{ fontSize: 10, color: '#5b6378' }}>仅容器类型支持自动布局</div>
+      <FieldRow label="自适应">
+        <Select
+          size="small" style={{ width: '100%' }}
+          value={autoSize}
+          onChange={handleAutoSizeChange}
+          options={[
+            { value: 'None', label: '固定宽高' },
+            { value: 'Width', label: '自动宽' },
+            { value: 'Height', label: '自动高' },
+            { value: 'Both', label: '自动宽高' },
+          ]}
+        />
+      </FieldRow>
+      {autoSize !== 'None' && (
+        <div style={{ fontSize: 10, color: autoSizeConflicts.length ? '#d89614' : '#5b6378' }}>
+          {autoSizeConflicts.length
+            ? `检测到 ${autoSizeConflicts.length} 个依赖父尺寸的布局，冲突轴会回退到基准尺寸。`
+            : '自动尺寸按可见子控件边界计算，隐藏节点不参与。'}
+        </div>
       )}
-      <div style={{ borderTop: '1px solid #2a3142', margin: '4px 0', paddingTop: 4 }}>
-        <div style={{ fontSize: 11, color: '#9aa3b4', marginBottom: 4 }}>弹性尺寸（Flex）</div>
-      </div>
+      <FieldRow label="布局模式">
+        <Select
+          size="small" style={{ width: '100%' }}
+          value={layout.flowOrientation ?? 'None'}
+          onChange={handleFlowChange}
+          options={[
+            { value: 'None', label: '无（手动定位）' },
+            { value: 'Vertical', label: '垂直堆叠 ↓' },
+            { value: 'Horizontal', label: '水平堆叠 →' },
+          ]}
+        />
+      </FieldRow>
+      {layout.flowOrientation && layout.flowOrientation !== 'None' && (
+        <>
+          <ScrubField label="间距" value={layout.spacing ?? 0} onChange={handleSpacingChange} min={0} />
+          <Button size="small" block onClick={() => applyFlexLayout(node.id)}>
+            重新排列子控件
+          </Button>
+        </>
+      )}
+    </Space>
+  )
+}
+
+// === 弹性尺寸（Flex：本控件作为子项的伸缩比例）===
+function FlexLayoutPanel({ node, updateNodeField }: {
+  node: any
+  updateNodeField: (id: string, path: string, value: unknown) => void
+}) {
+  const layout = node.layout ?? {}
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size="small">
       <ScrubField label="水平增长" value={node.widthStretchRatio ?? 0} onChange={v => updateNodeField(node.id, 'widthStretchRatio', v)} step={0.05} min={0} max={1} />
       <ScrubField label="垂直增长" value={node.heightStretchRatio ?? 0} onChange={v => updateNodeField(node.id, 'heightStretchRatio', v)} step={0.05} min={0} max={1} />
       <ScrubField label="水平收缩" value={node.widthCompactRatio ?? 0} onChange={v => updateNodeField(node.id, 'widthCompactRatio', v)} step={0.05} min={0} max={1} />

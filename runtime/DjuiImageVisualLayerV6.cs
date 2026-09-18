@@ -46,7 +46,10 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
 
         var fit = appearance?.ImageFit ?? "stretch";
         var cover = string.Equals(fit, "cover", StringComparison.Ordinal);
-        authored.ClipContent = cover || (appearance?.ClipContent ?? false);
+        // 圆角裁剪与进度条视觉层同款（宿主 CornerRadius + ClipContent）：宿主圆角由 TreeBuilder.ApplyAppearance
+        // 设置，但贴图绘制在子 visual 上，宿主不裁剪则圆角对图片完全无效。
+        var cornerRadius = appearance?.CornerRadius ?? 0f;
+        authored.ClipContent = cover || cornerRadius > 0f || (appearance?.ClipContent ?? false);
 
         var parentWidth = Math.Max(0, authored.Width);
         var parentHeight = Math.Max(0, authored.Height);

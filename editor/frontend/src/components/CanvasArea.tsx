@@ -761,29 +761,43 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
         cornerRadius={app.cornerRadius ?? 0}
         listening={false}
       />
-      {hasImage && image && useNineSlice && sliceEdges ? (
-        <NineSliceImage
-          image={image}
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          rotation={rotation}
-          opacity={opacity}
-          edges={sliceEdges}
-        />
-      ) : hasImage && (
-        <KImage
-          image={image}
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          rotation={rotation}
-          opacity={opacity}
-          listening={false}
-        />
-      )}
+      {hasImage && (() => {
+        // 与主画布一致：圆角时对控件框做 Group 裁剪，普通图片与九宫格统一走相对坐标
+        const radius = positiveNumber(app.cornerRadius)
+        const content = useNineSlice && sliceEdges ? (
+          <NineSliceImage
+            image={image}
+            x={0}
+            y={0}
+            width={width}
+            height={height}
+            rotation={0}
+            opacity={1}
+            edges={sliceEdges}
+          />
+        ) : (
+          <KImage
+            image={image}
+            x={0}
+            y={0}
+            width={width}
+            height={height}
+            listening={false}
+          />
+        )
+        return (
+          <Group
+            x={x}
+            y={y}
+            rotation={rotation}
+            opacity={opacity}
+            listening={false}
+            clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
+          >
+            {content}
+          </Group>
+        )
+      })()}
       {borderThickness > 0 && (
         <Rect
           x={x}
@@ -1104,18 +1118,8 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           sliceEdges={sliceEdges}
           cornerRadius={app.cornerRadius}
         />
-      ) : hasImage && effectiveImage && useNineSlice && sliceEdges ? (
-        <NineSliceImage
-          image={effectiveImage}
-          x={displayX}
-          y={displayY}
-          width={width}
-          height={height}
-          rotation={rotation}
-          opacity={renderOpacity}
-          edges={sliceEdges}
-        />
       ) : hasImage && effectiveImage && (() => {
+        const radius = positiveNumber(app.cornerRadius)
         const fit = computeImageFit(
           app.sourceSize?.width ?? effectiveImage.naturalWidth ?? effectiveImage.width,
           app.sourceSize?.height ?? effectiveImage.naturalHeight ?? effectiveImage.height,
@@ -1125,21 +1129,43 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           app.focalX ?? 0.5,
           app.focalY ?? 0.5,
         )
-        return (
+        const content = useNineSlice && sliceEdges ? (
+          <NineSliceImage
+            image={effectiveImage}
+            x={0}
+            y={0}
+            width={width}
+            height={height}
+            rotation={0}
+            opacity={1}
+            edges={sliceEdges}
+          />
+        ) : (
           <KImage
             image={effectiveImage}
-            x={displayX + fit.x}
-            y={displayY + fit.y}
+            x={fit.x}
+            y={fit.y}
             width={fit.width}
             height={fit.height}
             cropX={fit.crop?.x}
             cropY={fit.crop?.y}
             cropWidth={fit.crop?.width}
             cropHeight={fit.crop?.height}
+            listening={false}
+          />
+        )
+        // 图片圆角与进度条同款：Konva Image 不支持 cornerRadius，用 Group clipFunc 对控件框裁剪
+        return (
+          <Group
+            x={displayX}
+            y={displayY}
             rotation={rotation}
             opacity={renderOpacity}
             listening={false}
-          />
+            clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
+          >
+            {content}
+          </Group>
         )
       })()}
       {borderThickness > 0 && (

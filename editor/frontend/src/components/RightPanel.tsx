@@ -210,7 +210,6 @@ export default function RightPanel() {
             node={node}
             updateNodeField={updateNodeField}
             batchUpdateNode={batchUpdateNode}
-            removeNode={removeNode}
             openAssetPicker={openAssetPicker}
             onFitToImageSize={fitToImageSize}
             fittingSize={fittingSize}
@@ -255,11 +254,10 @@ export default function RightPanel() {
 }
 
 // === 属性面板内容 ===
-function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig, responsiveVariant, clearResponsiveOverrides, selectedIds }: {
+function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPicker, onFitToImageSize, fittingSize, sliceMeta, onOpenSliceEditor, applyFlexLayout, allPages, setActivePage, soundConfig, responsiveVariant, clearResponsiveOverrides, selectedIds }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
-  removeNode: (id: string) => void
   openAssetPicker: (field: string) => void
   onFitToImageSize: () => void
   fittingSize: boolean
@@ -311,16 +309,6 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, removeNode, 
 
   return (
     <div style={{ padding: '4px 8px 16px' }}>
-      {/* 节点信息 */}
-      <div style={{ marginBottom: 8, padding: '8px', background: '#1d2230', borderRadius: 6 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ color: '#5ab9ff', fontSize: 14 }}>{node.name || '未命名'}</div>
-            <div style={{ color: '#5b6378', fontSize: 11 }}>{node.starType}</div>
-          </div>
-          <Button danger icon={<DeleteOutlined />} size="small" onClick={() => removeNode(node.id)} />
-        </div>
-      </div>
 
       {responsiveVariant === 'wide' && (
         <div style={{ marginBottom: 8, padding: 8, border: '1px solid #5c4218', borderRadius: 6, background: '#2a1f0f', color: '#ffaa44', fontSize: 12 }}>

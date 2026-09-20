@@ -136,7 +136,8 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
     const requiredHeight = lines * baseFontSize * 1.25
     fontSize = Math.max(1, Math.floor(baseFontSize * Math.min(1, height / requiredHeight)))
   } else if (overflow === 'None') {
-    renderHeight = undefined
+    // 保留控件高度作 verticalAlign 参照（Konva 不会因 height 裁剪文本，溢出照画）；
+    // 曾在此置 undefined，导致溢出模式下垂直居中/居下永远失效、文字顶格
     if (!wrapEnabled) {
       renderWidth = Math.max(width, measuredWidth)
       if (align === 'right') xOffset = width - renderWidth

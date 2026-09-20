@@ -16,7 +16,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     private readonly DjuiProjectV6 _project;
     private readonly DjuiPageV6 _page;
     private readonly Dictionary<string, Control> _controls = new();
-    private Action<DjuiNodeV6, Control>? _nodeUpdater;
+    private Action<DjuiNodeV6, Control, float>? _nodeUpdater;
     private readonly Action<int, int> _sizeChanged;
     private readonly Action<DisplayOrientations> _orientationChanged;
     private readonly Action<float> _dprChanged;
@@ -51,7 +51,9 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         if (!_controls.TryAdd(nodeInstanceId, control)) throw new InvalidOperationException($"DJUI v6: 实例 {WindowInstanceId} 内节点 ID 重复: {nodeInstanceId}");
     }
 
-    public void SetNodeUpdater(Action<DjuiNodeV6, Control> updater)
+    /// <summary>注册节点字段更新器（relayout 时逐节点回调）。第三参为场景画板累计缩放
+    /// （sceneFrame 子树内 artboard→背景帧的映射比例，画板外恒为 1）——字号/描边等"非矩形属性"需自行补乘。</summary>
+    public void SetNodeUpdater(Action<DjuiNodeV6, Control, float> updater)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _nodeUpdater = updater ?? throw new ArgumentNullException(nameof(updater));
@@ -69,7 +71,8 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         CurrentPage = DjuiResponsiveResolverV6.Resolve(_page, CurrentPlan.Wide);
         var nodes = new Dictionary<string, DjuiNodeV6>(StringComparer.Ordinal);
         IndexNodes(CurrentPage.Root, nodes);
-        var solved = DjuiLayoutSolverV6.SolveV6(CurrentPage, CurrentPlan);
+        var sceneScales = new Dictionary<string, float>();
+        var solved = DjuiLayoutSolverV6.SolveV6(CurrentPage, CurrentPlan, sceneScales);
         var parents = new Dictionary<string, string?>(StringComparer.Ordinal);
         IndexParents(CurrentPage.Root, null, parents);
         foreach (var (nodeId, rect) in solved)
@@ -79,7 +82,8 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
             if (parents.TryGetValue(nodeId, out var parentId) && parentId != null && solved.TryGetValue(parentId, out var parentRect))
                 localRect = new DjuiRectV6(rect.X - parentRect.X, rect.Y - parentRect.Y, rect.Width, rect.Height);
             ApplyRect(control, localRect);
-            if (_nodeUpdater != null && nodes.TryGetValue(nodeId, out var node)) _nodeUpdater(node, control);
+            if (_nodeUpdater != null && nodes.TryGetValue(nodeId, out var node))
+                _nodeUpdater(node, control, sceneScales.TryGetValue(nodeId, out var sceneScale) ? sceneScale : 1f);
         }
     }
 

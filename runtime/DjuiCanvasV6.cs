@@ -92,11 +92,11 @@ public static class DjuiCanvasV6
 
 public static class DjuiLayoutSolverV6
 {
-    public static Dictionary<string, DjuiRectV6> SolveV6(DjuiPageV6 page, DjuiCanvasPlanV6 plan)
+    public static Dictionary<string, DjuiRectV6> SolveV6(DjuiPageV6 page, DjuiCanvasPlanV6 plan, Dictionary<string, float>? sceneScales = null)
     {
         var solved = new Dictionary<string, DjuiRectV6>();
         solved[page.Root.Id] = new DjuiRectV6(0, 0, plan.CanvasRect.Width, plan.CanvasRect.Height); // root is local to the window host
-        // 图帧锚定:场景画板优先显式声明 backgroundId；旧页面才兼容回退到
+        // 图帧锚定,场景画板优先显式声明 backgroundId；旧页面才兼容回退到
         // 根下第一个 stretch Both + image 节点。不要再让新页面依赖节点顺序。
         DjuiRectV6? imageFrame = null;
         string? backgroundId = null;
@@ -110,7 +110,7 @@ public static class DjuiLayoutSolverV6
             bool hasImage = !string.IsNullOrEmpty(ap?.Image);
             if (both && hasImage && (backgroundId == null || child.Id == backgroundId)) { imageFrame = ComputeImageFrame(solved: default, child, plan); break; }
         }
-        foreach (var child in page.Root.Children) SolveTree(child, plan.CanvasRect, plan, solved, imageFrame);
+        foreach (var child in page.Root.Children) SolveTree(child, plan.CanvasRect, plan, solved, imageFrame, null, null, sceneScales);
         return solved;
     }
 
@@ -184,7 +184,8 @@ public static class DjuiLayoutSolverV6
         Dictionary<string, DjuiRectV6> output,
         DjuiRectV6? imageFrame = null,
         SceneSpace? sceneSpace = null,
-        DjuiRectV6? sceneParent = null)
+        DjuiRectV6? sceneParent = null,
+        Dictionary<string, float>? sceneScales = null)
     {
         DjuiRectV6 rect;
         DjuiRectV6 authoredRect = default;
@@ -195,6 +196,10 @@ public static class DjuiLayoutSolverV6
                 throw new InvalidDataException($"DJUI v6: 场景画板内节点 {node.Id} 只能使用 parent 锚点");
             authoredRect = SolveV6(node, sceneParent ?? default, plan);
             rect = sceneSpace.Value.Map(authoredRect);
+            // 场景画板内节点的字号/描边需补乘画板缩放：编辑器画布对画板子树是整组缩放（字号跟随），
+            // 引擎只映射控件矩形，FontSize 不乘会导致场景页文字相对控件小 artboard→背景帧一倍多。
+            // rect 已是全局系，ScaleX 即「artboard 局部值 → 全局」总缩放（嵌套画板天然累计）。
+            sceneScales?.Add(node.Id, sceneSpace.Value.ScaleX);
         }
         else
         {
@@ -206,11 +211,11 @@ public static class DjuiLayoutSolverV6
         {
             var nextSpace = new SceneSpace(rect, frame.Artboard);
             var authoredRoot = new DjuiRectV6(0, 0, frame.Artboard.Width, frame.Artboard.Height);
-            foreach (var child in node.Children) SolveTree(child, rect, plan, output, imageFrame, nextSpace, authoredRoot);
+            foreach (var child in node.Children) SolveTree(child, rect, plan, output, imageFrame, nextSpace, authoredRoot, sceneScales);
             return;
         }
         foreach (var child in node.Children)
-            SolveTree(child, rect, plan, output, imageFrame, sceneSpace, sceneSpace != null ? authoredRect : null);
+            SolveTree(child, rect, plan, output, imageFrame, sceneSpace, sceneSpace != null ? authoredRect : null, sceneScales);
     }
 
 

@@ -110,7 +110,7 @@ public static class DjuiTreeBuilderV6
         {
             root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
             root.Parent = host;
-            session.SetNodeUpdater((node, control) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, buttonStates));
+            session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale));
             session.Relayout();
             return new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
         }
@@ -127,7 +127,7 @@ public static class DjuiTreeBuilderV6
         }
     }
 
-    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true)
+    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true, float sceneScale = 1f)
     {
         if (string.Equals(node.StarType, "TemplateInstance", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"DJUI v6: template node '{node.Id}' was not expanded.");
@@ -146,7 +146,7 @@ public static class DjuiTreeBuilderV6
             _ => throw new NotSupportedException($"DJUI v6: node '{node.Id}' uses unsupported starType '{node.StarType}'.")
         };
 
-        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, buttonStates);
+        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale);
         ApplyInteraction(control, node.Interaction);
         ApplyEffects(control, node.Effects);
         session.Register(node.Id, control);
@@ -173,12 +173,12 @@ public static class DjuiTreeBuilderV6
     /// （局部矩形，克隆体初始与源完全重叠，父级/位置归调用方）。
     /// 克隆节点以新 id 登记进布局会话：不参与 relayout，但树销毁时 ClearBehaviors/特效清理覆盖克隆体（R5 同款竞态防护）。
     /// </summary>
-    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved)
+    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales = null)
     {
         var node = JsonSerializer.Deserialize<DjuiNodeV6>(JsonSerializer.Serialize(source, CloneJsonOptions), CloneJsonOptions)
             ?? throw new InvalidOperationException("DJUI v6: clone JSON round-trip failed");
         ApplyCloneIds(node, idSuffix);
-        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, null);
+        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, null);
     }
 
     private static readonly JsonSerializerOptions CloneJsonOptions = new();
@@ -189,9 +189,11 @@ public static class DjuiTreeBuilderV6
         foreach (var child in node.Children) ApplyCloneIds(child, idSuffix);
     }
 
-    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, DjuiRectV6? parentRect)
+    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales, DjuiRectV6? parentRect)
     {
-        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false);
+        // 克隆体不参与 relayout，场景画板字号缩放须在建树时一次到位（按克隆源 id 查累计缩放）
+        var sceneScale = sceneScales != null && sceneScales.TryGetValue(origin.Id, out var scale) ? scale : 1f;
+        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
         if (solved.TryGetValue(origin.Id, out var rect))
         {
             var local = parentRect is { } pr ? new DjuiRectV6(rect.X - pr.X, rect.Y - pr.Y, rect.Width, rect.Height) : rect;
@@ -200,13 +202,13 @@ public static class DjuiTreeBuilderV6
         DjuiRectV6? ownRect = solved.TryGetValue(origin.Id, out var own) ? own : null;
         for (var i = 0; i < node.Children.Count; i++)
         {
-            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, ownRect);
+            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, ownRect);
             child.Parent = control;
         }
         return control;
     }
 
-    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates)
+    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, float sceneScale = 1f)
     {
         // 控件 Name 取页面 JSON 的 name 字段——引擎 FindChild(name) / FindChildren(name) 的寻址依据（含克隆体）
         if (!string.IsNullOrWhiteSpace(node.Name)) control.Name = node.Name;
@@ -216,7 +218,7 @@ public static class DjuiTreeBuilderV6
         ApplyProgress(control, node.Progress);
         var isRadialProgress = control is Progress progress && IsRadial(progress);
         if (control is not Progress) imageVisuals.Apply(node.Id, control, node.Appearance);
-        ApplyText(control, node.Text, defaultFont);
+        ApplyText(control, node.Text, defaultFont, sceneScale);
         ApplyButton(control, node.Button, node.Appearance, node.Transform, imageVisuals, buttonStates);
         if (control is Progress target)
         {
@@ -280,16 +282,16 @@ public static class DjuiTreeBuilderV6
         if (appearance.SlicedEdges is { Length: 4 } edges) control.SlicedEdges = new Thickness(edges[0], edges[1], edges[2], edges[3]);
     }
 
-    private static void ApplyText(Control control, DjuiTextV6? text, string? defaultFont)
+    private static void ApplyText(Control control, DjuiTextV6? text, string? defaultFont, float sceneScale = 1f)
     {
         if (text == null) return;
         var font = string.IsNullOrEmpty(text.Font) ? defaultFont : text.Font;
-        if (control is Label label) ApplyLabelText(label, text, font);
+        if (control is Label label) ApplyLabelText(label, text, font, sceneScale);
         else if (control is Input input)
         {
             if (text.Text != null) input.Text = text.Text;
             if (!string.IsNullOrEmpty(font)) input.Font = font;
-            if (text.FontSize is float size) input.FontSize = size;
+            if (text.FontSize is float size) input.FontSize = size * sceneScale;
             if (TryParseColor(text.TextColor, out var color)) input.TextColor = color;
             if (text.Bold is bool bold) input.Bold = bold;
         }
@@ -302,17 +304,19 @@ public static class DjuiTreeBuilderV6
                 buttonLabel.FullScreen();
                 buttonLabel.Parent = button;
             }
-            ApplyLabelText(buttonLabel, text, font);
+            ApplyLabelText(buttonLabel, text, font, sceneScale);
         }
     }
 
-    private static void ApplyLabelText(Label label, DjuiTextV6 text, string? font)
+    // 字号/描边补乘场景画板缩放（sceneScale）：画板子树内引擎只映射控件矩形，非矩形属性需自行缩放，
+    // 否则场景页文字相对控件小一倍多（编辑器画布是整组缩放，字号跟随，两边须一致）。
+    private static void ApplyLabelText(Label label, DjuiTextV6 text, string? font, float sceneScale = 1f)
     {
         if (text.Text != null) label.Text = text.Text;
         if (!string.IsNullOrEmpty(font)) label.Font = font;
-        if (text.FontSize is float size) label.FontSize = size;
+        if (text.FontSize is float size) label.FontSize = size * sceneScale;
         if (TryParseColor(text.TextColor, out var color)) label.TextColor = color;
-        if (text.StrokeSize is float strokeSize) label.StrokeSize = Math.Max(0, strokeSize);
+        if (text.StrokeSize is float strokeSize) label.StrokeSize = Math.Max(0, strokeSize * sceneScale);
         if (TryParseColor(text.StrokeColor, out var strokeColor)) label.StrokeColor = strokeColor;
         if (text.Bold is bool bold) label.Bold = bold;
         if (text.TextWrap is bool wrap) label.TextWrap = wrap;

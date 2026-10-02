@@ -113,6 +113,16 @@ async function walkFiles(store: PublishStore, path: string): Promise<string[]> {
   return result.sort((a, b) => a.localeCompare(b, 'zh-CN'))
 }
 
+/** 浏览器 File System Access API 逐文件核对/复制单次开销大，串行会随素材量线性变慢；Node 端并行 IO 同样受益 */
+const MIRROR_CONCURRENCY = 8
+
+async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let index = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) await worker(items[index++])
+  }))
+}
+
 async function mirrorDirectory(
   source: PublishStore,
   sourcePath: string,
@@ -120,33 +130,41 @@ async function mirrorDirectory(
   targetPath: string,
   transform?: (sourceFilePath: string, relativePath: string, data: Uint8Array) => Promise<Uint8Array> | Uint8Array,
   shouldSkip?: (relativePath: string, info: { size: number; mtime: number }) => Promise<boolean>,
+  /** 相对路径的基准目录（顶层源目录）；递归进子目录时必须沿用，否则 shouldSkip/manifest 的键会错位 */
+  basePath: string = sourcePath,
 ): Promise<{ copied: number; skipped: number; removed: number; total: number }> {
   const stats = { copied: 0, skipped: 0, removed: 0, total: 0 }
   await target.ensureDir(targetPath)
   const sourceEntries = await source.listEntries(sourcePath)
   const remaining = new Map((await target.listEntries(targetPath)).map(entry => [entry.name, entry]))
-
+  const directories: StoreEntry[] = []
+  const files: StoreEntry[] = []
   for (const entry of sourceEntries) {
     remaining.delete(entry.name)
+    ;(entry.kind === 'directory' ? directories : files).push(entry)
+  }
+
+  await runPool(files, MIRROR_CONCURRENCY, async entry => {
+    stats.total++
     const from = joinPath(sourcePath, entry.name)
     const to = joinPath(targetPath, entry.name)
-    if (entry.kind === 'directory') {
-      const nested = await mirrorDirectory(source, from, target, to, transform, shouldSkip)
-      stats.copied += nested.copied; stats.skipped += nested.skipped; stats.removed += nested.removed; stats.total += nested.total
-      continue
-    }
-
-    stats.total++
-    const relative = from.slice(sourcePath.length).replace(/^\//, '')
+    const relative = from.slice(basePath.length).replace(/^\//, '')
     const info = await source.fileInfo(from)
     if (info && shouldSkip && await shouldSkip(relative, info) && await target.fileExists(to)) {
       stats.skipped++
-      continue
+      return
     }
     const content = await source.readBytes(from)
     if (content === null) throw new Error(`无法读取发布源文件：${from}`)
     await target.writeBytes(to, transform ? await transform(from, relative, content) : content)
     stats.copied++
+  })
+
+  const nestedResults = await Promise.all(directories.map(directory =>
+    mirrorDirectory(source, joinPath(sourcePath, directory.name), target, joinPath(targetPath, directory.name), transform, shouldSkip, basePath),
+  ))
+  for (const nested of nestedResults) {
+    stats.copied += nested.copied; stats.skipped += nested.skipped; stats.removed += nested.removed; stats.total += nested.total
   }
 
   for (const entry of remaining.values()) {
@@ -161,7 +179,8 @@ async function collectFingerprints(store: PublishStore, dir: string): Promise<Re
   for (const file of await walkFiles(store, dir)) {
     const info = await store.fileInfo(file)
     if (!info) continue
-    result[file.slice(dir.length).replace(/^\//, '')] = [info.size, info.mtime]
+    // mtime 统一取整毫秒：浏览器 lastModified 是整数、Node mtimeMs 是浮点，不归一则跨端指纹永不相等
+    result[file.slice(dir.length).replace(/^\//, '')] = [info.size, Math.round(info.mtime)]
   }
   return result
 }
@@ -396,7 +415,8 @@ export async function publishCore(workspace: PublishStore, star: PublishStore): 
   const previousFiles = prevManifest.files ?? {}
   const assets = await mirrorDirectory(workspace, '成品素材', star, IMAGE_TARGET_DIR, undefined, async (relative, info) => {
     const previous = previousFiles[relative]
-    return !!previous && previous[0] === info.size && previous[1] === info.mtime
+    // 两端都取整：兼容旧清单里的浮点 mtime（网页整数 ↔ CLI 浮点曾互不相等导致全量重拷）
+    return !!previous && previous[0] === info.size && Math.round(previous[1]) === Math.round(info.mtime)
   })
   await star.writeJson(MANIFEST_PATH, { files: await collectFingerprints(workspace, '成品素材') })
 

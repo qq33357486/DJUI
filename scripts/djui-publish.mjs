@@ -2118,34 +2118,47 @@ async function walkFiles(store, path) {
   }
   return result.sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
-async function mirrorDirectory(source, sourcePath, target, targetPath, transform, shouldSkip) {
+var MIRROR_CONCURRENCY = 8;
+async function runPool(items, limit, worker) {
+  let index = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) await worker(items[index++]);
+  }));
+}
+async function mirrorDirectory(source, sourcePath, target, targetPath, transform, shouldSkip, basePath = sourcePath) {
   const stats = { copied: 0, skipped: 0, removed: 0, total: 0 };
   await target.ensureDir(targetPath);
   const sourceEntries = await source.listEntries(sourcePath);
   const remaining = new Map((await target.listEntries(targetPath)).map((entry) => [entry.name, entry]));
+  const directories = [];
+  const files = [];
   for (const entry of sourceEntries) {
     remaining.delete(entry.name);
+    (entry.kind === "directory" ? directories : files).push(entry);
+  }
+  await runPool(files, MIRROR_CONCURRENCY, async (entry) => {
+    stats.total++;
     const from = joinPath(sourcePath, entry.name);
     const to = joinPath(targetPath, entry.name);
-    if (entry.kind === "directory") {
-      const nested = await mirrorDirectory(source, from, target, to, transform, shouldSkip);
-      stats.copied += nested.copied;
-      stats.skipped += nested.skipped;
-      stats.removed += nested.removed;
-      stats.total += nested.total;
-      continue;
-    }
-    stats.total++;
-    const relative2 = from.slice(sourcePath.length).replace(/^\//, "");
+    const relative2 = from.slice(basePath.length).replace(/^\//, "");
     const info = await source.fileInfo(from);
     if (info && shouldSkip && await shouldSkip(relative2, info) && await target.fileExists(to)) {
       stats.skipped++;
-      continue;
+      return;
     }
     const content = await source.readBytes(from);
     if (content === null) throw new Error(`\u65E0\u6CD5\u8BFB\u53D6\u53D1\u5E03\u6E90\u6587\u4EF6\uFF1A${from}`);
     await target.writeBytes(to, transform ? await transform(from, relative2, content) : content);
     stats.copied++;
+  });
+  const nestedResults = await Promise.all(directories.map(
+    (directory) => mirrorDirectory(source, joinPath(sourcePath, directory.name), target, joinPath(targetPath, directory.name), transform, shouldSkip, basePath)
+  ));
+  for (const nested of nestedResults) {
+    stats.copied += nested.copied;
+    stats.skipped += nested.skipped;
+    stats.removed += nested.removed;
+    stats.total += nested.total;
   }
   for (const entry of remaining.values()) {
     await target.remove(joinPath(targetPath, entry.name), entry.kind === "directory");
@@ -2158,7 +2171,7 @@ async function collectFingerprints(store, dir) {
   for (const file of await walkFiles(store, dir)) {
     const info = await store.fileInfo(file);
     if (!info) continue;
-    result[file.slice(dir.length).replace(/^\//, "")] = [info.size, info.mtime];
+    result[file.slice(dir.length).replace(/^\//, "")] = [info.size, Math.round(info.mtime)];
   }
   return result;
 }
@@ -2376,7 +2389,7 @@ async function publishCore(workspace, star) {
   const previousFiles = prevManifest.files ?? {};
   const assets = await mirrorDirectory(workspace, "\u6210\u54C1\u7D20\u6750", star, IMAGE_TARGET_DIR, void 0, async (relative2, info) => {
     const previous = previousFiles[relative2];
-    return !!previous && previous[0] === info.size && previous[1] === info.mtime;
+    return !!previous && previous[0] === info.size && Math.round(previous[1]) === Math.round(info.mtime);
   });
   await star.writeJson(MANIFEST_PATH, { files: await collectFingerprints(workspace, "\u6210\u54C1\u7D20\u6750") });
   const warnings = [];

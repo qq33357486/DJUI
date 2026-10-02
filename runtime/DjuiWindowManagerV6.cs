@@ -225,6 +225,104 @@ public static class DjuiWindowManagerV6
         return SingletonInstances.TryGetValue(pageId, out var id) ? GetControl<T>(id, nodeInstanceId) : null;
     }
 
+    /// <summary>
+    /// 运行时替换节点图片（单例页口径，业务最常用）。只换图不动排版：
+    /// imageFit / sourceSize / focalX/focalY / slicedEdges / desaturated 等沿用该节点原 appearance 值。
+    /// image 传 null 或空串＝撤销图片（回到无图形态；带子件的节点注意：撤销后再设回会触发 visual 末位重建、
+    /// 图片盖住子件，Z 序与建树期相反，详见随 Runtime 分发的 AGENTS.md「运行时换图」限制）。
+    /// 对 Button＝更换 normal 底图（hover/pressed/disabled 三态配置不动，未配置的态由状态机自动跟随新底图）。
+    /// 返回 false＝页面未开 / 节点不存在 / 节点是 Progress（不支持），均已记日志，不抛异常。
+    /// </summary>
+    public static bool SetImage(string pageId, string nodeInstanceId, string? image)
+    {
+        if (!SingletonInstances.TryGetValue(pageId, out var id) || !Instances.TryGetValue(id, out var instance))
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImage 页面未打开: {Page}（节点 {Node}）", pageId, nodeInstanceId);
+            return false;
+        }
+        return SetImageCore(instance.Session, nodeInstanceId, image);
+    }
+
+    /// <summary>同 SetImage，但按窗口实例 id 寻址（OpenInstance 多实例页，如飘字）。</summary>
+    public static bool SetImageByInstance(string windowInstanceId, string nodeInstanceId, string? image)
+    {
+        if (!Instances.TryGetValue(windowInstanceId, out var instance))
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImageByInstance 窗口实例不存在: {Instance}（节点 {Node}）", windowInstanceId, nodeInstanceId);
+            return false;
+        }
+        return SetImageCore(instance.Session, nodeInstanceId, image);
+    }
+
+    /// <summary>
+    /// 直控口径：按 Control 引用换图（克隆体 / 模板实例 / authored 节点通吃，内部自动判别）。
+    /// 手里只有 Control 引用的业务（如物品格子填充）用这个；authored 节点同样会写会话数据模型，
+    /// 克隆体（id 带 #cN）则只刷新自身 visual／按钮状态机（克隆体不参与 relayout，本就无回退问题）。
+    /// </summary>
+    public static bool SetImage(Control control, string? image)
+    {
+        var session = DjuiLayoutSessionV6.FindOwner(control);
+        if (session == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImage(Control) 控件不属于任何 DJUI 窗口: {Name}", control.Name);
+            return false;
+        }
+        var nodeId = session.FindNodeId(control);
+        if (nodeId == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImage(Control) 控件未登记节点 ID: {Name}", control.Name);
+            return false;
+        }
+        return SetImageCore(session, nodeId, image);
+    }
+
+    /// <summary>
+    /// SetImage 三重载与 image 绑定共用的唯一核心：先写布局会话数据模型（防 relayout 回退的根本），
+    /// 再用与 relayout 重放完全相同的代码（ApplyImageRefresh）刷新 visual 子层。宽容失败，不抛异常。
+    /// </summary>
+    internal static bool SetImageCore(DjuiLayoutSessionV6 session, string nodeInstanceId, string? image)
+    {
+        var control = session.GetControl<Control>(nodeInstanceId);
+        if (control == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImage 节点不存在: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+            return false;
+        }
+        if (control is Progress)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetImage 不支持 Progress（进度条图片走专属视觉层）: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+            return false;
+        }
+        DjuiNodeV6? node;
+        if (session.UpdateAuthoredImage(nodeInstanceId, image))
+        {
+            // authored 分支：Apply 参数取 CurrentPage 树的同 id 节点（与 relayout 重放同源同模型）
+            node = FindNode(session.CurrentPage.Root, nodeInstanceId);
+            if (node == null)
+            {
+                Game.Logger.LogWarning("DJUI v6: SetImage 当前解析视图缺节点: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+                return false;
+            }
+        }
+        else
+        {
+            // 克隆分支（id 带 #cN，不在 authored 树）：克隆节点对象是独立 JSON 拷贝、无重放消费方，
+            // 直接写入克隆私有模型即可（appearance 是可空块，??= 不可省——部分克隆源节点无 appearance）
+            node = DjuiTreeBuilderV6.FindCloneNode(control);
+            if (node == null)
+            {
+                Game.Logger.LogWarning("DJUI v6: SetImage 克隆节点记录缺失: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+                return false;
+            }
+            node.Appearance ??= new DjuiAppearanceV6();
+            node.Appearance.Image = string.IsNullOrWhiteSpace(image) ? null : image;
+        }
+        var owner = session.Owner;
+        if (owner == null) return true;   // 建树期绑定首放：模型已写，Build 收尾的 Relayout 会按新模型铺图
+        DjuiTreeBuilderV6.ApplyImageRefresh(control, node, owner.ImageVisuals, owner.ButtonStates);
+        return true;
+    }
+
     public static bool IsOpen(string pageId)
         => SingletonInstances.TryGetValue(pageId, out var id) && Instances.ContainsKey(id);
 

@@ -1,5 +1,6 @@
 #if CLIENT
 
+using System.Runtime.CompilerServices;
 using GameUI.Control;
 using GameUI.Device;
 using GameUI.Enum;
@@ -16,6 +17,12 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     private readonly DjuiProjectV6 _project;
     private readonly DjuiPageV6 _page;
     private readonly Dictionary<string, Control> _controls = new();
+    // Control → 节点实例 id 反查表（与 _controls 同步维护）：SetImage(Control) 直控口径的寻址依据
+    private readonly Dictionary<Control, string> _controlIds = new();
+    // 宽屏 override 冲突告警去重（同节点只提醒一次，先例：DjuiImageVisualLayerV6._warnedMissingSourceSize）
+    private readonly HashSet<string> _warnedImageOverride = new(StringComparer.Ordinal);
+    // Control → 所属会话的进程级弱表：控件 Dispose 后条目自动消失，无泄漏（先例：DjuiButtonStateRegistryV6.States）
+    private static readonly ConditionalWeakTable<Control, DjuiLayoutSessionV6> OwnerIndex = new();
     private Action<DjuiNodeV6, Control, float>? _nodeUpdater;
     private readonly Action<int, int> _sizeChanged;
     private readonly Action<DisplayOrientations> _orientationChanged;
@@ -24,6 +31,9 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
 
     public string WindowInstanceId { get; }
     public IReadOnlyDictionary<string, Control> Controls => _controls;
+    /// <summary>持有本会话的树实例（DjuiTreeBuilderV6.Build 收尾赋值；建树期内为 null）。
+    /// SetImage 运行期取 ImageVisuals/ButtonStates 刷新 visual 用。</summary>
+    internal DjuiTreeInstanceV6? Owner { get; set; }
     public DjuiCanvasPlanV6 CurrentPlan { get; private set; }
     public DjuiPageV6 CurrentPage { get; private set; }
 
@@ -49,6 +59,62 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (string.IsNullOrWhiteSpace(nodeInstanceId)) throw new ArgumentException("节点实例 ID 不能为空", nameof(nodeInstanceId));
         if (!_controls.TryAdd(nodeInstanceId, control)) throw new InvalidOperationException($"DJUI v6: 实例 {WindowInstanceId} 内节点 ID 重复: {nodeInstanceId}");
+        // authored 与克隆体的唯一登记口都在这里——反查表与弱表一次性全覆盖两类控件
+        _controlIds[control] = nodeInstanceId;
+        OwnerIndex.AddOrUpdate(control, this);
+    }
+
+    /// <summary>按 Control 引用反查所属布局会话（非 DJUI 管理的控件返回 null）。</summary>
+    internal static DjuiLayoutSessionV6? FindOwner(Control control)
+        => OwnerIndex.TryGetValue(control, out var session) ? session : null;
+
+    /// <summary>按 Control 引用反查节点实例 id（未登记返回 null）。</summary>
+    internal string? FindNodeId(Control control)
+        => _controlIds.TryGetValue(control, out var id) ? id : null;
+
+    /// <summary>
+    /// SetImage / image 绑定通道的模型写入点：同步更新会话源树 _page 与当前解析视图 CurrentPage 的
+    /// appearance.Image——relayout 重放（ApplyNodeFields → imageVisuals.Apply / ApplyButton）以这两棵树为
+    /// 唯一数据源，写在这里才能活过任意次重放（宽屏深拷贝态也因写穿 _page 而存活）。
+    /// 空串/void 统一归一为 null。返回节点是否在 authored 树中（克隆 id 不在，返回 false）。
+    /// </summary>
+    internal bool UpdateAuthoredImage(string nodeInstanceId, string? image)
+    {
+        var normalized = string.IsNullOrWhiteSpace(image) ? null : image;
+        // 宽屏 override 冲突检测：该节点声明了 responsive.wide.overrides 的 "appearance.image" 时，
+        // 宽屏层每次 Resolve 都会把 authored 宽屏图盖回来，写入无效——告警一次并提示替代方案
+        if (_warnedImageOverride.Add(nodeInstanceId)
+            && _page.Responsive?.Wide.Overrides.TryGetValue(nodeInstanceId, out var fields) == true
+            && fields.ContainsKey("appearance.image"))
+        {
+            Game.Logger.LogWarning("DJUI v6: 节点 {Node} 声明了宽屏覆盖 appearance.image，宽屏态 SetImage 换图不生效（请改用双节点法或去掉该覆盖）", nodeInstanceId);
+        }
+        var node = FindNodeIn(_page.Root, nodeInstanceId);
+        if (node == null) return false;
+        node.Appearance ??= new DjuiAppearanceV6();
+        node.Appearance.Image = normalized;
+        // 宽屏副本态（CurrentPage 是 _page 的深拷贝）：两棵树都写，当前显示立即一致，无需强制 Relayout
+        if (!ReferenceEquals(CurrentPage, _page))
+        {
+            var viewNode = FindNodeIn(CurrentPage.Root, nodeInstanceId);
+            if (viewNode != null)
+            {
+                viewNode.Appearance ??= new DjuiAppearanceV6();
+                viewNode.Appearance.Image = normalized;
+            }
+        }
+        return true;
+    }
+
+    private static DjuiNodeV6? FindNodeIn(DjuiNodeV6 node, string id)
+    {
+        if (string.Equals(node.Id, id, StringComparison.Ordinal)) return node;
+        foreach (var child in node.Children)
+        {
+            var hit = FindNodeIn(child, id);
+            if (hit != null) return hit;
+        }
+        return null;
     }
 
     /// <summary>注册节点字段更新器（relayout 时逐节点回调）。第三参为场景画板累计缩放
@@ -142,6 +208,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         _viewport.OnOrientationChanged -= _orientationChanged;
         _viewport.OnDevicePixelRatioChanged -= _dprChanged;
         _controls.Clear();
+        _controlIds.Clear();
     }
 }
 

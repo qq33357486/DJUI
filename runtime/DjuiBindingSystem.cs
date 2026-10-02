@@ -48,7 +48,28 @@ public static class DjuiBindingSystem
         return registration;
     }
 
-    private static Action<object?>? CreateBindingAction(string propertyName, Control control)
+    /// <summary>image 绑定通道的注册上下文：定位 authored 模型与所属会话。注册点（DjuiTreeBuilderV6.BuildNode）天然齐备这两项。</summary>
+    private sealed record ImageBindingContext(DjuiLayoutSessionV6 Session, string NodeId);
+
+    /// <summary>
+    /// v6 注册重载（带节点 id 与布局会话）：image 绑定经它取得模型定位，其余属性与无上下文重载行为一致。
+    /// 绑定键已有值时立即重放（同无上下文重载）——这是 image 绑定跨树重建自动恢复最近图值的机制。
+    /// </summary>
+    internal static IDisposable RegisterBinding(Control control, string propertyName, string bindingKey,
+        string nodeId, DjuiLayoutSessionV6 session)
+    {
+        var apply = CreateBindingAction(propertyName, control,
+            string.Equals(propertyName, "image", StringComparison.Ordinal) ? new ImageBindingContext(session, nodeId) : null);
+        if (apply == null) return EmptyDisposable.Instance;
+        var registration = new Registration { Key = bindingKey, Control = control, Apply = apply };
+        if (!_bindings.TryGetValue(bindingKey, out var list)) _bindings[bindingKey] = list = new List<Registration>();
+        list.Add(registration);
+        if (_values.TryGetValue(bindingKey, out var value)) apply(value);
+        return registration;
+    }
+
+    private static Action<object?>? CreateBindingAction(string propertyName, Control control,
+        ImageBindingContext? imageContext = null)
     {
         return propertyName switch
         {
@@ -60,6 +81,11 @@ public static class DjuiBindingSystem
                 progress.Value = Convert.ToSingle(value ?? 0f);
                 DjuiProgressVisualLayerV6.NotifyValueChanged(progress);
             },
+            // image 绑定＝SetImage 同一通道（SetImageCore）：模型写入、克隆分流、Progress 排除、
+            // Button 状态机协同全部自动继承；空值归一为撤销图片。无上下文（结构性误用）落入 _ => null 静默无效。
+            "image" when imageContext != null => value => DjuiWindowManagerV6.SetImageCore(
+                imageContext.Session, imageContext.NodeId,
+                string.IsNullOrWhiteSpace(value?.ToString()) ? null : value.ToString()),
             _ => null,
         };
     }

@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.CompilerServices;
 using GameUI.Control;
 using GameUI.Control.Primitive;
 using GameUI.Control.Behavior;
@@ -112,7 +113,9 @@ public static class DjuiTreeBuilderV6
             root.Parent = host;
             session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale));
             session.Relayout();
-            return new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            var instance = new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            session.Owner = instance;   // SetImage 运行期经它取 ImageVisuals/ButtonStates（建树期绑定首放时为 null，SetImageCore 有专门处理）
+            return instance;
         }
         catch
         {
@@ -155,7 +158,7 @@ public static class DjuiTreeBuilderV6
             DjuiActionRouter.BindAction(control, node.Djui?.Action);
             DjuiAudioSystem.BindClickSound(control, node.Djui?.ClickSoundId);
             foreach (var binding in node.Djui?.Bindings ?? [])
-                bindingRegistrations.Add(DjuiBindingSystem.RegisterBinding(control, binding.Key, binding.Value));
+                bindingRegistrations.Add(DjuiBindingSystem.RegisterBinding(control, binding.Key, binding.Value, node.Id, session));
         }
 
         if (recurse)
@@ -181,6 +184,14 @@ public static class DjuiTreeBuilderV6
         return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, null);
     }
 
+    // 克隆节点弱表：克隆 node 树本是 JSON round-trip 的用完即弃产物，存弱表后 SetImage(Control)
+    // 可取到完整 appearance 排版参数（克隆体不参与 relayout，node 无失效问题；控件销毁后条目自清）
+    private static readonly ConditionalWeakTable<Control, DjuiNodeV6> CloneNodeIndex = new();
+
+    /// <summary>按克隆控件引用取回其节点模型（非克隆体返回 null）。</summary>
+    internal static DjuiNodeV6? FindCloneNode(Control control)
+        => CloneNodeIndex.TryGetValue(control, out var node) ? node : null;
+
     private static readonly JsonSerializerOptions CloneJsonOptions = new();
 
     private static void ApplyCloneIds(DjuiNodeV6 node, string idSuffix)
@@ -194,6 +205,7 @@ public static class DjuiTreeBuilderV6
         // 克隆体不参与 relayout，场景画板字号缩放须在建树时一次到位（按克隆源 id 查累计缩放）
         var sceneScale = sceneScales != null && sceneScales.TryGetValue(origin.Id, out var scale) ? scale : 1f;
         var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
+        CloneNodeIndex.AddOrUpdate(control, node);
         if (solved.TryGetValue(origin.Id, out var rect))
         {
             var local = parentRect is { } pr ? new DjuiRectV6(rect.X - pr.X, rect.Y - pr.Y, rect.Width, rect.Height) : rect;
@@ -217,15 +229,30 @@ public static class DjuiTreeBuilderV6
         ApplyAppearance(control, node.Appearance);
         ApplyProgress(control, node.Progress);
         var isRadialProgress = control is Progress progress && IsRadial(progress);
-        if (control is not Progress) imageVisuals.Apply(node.Id, control, node.Appearance);
         ApplyText(control, node.Text, defaultFont, sceneScale);
-        ApplyButton(control, node.Button, node.Appearance, node.Transform, imageVisuals, buttonStates);
+        ApplyImageRefresh(control, node, imageVisuals, buttonStates);
         if (control is Progress target)
         {
             if (isRadialProgress) ApplyNativeProgressImage(target, node.Appearance);
             else progressVisuals.Apply(node.Id, target, node.Appearance);
         }
         ApplyLayout(control, node.Layout);
+    }
+
+    /// <summary>
+    /// 运行期图片刷新（SetImage / image 绑定 / relayout 重放三方共用）：
+    /// 非 Progress 走 imageVisuals.Apply（图片内容＋visual 矩形推导，矩形只吃 appearance 排版参数与
+    /// 宿主当前宽高，不改宿主矩形＝只换图不动布局）；Button 再经 ApplyButton → buttonStates.Attach
+    /// 刷新状态机 normal 图（hover/pressed/disabled 未配置的态自动跟随新底图）。
+    /// Progress 静默跳过——进度条图片走专属视觉层，SetImageCore 入口处已拦截。
+    /// </summary>
+    internal static void ApplyImageRefresh(Control control, DjuiNodeV6 node,
+        DjuiImageVisualLayerV6 imageVisuals, DjuiButtonStateRegistryV6 buttonStates)
+    {
+        if (control is Progress) return;
+        imageVisuals.Apply(node.Id, control, node.Appearance);
+        if (control is Button)
+            ApplyButton(control, node.Button, node.Appearance, node.Transform, imageVisuals, buttonStates);
     }
 
     private static void ApplyInteraction(Control control, DjuiInteractionV6? interaction)

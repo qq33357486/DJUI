@@ -41,6 +41,10 @@ DjuiBindingSystem.Set("coin_count", 999);
 // 7. 运行时动态禁用（走此方法或 disabled 绑定才会刷新 DJUI 禁用视觉；
 //    直接给引擎控件赋 Disabled 只拦截点击、不变灰——引擎无 Disabled 变更通知）
 DjuiButtonState.SetDisabled(btn, false);
+
+// 8. 运行时换图（SetImage 三口径，详见下方「运行时换图（SetImage）」）
+DjuiWindowManagerV6.SetImage(页面标识.建筑详情, "building_detail_upgrade_button", "image/djui/buttons/升级绿底.png");
+DjuiWindowManagerV6.SetImage(格子控件引用, 品质底图路径);   // 直控口径：克隆体/authored 通吃
 ```
 
 ## 按钮状态视觉（normal / hover / pressed / disabled）
@@ -50,6 +54,33 @@ DjuiButtonState.SetDisabled(btn, false);
 - `button.imageHover` / `button.imagePressed` / `button.imageDisabled`：三个可选状态图，未设置的态沿用正常图
 - 禁用时未配置 `imageDisabled` → 自动兜底：图片灰度 + 整体透明度降为 50%（常量 `DjuiButtonStateV6.DisabledFallbackOpacity`，实测后可调）
 - 动态切换禁用：数据绑定属性 `disabled`（`DjuiBindingSystem.Set("key", bool)`）或 `DjuiButtonState.SetDisabled(control, bool)`
+- 运行时换 normal 底图：`DjuiWindowManagerV6.SetImage(...)`——走 `DjuiButtonStateV6` 状态机通道（`Attach → Update`），hover/pressed/disabled 未配置的态与禁用灰化兜底自动跟随新底图；与 `SetDisabled` 同状态机单点写 visual，互不覆盖
+
+## 运行时换图（SetImage）
+
+游戏代码可在运行时替换节点图片，**只换图不动排版**：`imageFit / sourceSize / focalX/focalY / slicedEdges / desaturated` 等沿用该节点原 appearance 值，宿主矩形不变。三个公开重载：
+
+- `SetImage(pageId, nodeInstanceId, image)`：单例页口径（业务最常用）
+- `SetImageByInstance(windowInstanceId, nodeInstanceId, image)`：`OpenInstance` 多实例页口径（如飘字）
+- `SetImage(control, image)`：直控口径，按 `Control` 引用换图——**克隆体（CloneControl 产物）/ authored 节点通吃**，业务手里是克隆控件引用时用这个（克隆体不能用 id 寻址时也兜底支持 `源id#cN`）
+
+行为口径：
+
+- `image` 传 `null`/空串＝撤销图片（回到无图形态）
+- authored 空图片的节点（如宿主自渲染的飘字图标）换图后自动切换为 visual 子层渲染；撤销后还原
+- 已开窗口换图后，转屏/视口变化触发的重新布局**不会把图片恢复成旧值**（换图同步写入布局数据模型）
+- 对 Button＝更换 normal 底图，与 `SetDisabled` 禁用灰化自然共存
+- 返回 `false`＝页面未开 / 节点不存在 / 节点是 Progress，均记 Warning 日志、不抛异常
+
+数据绑定通道：节点 `djui.bindings` 声明 `"image": "绑定key"` 后，`DjuiBindingSystem.Set(key, 图片路径)` 即换图（与 SetImage 同一通道，空值撤销）。绑定通道的独特优势：**窗口销毁重建（池淘汰）后新树注册时自动恢复最近一次图值**；直接 SetImage 的值随旧树销毁丢失，业务需在 `OnCreate`/`OnOpen` 里重放（业务已有重开全量重刷惯例）。
+
+**限制（首版口径）**：
+
+1. Progress 进度条图片不支持运行时换图（走专属视觉层，三处机制互不相同，首版明确排除）
+2. 节点声明了宽屏覆盖 `responsive.wide.overrides` 的 `appearance.image` 时，宽屏态 SetImage 不生效（宽屏层每次解析都会把覆盖图盖回来）——改用双节点法或去掉该覆盖（会有一次性 Warning 提示）
+3. 窗口池淘汰销毁重建后，直接 SetImage 的值丢失——在 `OnCreate`/`OnOpen` 重放，或改走 image 绑定
+4. 克隆体无数据绑定（克隆不绑行为），换图只能走 `SetImage(Control, …)`
+5. **带子件的节点，运行时建层或「撤销图片后再设回」都会把图片绘制在子件之上**（Z 序与编辑器及初始建树相反，且不会被重放纠正）：空图片的容器节点首次换图、以及任何节点 `SetImage(null)` 撤销后再设回，都会触发。**带子件的节点应避免 SetImage(null) 撤销操作**；确需恢复正确层级只能销毁重建窗口（池淘汰/CloseAll 后重开）
 
 ## 响应式宽屏层（基础层 / 宽屏层）
 

@@ -98,6 +98,28 @@ var label = DjuiWindowManagerV6.GetControl<Label>(instanceId, "toast_text");
 - 运行时动态切换禁用：数据绑定属性 `disabled`，或调用 `DjuiButtonState.SetDisabled(control, bool)`。
 - 已知限制：直接给引擎控件赋 `Disabled` 只拦截点击、不刷新 DJUI 禁用视觉（引擎没有 Disabled 变更通知）。
 
+## 运行时换图（SetImage）
+
+游戏代码可在运行时替换节点图片，**只换图不动排版**（imageFit / sourceSize / focal 等沿用原属性，宿主矩形不变）：
+
+```csharp
+// 单例页口径（业务最常用）
+DjuiWindowManagerV6.SetImage("building_detail", "building_detail_upgrade_button", "image/djui/buttons/upgrade_green.png");
+
+// OpenInstance 多实例页口径
+DjuiWindowManagerV6.SetImageByInstance(instanceId, "float_icon", "image/djui/icons/new.png");
+
+// 直控口径：克隆体（CloneControl 产物）/ authored 节点通吃，按 Control 引用换图
+DjuiWindowManagerV6.SetImage(cellControl, "image/djui/frames/quality_epic.png");
+```
+
+- `image` 传 `null`/空串＝撤销图片；对 Button＝换 normal 底图（hover/pressed/disabled 未配置的态与禁用灰化自动跟随新底图）
+- 已开窗口换图后，转屏/重新布局不会把图片恢复成旧图（换图写入布局数据模型，与重放同源）
+- 失败语义：返回 `false`（页面未开 / 节点不存在 / 节点是 Progress）并记 Warning 日志，不抛异常
+- **Z 序限制**：带子件的节点，运行时建层（authored 空图片节点首次换图）或「SetImage(null) 撤销后再设回」会把图片绘制在子件之上（与编辑器相反且不被重放纠正）——带子件的节点避免撤销操作，恢复层级只能销毁重建窗口
+- 窗口池淘汰销毁重建后直接 SetImage 的值会丢失：在 `OnCreate`/`OnOpen` 重放，或改走 image 绑定（新树注册时自动恢复最近值）
+- 更多口径与限制见随 Runtime 分发的 `src/DjuiRuntime/AGENTS.md`「运行时换图」
+
 ## 动作路由
 
 节点的 `djui.action` 会交给 `DjuiActionRouter`。项目可以在 Runtime 侧扩展动作注册逻辑，把编辑器中的动作名映射到游戏代码。
@@ -148,6 +170,7 @@ DjuiBindingSystem.Set("coin_count", 999);
 | `disabled` | 全部 | 禁用并刷新 DJUI 禁用视觉（走 `DjuiButtonState.SetDisabled`） |
 | `text` | Label / Input | 文本 |
 | `value` | Progress | 进度值 |
+| `image` | Panel / Button（非 Progress） | 换图片（值＝图片路径，走 `SetImage` 同一通道；空值撤销图片） |
 
 动态禁用也可以直接调 `DjuiButtonState.SetDisabled(control, bool)`（设置引擎属性并同步视觉）。
 

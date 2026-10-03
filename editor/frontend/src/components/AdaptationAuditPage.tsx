@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Empty, Tag } from 'antd'
 import { AppstoreOutlined, ArrowLeftOutlined, BlockOutlined, EyeOutlined } from '@ant-design/icons'
 import { useEditorStore } from '@/store/editorStore'
@@ -59,6 +59,31 @@ export default function AdaptationAuditPage({ onBack, onViewOnCanvas, pages, onS
   const allPages = useEditorStore(state => state.allPages)
   const config = useProjectStore(state => state.config)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sliceMeta, setSliceMeta] = useState<Awaited<ReturnType<typeof api.getSliceMeta>>>({})
+
+  // 所有设备预览共用工作区切片配置，避免每张缩略图重复读取。
+  useEffect(() => {
+    let disposed = false
+    let requestId = 0
+    setSliceMeta({})
+    const reload = async () => {
+      const currentRequest = ++requestId
+      try {
+        const meta = config?.workspacePath ? await api.getSliceMeta() : {}
+        if (!disposed && currentRequest === requestId) setSliceMeta(meta)
+      } catch (error) {
+        if (!disposed && currentRequest === requestId) {
+          console.error('加载适配审计九宫格配置失败', error)
+        }
+      }
+    }
+    void reload()
+    window.addEventListener('djui:sliceMetaChanged', reload)
+    return () => {
+      disposed = true
+      window.removeEventListener('djui:sliceMetaChanged', reload)
+    }
+  }, [config?.workspacePath])
 
   const rows = useMemo(() => {
     if (!page || !config) return []
@@ -139,7 +164,7 @@ export default function AdaptationAuditPage({ onBack, onViewOnCanvas, pages, onS
                   style={{ cursor: 'pointer', textAlign: 'left', color: '#dfe7f5', background: '#151924', border: '1px solid ' + (active ? '#5ab9ff' : issueColor(row.result)), borderRadius: 10, overflow: 'hidden', padding: 0 }}
                 >
                   <div style={{ height: viewportHeight, background: '#0d0f15', display: 'grid', placeItems: 'center' }}>
-                    <StaticViewportPreview root={row.root} config={config} device={row.device} workspacePath={config.workspacePath} projectPath={config.starProjectPath} width={225} height={viewportHeight} />
+                    <StaticViewportPreview root={row.root} config={config} device={row.device} workspacePath={config.workspacePath} projectPath={config.starProjectPath} sliceMeta={sliceMeta} width={225} height={viewportHeight} />
                   </div>
                   <div style={{ padding: '9px 10px 10px' }}>
                     <strong style={{ display: 'block', fontSize: 12 }}>{row.device.label}</strong>

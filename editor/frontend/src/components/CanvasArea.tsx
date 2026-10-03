@@ -1331,13 +1331,14 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
  * 因而不是另一套缩略图算法；交互和编辑辅助线在这里被刻意关闭。
  */
 export function StaticViewportPreview({
-  root, config, device, workspacePath, projectPath, width, height,
+  root, config, device, workspacePath, projectPath, sliceMeta, width, height,
 }: {
   root: UiNode
   config: ProjectConfig
   device: DevicePresetV6
   workspacePath: string
   projectPath: string
+  sliceMeta: Record<string, SliceEdges>
   width: number
   height: number
 }) {
@@ -1381,7 +1382,7 @@ export function StaticViewportPreview({
               safeRect={plan.safeRect}
               imageFrame={imageFrame}
               showEditorOverlay={false}
-              sliceMeta={{}}
+              sliceMeta={sliceMeta}
               dragPreview={null}
               inheritedDragDelta={{ x: 0, y: 0 }}
             />

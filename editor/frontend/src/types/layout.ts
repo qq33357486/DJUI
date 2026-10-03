@@ -293,7 +293,7 @@ export const COMPONENT_LIBRARY: ComponentDef[] = [
       starType: 'Label',
       basic: { visible: true },
       transform: { positionType: 'Absolute', width: 100, height: 24 },
-      text: { text: '文本', fontSize: 16, textColor: '#FFFFFF', bold: false, textWrap: false, textOverflow: 'Shrink' },
+      text: { text: '文本', fontSize: 16, textColor: '#FFFFFF', bold: false, textWrap: false, textOverflow: 'None' },
     },
   },
   {

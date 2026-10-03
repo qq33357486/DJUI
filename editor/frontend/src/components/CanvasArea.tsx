@@ -167,7 +167,7 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
   const fontFamily = cssFont ? (/[,"]/.test(cssFont) ? cssFont : `"${cssFont}"`) : undefined
   const bold = node.text?.bold ?? false
   const wrapEnabled = node.text?.textWrap ?? false
-  const overflow = node.text?.textOverflow ?? 'Shrink'
+  const overflow = node.text?.textOverflow ?? (node.starType === 'Label' ? 'None' : 'Shrink')
   const align = textAlign(node.layout?.horizontalContentAlignment)
   const measuredWidth = Math.max(1, measureTextWidth(text, baseFontSize, fontFamily, bold))
 

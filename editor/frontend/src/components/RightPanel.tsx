@@ -648,7 +648,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                       <Select
                         size="small"
                         style={{ width: '100%' }}
-                        value={txt.textOverflow ?? 'Shrink'}
+                        value={txt.textOverflow ?? 'None'}
                         onChange={v => updateNodeField(node.id, 'text.textOverflow', v)}
                         options={TEXT_OVERFLOW_OPTIONS}
                       />

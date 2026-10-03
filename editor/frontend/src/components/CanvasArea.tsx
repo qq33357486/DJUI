@@ -14,6 +14,7 @@ import { devicePresetsForOrientationV6, findDevicePresetV6, type DevicePresetV6 
 import { auditPageAdaptation, computeImageFrameForAudit } from '@/utils/adaptationAudit'
 import { getEditorOverlayVisible, getReferenceImageVisible, setEditorOverlayVisible, setReferenceImageVisible } from '@/lib/editorPreferences'
 import type Konva from 'konva'
+import KonvaRuntime from 'konva'
 
 // === 自定义 useImage hook：从 URL 加载 HTMLImageElement ===
 function useImage(url: string | null): HTMLImageElement | null {
@@ -108,11 +109,12 @@ function positiveNumber(value: unknown) {
 }
 
 /**
- * 解析图片染色色值（#RGB / #RRGGBB / #RRGGBBAA）为 rgb 串与 alpha。
- * 引擎语义（1003 探针实锤）：img × tintRGB × α + img × (1-α)，透明像素保持透明；
- * Konva 里等价于叠一层 multiply Rect：fill=rgb, opacity=α（画布合成即先乘后按 α 混回原图）。
+ * 解析图片染色色值（#RGB / #RRGGBB / #RRGGBBAA）为等价纯乘算色。
+ * 引擎语义（1003 探针实锤）：result = img×tint×α + img×(1-α)，透明像素保持透明（顶点色式，非叠加层）。
+ * 由乘法分配律可折算为单次乘算：c' = c×α + 255×(1-α)，配合 Konva RGB filter（逐像素乘、alpha 不动）
+ * 即与引擎逐像素等价——multiply 矩形方案在透明区会把色块画上去（1003 实测），不可用。
  */
-function parseTint(tint?: string | null): { rgb: string; alpha: number } | null {
+function parseTintMultiply(tint?: string | null): { r: number; g: number; b: number } | null {
   if (!tint) return null
   const value = tint.trim()
   let hex: string | null = null
@@ -120,30 +122,39 @@ function parseTint(tint?: string | null): { rgb: string; alpha: number } | null 
   else if (/^#[0-9a-f]{6}$/i.test(value)) hex = value.slice(1)
   else if (/^#[0-9a-f]{8}$/i.test(value)) hex = value.slice(1)
   if (!hex) return null
-  const r = parseInt(hex.slice(0, 2), 16)
-  const g = parseInt(hex.slice(2, 4), 16)
-  const b = parseInt(hex.slice(4, 6), 16)
+  const mix = (c: number, alpha: number) => Math.round(c * alpha + 255 * (1 - alpha))
   const alpha = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1
   if (alpha <= 0) return null
-  return { rgb: `${r},${g},${b}`, alpha: Math.min(alpha, 1) }
+  return {
+    r: mix(parseInt(hex.slice(0, 2), 16), alpha),
+    g: mix(parseInt(hex.slice(2, 4), 16), alpha),
+    b: mix(parseInt(hex.slice(4, 6), 16), alpha),
+  }
 }
 
-/** 染色覆盖层：乘算 Rect，几何与所给图片矩形一致（须渲染在图片之上、同一裁剪 Group 内）。 */
-function TintRect({ tint, x, y, width, height }: { tint?: string | null; x: number; y: number; width: number; height: number }) {
-  const parsed = parseTint(tint)
-  if (!parsed || width <= 0 || height <= 0) return null
-  return (
-    <Rect
-      x={x}
-      y={y}
-      width={width}
-      height={height}
-      fill={`rgb(${parsed.rgb})`}
-      opacity={parsed.alpha}
-      globalCompositeOperation="multiply"
-      listening={false}
-    />
-  )
+/** 带染色的 Konva 图片：RGB filter 逐像素乘算（含 cache 管理），渲染结果与引擎一致（透明区不染）。 */
+function TintedImage({ tint, ...rest }: { tint?: string | null } & React.ComponentProps<typeof KImage>) {
+  const ref = useRef<Konva.Image | null>(null)
+  const mult = parseTintMultiply(tint)
+  const { image, width, height, cropX, cropY, cropWidth, cropHeight } = rest
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    if (mult) {
+      // filter 只作用于 cache 后的离屏位图；尺寸/裁剪/图片变化须重 cache。pixelRatio 超采样防缩放糊
+      node.cache({ pixelRatio: 2 })
+      node.filters([KonvaRuntime.Filters.RGB])
+      node.red(mult.r)
+      node.green(mult.g)
+      node.blue(mult.b)
+    } else {
+      node.filters([])
+      node.clearCache()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mult?.r, mult?.g, mult?.b, image, width, height, cropX, cropY, cropWidth, cropHeight])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return <KImage ref={ref as any} {...rest} />
 }
 
 function getTextPreview(node: UiNode, width: number, height: number, defaultFont?: string | null) {
@@ -274,7 +285,7 @@ function solvePreviewRect(node: UiNode, parentRect: LayoutRect, canvasWidth: num
   return rect
 }
 
-function NineSliceImage({ image, x, y, width, height, rotation, opacity, edges }: {
+function NineSliceImage({ image, x, y, width, height, rotation, opacity, edges, tint }: {
   image: HTMLImageElement
   x: number
   y: number
@@ -283,6 +294,7 @@ function NineSliceImage({ image, x, y, width, height, rotation, opacity, edges }
   rotation: number
   opacity: number
   edges: SliceEdges
+  tint?: string | null
 }) {
   const imgW = image.naturalWidth || image.width
   const imgH = image.naturalHeight || image.height
@@ -318,8 +330,9 @@ function NineSliceImage({ image, x, y, width, height, rotation, opacity, edges }
       {rows.flatMap((row, rowIndex) => cols.map((col, colIndex) => {
         if (col.sw <= 0 || row.sh <= 0 || col.dw <= 0 || row.dh <= 0) return null
         return (
-          <KImage
+          <TintedImage
             key={`${rowIndex}-${colIndex}`}
+            tint={tint}
             image={image}
             x={col.dx}
             y={row.dy}
@@ -430,9 +443,11 @@ function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, v
           rotation={0}
           opacity={1}
           edges={sliceEdges}
+          tint={imageTint}
         />
       ) : image ? (
-        <KImage
+        <TintedImage
+          tint={imageTint}
           image={image}
           x={fit.x}
           y={fit.y}
@@ -455,10 +470,6 @@ function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, v
           listening={false}
         />
       )}
-      {/* 进度条染色预览：与 Runtime 一致（线性/放射都乘算在进度图上） */}
-      {useNineSlice && image && sliceEdges
-        ? <TintRect tint={imageTint} x={0} y={0} width={width} height={height} />
-        : <TintRect tint={imageTint} x={fit.x} y={fit.y} width={fit.width} height={fit.height} />}
     </Group>
   )
 }
@@ -819,9 +830,11 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
             rotation={0}
             opacity={1}
             edges={sliceEdges}
+            tint={app.imageTint}
           />
         ) : (
-          <KImage
+          <TintedImage
+            tint={app.imageTint}
             image={image}
             x={0}
             y={0}
@@ -840,7 +853,6 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
             clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
           >
             {content}
-            <TintRect tint={app.imageTint} x={0} y={0} width={width} height={height} />
           </Group>
         )
       })()}
@@ -1186,9 +1198,11 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             rotation={0}
             opacity={1}
             edges={sliceEdges}
+            tint={app.imageTint}
           />
         ) : (
-          <KImage
+          <TintedImage
+            tint={app.imageTint}
             image={effectiveImage}
             x={fit.x}
             y={fit.y}
@@ -1212,10 +1226,6 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
           >
             {content}
-            {/* 染色层与 Runtime 同语义：乘算 tint 盖在图片上（透明区不受影响，multiply 只作用已绘像素） */}
-            {useNineSlice && sliceEdges
-              ? <TintRect tint={app.imageTint} x={0} y={0} width={width} height={height} />
-              : <TintRect tint={app.imageTint} x={fit.x} y={fit.y} width={fit.width} height={fit.height} />}
           </Group>
         )
       })()}

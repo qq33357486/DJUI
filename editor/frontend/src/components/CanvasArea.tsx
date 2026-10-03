@@ -1243,22 +1243,6 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           listening={false}
         />
       )}
-      {/* 九宫格切片预览（选中 + 图片有切片元数据时显示分割线） */}
-      {isSelected && app.image && sliceMeta[app.image] && (() => {
-        const se = sliceMeta[app.image]
-        const lx = displayX + se.left
-        const rx = displayX + width - se.right
-        const ty = displayY + se.top
-        const by = displayY + height - se.bottom
-        return (
-          <>
-            <Line points={[lx, displayY, lx, displayY + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[rx, displayY, rx, displayY + height]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[displayX, ty, displayX + width, ty]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-            <Line points={[displayX, by, displayX + width, by]} stroke="#5ab9ff" strokeWidth={1} dash={[4, 3]} listening={false} />
-          </>
-        )
-      })()}
       {/* 文本渲染 */}
       {(node.text?.text || node.starType === 'Label') && (() => {
         const preview = getTextPreview(node, width, height, defaultFont)

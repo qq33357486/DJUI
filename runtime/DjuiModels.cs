@@ -293,6 +293,9 @@ public class DjuiAppearanceJson
     [JsonPropertyName("background")]
     public string? Background { get; set; }
 
+    [JsonPropertyName("imageTint")]
+    public string? ImageTint { get; set; }
+
     [JsonPropertyName("borderThickness")]
     public float? BorderThickness { get; set; }
 

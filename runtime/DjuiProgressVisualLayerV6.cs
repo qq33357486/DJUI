@@ -124,6 +124,10 @@ internal sealed class DjuiProgressVisualLayerV6 : IDisposable, IThinker
             new DjuiRectV6(imageRect.X - fillX, imageRect.Y - fillY, imageRect.Width, imageRect.Height));
         state.Image.Image = state.ImagePath;
         state.Image.Desaturated = state.Appearance?.Desaturated ?? false;
+        // 染色与普通图片同规则：乘算 tint 必须与 Image 同控件，落在进度条 image 子层上
+        state.Image.Background = DjuiTreeBuilderV6.TryParseColor(state.Appearance?.ImageTint, out var tintColor)
+            ? tintColor
+            : null;
         state.Image.ImageFlipX = state.Appearance?.ImageFlipX ?? false;
         state.Image.ImageFlipY = state.Appearance?.ImageFlipY ?? false;
         state.Image.SlicedEdges = state.Appearance?.SlicedEdges is { Length: 4 } edges

@@ -323,6 +323,112 @@ public static class DjuiWindowManagerV6
         return true;
     }
 
+    /// <summary>
+    /// 运行时图片染色（单例页口径，业务最常用）。乘算 tint：图片像素 × 颜色，白色素材＝直接变成该颜色，
+    /// 透明区域保持透明（不产生色块）。与 SetImage 同构：写布局会话模型防 relayout 回退，进度条同样支持
+    /// （放射状落宿主、线性落进度条 image 子层，与建树期一致）。Button 染的是 normal 底图所在 visual 层，
+    /// hover/pressed/disabled 未配置的态自动跟随。tint 传 null 或空串＝撤销染色。
+    /// 颜色格式：#RRGGBB / #RRGGBBAA / rgba() 串。返回 false＝页面未开 / 节点不存在 / 颜色非法，均已记日志。
+    /// </summary>
+    public static bool SetTint(string pageId, string nodeInstanceId, string? tint)
+    {
+        if (!SingletonInstances.TryGetValue(pageId, out var id) || !Instances.TryGetValue(id, out var instance))
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTint 页面未打开: {Page}（节点 {Node}）", pageId, nodeInstanceId);
+            return false;
+        }
+        return SetTintCore(instance.Session, nodeInstanceId, tint);
+    }
+
+    /// <summary>同 SetTint，但按窗口实例 id 寻址（OpenInstance 多实例页）。</summary>
+    public static bool SetTintByInstance(string windowInstanceId, string nodeInstanceId, string? tint)
+    {
+        if (!Instances.TryGetValue(windowInstanceId, out var instance))
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTintByInstance 窗口实例不存在: {Instance}（节点 {Node}）", windowInstanceId, nodeInstanceId);
+            return false;
+        }
+        return SetTintCore(instance.Session, nodeInstanceId, tint);
+    }
+
+    /// <summary>
+    /// 直控口径：按 Control 引用染色（克隆体 / 模板实例 / authored 节点通吃），与 SetImage(Control) 同构。
+    /// </summary>
+    public static bool SetTint(Control control, string? tint)
+    {
+        var session = DjuiLayoutSessionV6.FindOwner(control);
+        if (session == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTint(Control) 控件不属于任何 DJUI 窗口: {Name}", control.Name);
+            return false;
+        }
+        var nodeId = session.FindNodeId(control);
+        if (nodeId == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTint(Control) 控件未登记节点 ID: {Name}", control.Name);
+            return false;
+        }
+        return SetTintCore(session, nodeId, tint);
+    }
+
+    /// <summary>
+    /// SetTint 三重载共用核心：先校验颜色（非法直接失败，模型不动），再写会话数据模型
+    /// （防 relayout 回退），最后走与 relayout 重放相同的刷新路径。
+    /// </summary>
+    internal static bool SetTintCore(DjuiLayoutSessionV6 session, string nodeInstanceId, string? tint)
+    {
+        var normalized = string.IsNullOrWhiteSpace(tint) ? null : tint.Trim();
+        if (normalized != null && !DjuiTreeBuilderV6.TryParseColor(normalized, out _))
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTint 颜色无法解析: {Tint}（节点 {Node}，支持 #RRGGBB / #RRGGBBAA / rgba()）", tint, nodeInstanceId);
+            return false;
+        }
+        var control = session.GetControl<Control>(nodeInstanceId);
+        if (control == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: SetTint 节点不存在: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+            return false;
+        }
+        DjuiNodeV6? node;
+        if (session.UpdateAuthoredTint(nodeInstanceId, normalized))
+        {
+            node = FindNode(session.CurrentPage.Root, nodeInstanceId);
+            if (node == null)
+            {
+                Game.Logger.LogWarning("DJUI v6: SetTint 当前解析视图缺节点: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+                return false;
+            }
+        }
+        else
+        {
+            node = DjuiTreeBuilderV6.FindCloneNode(control);
+            if (node == null)
+            {
+                Game.Logger.LogWarning("DJUI v6: SetTint 克隆节点记录缺失: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, nodeInstanceId);
+                return false;
+            }
+            node.Appearance ??= new DjuiAppearanceV6();
+            node.Appearance.ImageTint = normalized;
+        }
+        var owner = session.Owner;
+        if (owner == null) return true;
+        DjuiTreeBuilderV6.ApplyImageRefresh(control, node, owner.ImageVisuals, owner.ButtonStates);
+        // 进度条染色不走 imageVisuals（ApplyImageRefresh 对 Progress 静默跳过），
+        // 复用建树期的 Progress 分支才能覆盖放射状（宿主原生图）与线性（进度条专属子层）两条路径
+        if (control is Progress progressTarget)
+        {
+            if (progressTarget.ProgressionMode is ProgressionMode.Clockwise or ProgressionMode.CounterClockwise)
+            {
+                DjuiTreeBuilderV6.ApplyNativeProgressImage(progressTarget, node.Appearance);
+            }
+            else
+            {
+                owner.ProgressVisuals.Apply(node.Id, progressTarget, node.Appearance);
+            }
+        }
+        return true;
+    }
+
     public static bool IsOpen(string pageId)
         => SingletonInstances.TryGetValue(pageId, out var id) && Instances.ContainsKey(id);
 

@@ -36,6 +36,11 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
 
         visual.Image = image;
         visual.Desaturated = appearance?.Desaturated ?? false;
+        // 图片染色：引擎乘算 tint 只发生在同一 Control 的 Background×Image 之间（跨控件不作用，
+        // 1003 探针实测），必须写在画图的 visual 子层上而不是宿主。空/非法＝撤销染色。
+        visual.Background = DjuiTreeBuilderV6.TryParseColor(appearance?.ImageTint, out var tintColor)
+            ? tintColor
+            : null;
         visual.ImageFlipX = appearance?.ImageFlipX ?? false;
         visual.ImageFlipY = appearance?.ImageFlipY ?? false;
         // 图片实际绘制在 visual 子节点；九宫格边距也必须落在该节点，

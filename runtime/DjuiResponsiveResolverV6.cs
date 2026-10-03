@@ -52,6 +52,7 @@ public static class DjuiResponsiveResolverV6
             case "transform.width": (node.Transform ??= new()).Width = Number(value, path); break;
             case "transform.height": (node.Transform ??= new()).Height = Number(value, path); break;
             case "appearance.image": (node.Appearance ??= new()).Image = NullableString(value, path); break;
+            case "appearance.imageTint": (node.Appearance ??= new()).ImageTint = NullableString(value, path); break;
             case "appearance.background": (node.Appearance ??= new()).Background = NullableString(value, path); break;
             case "appearance.imageFit": (node.Appearance ??= new()).ImageFit = EnumString(value, path, "stretch", "contain", "cover"); break;
             case "appearance.focalX": (node.Appearance ??= new()).FocalX = Unit(value, path); break;

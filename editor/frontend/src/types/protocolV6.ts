@@ -40,7 +40,7 @@ export interface WindowConfigV6 {
 export const RESPONSIVE_OVERRIDE_PATHS = [
   'basic.visible', 'basic.disabled',
   'transform.x', 'transform.y', 'transform.width', 'transform.height',
-  'appearance.image', 'appearance.background', 'appearance.imageFit',
+  'appearance.image', 'appearance.imageTint', 'appearance.background', 'appearance.imageFit',
   'appearance.focalX', 'appearance.focalY', 'appearance.borderThickness', 'appearance.borderColor',
   'text.text', 'text.fontSize', 'text.textColor', 'text.strokeSize', 'text.strokeColor',
   'text.bold', 'text.font', 'text.textWrap',
@@ -60,7 +60,7 @@ export interface NodeV6 {
     rotation?: number; scale?: [number, number]; opacity?: number; zIndex?: number
   }
   appearance?: {
-    image?: string | null; background?: string | null; imageMask?: string | null
+    image?: string | null; imageTint?: string | null; background?: string | null; imageMask?: string | null
     imageFit?: ImageFitV6; focalX?: number; focalY?: number
     sourceSize?: PageLocalSizeV6 | null
     borderThickness?: number | null; borderColor?: string | null

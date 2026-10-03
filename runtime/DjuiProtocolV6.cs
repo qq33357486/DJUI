@@ -119,6 +119,9 @@ public sealed class DjuiAppearanceV6
 {
     [JsonPropertyName("image")] public string? Image { get; set; }
     [JsonPropertyName("background")] public string? Background { get; set; }
+    /// <summary>图片染色（乘算 tint，hex 颜色串）。引擎语义：Background 画刷与 Image 同控件时乘算混合、
+    /// 只作用图片像素（透明处保持透明，探针 1003 实测），跨控件不作用——故必须落在 visual 子层上。</summary>
+    [JsonPropertyName("imageTint")] public string? ImageTint { get; set; }
     [JsonPropertyName("imageMask")] public string? ImageMask { get; set; }
     [JsonPropertyName("slicedEdges")] public float[]? SlicedEdges { get; set; }
     [JsonPropertyName("imageBlurLevel")] public float? ImageBlurLevel { get; set; }

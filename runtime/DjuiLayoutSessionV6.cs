@@ -21,6 +21,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     private readonly Dictionary<Control, string> _controlIds = new();
     // 宽屏 override 冲突告警去重（同节点只提醒一次，先例：DjuiImageVisualLayerV6._warnedMissingSourceSize）
     private readonly HashSet<string> _warnedImageOverride = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _warnedTintOverride = new(StringComparer.Ordinal);
     // Control → 所属会话的进程级弱表：控件 Dispose 后条目自动消失，无泄漏（先例：DjuiButtonStateRegistryV6.States）
     private static readonly ConditionalWeakTable<Control, DjuiLayoutSessionV6> OwnerIndex = new();
     private Action<DjuiNodeV6, Control, float>? _nodeUpdater;
@@ -101,6 +102,36 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
             {
                 viewNode.Appearance ??= new DjuiAppearanceV6();
                 viewNode.Appearance.Image = normalized;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// SetTint 的模型写入点（与 UpdateAuthoredImage 同构）：写穿 _page 与 CurrentPage 两棵树的
+    /// appearance.ImageTint，relayout 重放时由 imageVisuals.Apply / progressVisuals.Apply 消费。
+    /// 空串统一归一为 null（撤销染色）。返回节点是否在 authored 树中。
+    /// </summary>
+    internal bool UpdateAuthoredTint(string nodeInstanceId, string? tint)
+    {
+        var normalized = string.IsNullOrWhiteSpace(tint) ? null : tint;
+        if (_warnedTintOverride.Add(nodeInstanceId)
+            && _page.Responsive?.Wide.Overrides.TryGetValue(nodeInstanceId, out var fields) == true
+            && fields.ContainsKey("appearance.imageTint"))
+        {
+            Game.Logger.LogWarning("DJUI v6: 节点 {Node} 声明了宽屏覆盖 appearance.imageTint，宽屏态 SetTint 染色不生效（请改用双节点法或去掉该覆盖）", nodeInstanceId);
+        }
+        var node = FindNodeIn(_page.Root, nodeInstanceId);
+        if (node == null) return false;
+        node.Appearance ??= new DjuiAppearanceV6();
+        node.Appearance.ImageTint = normalized;
+        if (!ReferenceEquals(CurrentPage, _page))
+        {
+            var viewNode = FindNodeIn(CurrentPage.Root, nodeInstanceId);
+            if (viewNode != null)
+            {
+                viewNode.Appearance ??= new DjuiAppearanceV6();
+                viewNode.Appearance.ImageTint = normalized;
             }
         }
         return true;

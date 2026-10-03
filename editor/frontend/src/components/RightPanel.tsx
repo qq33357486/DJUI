@@ -491,6 +491,21 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                   <Switch size="small" checked={app.desaturated ?? false} onChange={v => updateNodeField(node.id, 'appearance.desaturated', v)} />
                 </FieldRow>
                 <SectionTitle color={MODULE_COLORS.appearance}>颜色</SectionTitle>
+                {app.image && (
+                  <FieldRow label="图片染色">
+                    <div style={{ display: 'flex', gap: 4, width: '100%', alignItems: 'center' }}>
+                      <PaletteColorPicker
+                        value={app.imageTint || '#FFFFFFFF'}
+                        onChange={hex => updateNodeField(node.id, 'appearance.imageTint', hex)}
+                      />
+                      {app.imageTint && (
+                        <Button size="small" onClick={() => updateNodeField(node.id, 'appearance.imageTint', null)}>
+                          清除
+                        </Button>
+                      )}
+                    </div>
+                  </FieldRow>
+                )}
                 <FieldRow label="背景色">
                   <PaletteColorPicker
                     value={app.background || '#00000000'}

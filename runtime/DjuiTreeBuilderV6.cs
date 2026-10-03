@@ -373,16 +373,20 @@ public static class DjuiTreeBuilderV6
     private static bool IsRadial(Progress progress)
         => progress.ProgressionMode is ProgressionMode.Clockwise or ProgressionMode.CounterClockwise;
 
-    private static void ApplyNativeProgressImage(Progress target, DjuiAppearanceV6? appearance)
+    /// <summary>放射状进度条原生路径应用（建树与 SetTint 运行期共用）。</summary>
+    internal static void ApplyNativeProgressImage(Progress target, DjuiAppearanceV6? appearance)
     {
         target.Image = appearance?.Image ?? "";
+        // 放射状进度条图在宿主自身（原生裁剪路径），染色直接落宿主 Background（同控件乘算）
+        target.Background = TryParseColor(appearance?.ImageTint, out var tintColor) ? tintColor : null;
         target.SlicedEdges = appearance?.SlicedEdges is { Length: 4 } edges
             ? new Thickness(edges[0], edges[1], edges[2], edges[3])
             : new Thickness(0, 0, 0, 0);
         target.ClipContent = appearance?.ClipContent ?? false;
     }
 
-    private static bool TryParseColor(string? raw, out Color color)
+    /// <summary>hex / rgba() 颜色串解析（background、imageTint 共用）。解析失败返回 false、color 为 White。</summary>
+    internal static bool TryParseColor(string? raw, out Color color)
     {
         color = Color.White;
         if (string.IsNullOrWhiteSpace(raw)) return false;

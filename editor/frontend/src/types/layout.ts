@@ -37,6 +37,8 @@ export interface DjuiAppearance {
   /** Runtime fallback because StarEngine exposes only a texture path, not synchronous intrinsic dimensions. */
   sourceSize?: { width: number; height: number } | null
   background?: string | null
+  /** 图片染色（乘算 tint）：图片像素×颜色，白色素材=变成该色，透明区保持透明；仅在有图时生效 */
+  imageTint?: string | null
   borderThickness?: number | null
   borderColor?: string | null
   imageMask?: string | null

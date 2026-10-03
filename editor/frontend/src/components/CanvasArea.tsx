@@ -107,6 +107,45 @@ function positiveNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+/**
+ * 解析图片染色色值（#RGB / #RRGGBB / #RRGGBBAA）为 rgb 串与 alpha。
+ * 引擎语义（1003 探针实锤）：img × tintRGB × α + img × (1-α)，透明像素保持透明；
+ * Konva 里等价于叠一层 multiply Rect：fill=rgb, opacity=α（画布合成即先乘后按 α 混回原图）。
+ */
+function parseTint(tint?: string | null): { rgb: string; alpha: number } | null {
+  if (!tint) return null
+  const value = tint.trim()
+  let hex: string | null = null
+  if (/^#[0-9a-f]{3}$/i.test(value)) hex = value.slice(1).split('').map((c) => c + c).join('')
+  else if (/^#[0-9a-f]{6}$/i.test(value)) hex = value.slice(1)
+  else if (/^#[0-9a-f]{8}$/i.test(value)) hex = value.slice(1)
+  if (!hex) return null
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  const alpha = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1
+  if (alpha <= 0) return null
+  return { rgb: `${r},${g},${b}`, alpha: Math.min(alpha, 1) }
+}
+
+/** 染色覆盖层：乘算 Rect，几何与所给图片矩形一致（须渲染在图片之上、同一裁剪 Group 内）。 */
+function TintRect({ tint, x, y, width, height }: { tint?: string | null; x: number; y: number; width: number; height: number }) {
+  const parsed = parseTint(tint)
+  if (!parsed || width <= 0 || height <= 0) return null
+  return (
+    <Rect
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      fill={`rgb(${parsed.rgb})`}
+      opacity={parsed.alpha}
+      globalCompositeOperation="multiply"
+      listening={false}
+    />
+  )
+}
+
 function getTextPreview(node: UiNode, width: number, height: number, defaultFont?: string | null) {
   const text = node.text?.text ?? ''
   const baseFontSize = node.text?.fontSize ?? 16
@@ -314,7 +353,7 @@ function drawRoundedClipPath(ctx: any, x: number, y: number, width: number, heig
   ctx.closePath()
 }
 
-function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, value, mode, progressRotation, imagePath, imageFit, sourceSize, focalX, focalY, sliceEdges, cornerRadius }: {
+function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, value, mode, progressRotation, imagePath, imageFit, sourceSize, focalX, focalY, sliceEdges, cornerRadius, imageTint }: {
   image: HTMLImageElement | null
   x: number
   y: number
@@ -332,6 +371,7 @@ function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, v
   focalY: number
   sliceEdges?: SliceEdges
   cornerRadius?: number
+  imageTint?: string | null
 }) {
   const progress = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
   if (progress <= 0 || width <= 0 || height <= 0) return null
@@ -415,6 +455,10 @@ function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, v
           listening={false}
         />
       )}
+      {/* 进度条染色预览：与 Runtime 一致（线性/放射都乘算在进度图上） */}
+      {useNineSlice && image && sliceEdges
+        ? <TintRect tint={imageTint} x={0} y={0} width={width} height={height} />
+        : <TintRect tint={imageTint} x={fit.x} y={fit.y} width={fit.width} height={fit.height} />}
     </Group>
   )
 }
@@ -796,6 +840,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
             clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
           >
             {content}
+            <TintRect tint={app.imageTint} x={0} y={0} width={width} height={height} />
           </Group>
         )
       })()}
@@ -1118,6 +1163,7 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
           focalY={app.focalY ?? 0.5}
           sliceEdges={sliceEdges}
           cornerRadius={app.cornerRadius}
+          imageTint={app.imageTint}
         />
       ) : hasImage && effectiveImage && (() => {
         const radius = positiveNumber(app.cornerRadius)
@@ -1166,6 +1212,10 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
             clipFunc={radius > 0 ? ((ctx) => drawRoundedClipPath(ctx, 0, 0, width, height, radius)) : undefined}
           >
             {content}
+            {/* 染色层与 Runtime 同语义：乘算 tint 盖在图片上（透明区不受影响，multiply 只作用已绘像素） */}
+            {useNineSlice && sliceEdges
+              ? <TintRect tint={app.imageTint} x={0} y={0} width={width} height={height} />
+              : <TintRect tint={app.imageTint} x={fit.x} y={fit.y} width={fit.width} height={fit.height} />}
           </Group>
         )
       })()}

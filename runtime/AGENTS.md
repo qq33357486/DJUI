@@ -82,6 +82,32 @@ DjuiWindowManagerV6.SetImage(格子控件引用, 品质底图路径);   // 直�
 4. 克隆体无数据绑定（克隆不绑行为），换图只能走 `SetImage(Control, …)`
 5. **带子件的节点，运行时建层或「撤销图片后再设回」都会把图片绘制在子件之上**（Z 序与编辑器及初始建树相反，且不会被重放纠正）：空图片的容器节点首次换图、以及任何节点 `SetImage(null)` 撤销后再设回，都会触发。**带子件的节点应避免 SetImage(null) 撤销操作**；确需恢复正确层级只能销毁重建窗口（池淘汰/CloseAll 后重开）
 
+## 运行时染色（SetTint）
+
+游戏代码可在运行时给节点图片染上乘算色，**只染色不动图片与排版**。三个公开重载与 SetImage 一一同构：
+
+- `SetTint(pageId, nodeInstanceId, tint)`：单例页口径（业务最常用）
+- `SetTintByInstance(windowInstanceId, nodeInstanceId, tint)`：`OpenInstance` 多实例页口径
+- `SetTint(control, tint)`：直控口径，克隆体 / authored 节点通吃
+
+行为口径：
+
+- 染色是**乘算**：图片像素 × 颜色。白色素材＝直接变成该颜色（一套白图多色复用，如星级星、品质框）；**透明区域保持透明**，不会出现色块
+- 颜色带 alpha 时按 `原图×颜色×α + 原图×(1-α)` 混合（半透明染色）
+- `tint` 传 `null`/空串＝撤销染色；格式 `#RRGGBB` / `#RRGGBBAA` / `rgba()`，非法值返回 false 并记 Warning
+- 换图不丢染色：`SetImage` 换图后 tint 沿用（同一 visual 层）；Button 染 normal 底图所在 visual，未配置的 hover/pressed/disabled 态自动跟随
+- Progress 进度条**支持染色**（放射状与线性都走建树同款通道），这点与 SetImage 不同（SetImage 不支持 Progress）
+- 页面 JSON 里写 `appearance.imageTint` 即建树期静态染色（编辑器右侧面板「图片染色」），运行时 SetTint 覆盖之
+- 已开窗口染色后转屏/重布局不回退（同步写入布局数据模型）；窗口池销毁重建后运行时值丢失，需在 `OnCreate`/`OnOpen` 重放（同 SetImage 口径）
+- 节点声明了宽屏覆盖 `appearance.imageTint` 时宽屏态 SetTint 不生效（同 SetImage 的宽屏限制）
+
+```csharp
+// 星级星图染色：白色星母版一套图，按品质运行时变色
+DjuiWindowManagerV6.SetTint(页面标识.艺人列表, "star_icon_3", "#FFC53D");   // 金
+DjuiWindowManagerV6.SetTint(格子控件引用, "#7B61FF");                      // 直控口径（克隆格）
+DjuiWindowManagerV6.SetTint(页面标识.艺人列表, "star_icon_3", null);       // 撤销染色
+```
+
 ## 响应式宽屏层（基础层 / 宽屏层）
 
 页面分两层：**基础层**（页面 JSON 里的节点与属性本体）与**宽屏层**（`responsive.wide.overrides` 差异补丁表）。运行时按**方向感知**规则自动选层：
@@ -96,7 +122,7 @@ DjuiWindowManagerV6.SetImage(格子控件引用, 品质底图路径);   // 直�
 |---|---|
 | 基础 | `basic.visible`、`basic.disabled` |
 | 变换 | `transform.x` / `y` / `width` / `height` |
-| 外观 | `appearance.image`、`background`、`imageFit`、`focalX`、`focalY`、`borderThickness`、`borderColor` |
+| 外观 | `appearance.image`、`imageTint`、`background`、`imageFit`、`focalX`、`focalY`、`borderThickness`、`borderColor` |
 | 文本 | `text.text`、`fontSize`、`textColor`、`strokeSize`、`strokeColor`、`bold`、`font`、`textWrap` |
 | 按钮/进度 | `button.imageHover`、`button.imagePressed`、`button.imageDisabled`、`progress.value` |
 

@@ -497,6 +497,10 @@ public class DjuiUiLoader
                 node.Appearance ??= new DjuiAppearanceJson();
                 node.Appearance.Background = ReadString(value);
                 break;
+            case "appearance.imageTint":
+                node.Appearance ??= new DjuiAppearanceJson();
+                node.Appearance.ImageTint = ReadString(value);
+                break;
             case "appearance.borderThickness":
                 node.Appearance ??= new DjuiAppearanceJson();
                 node.Appearance.BorderThickness = ReadFloat(value);

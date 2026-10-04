@@ -67,6 +67,8 @@ internal sealed class DjuiProgressVisualLayerV6 : IDisposable, IThinker
         if (Owners.TryGetValue(progress, out var owner)) owner.Refresh(progress, force: true);
     }
 
+    internal void RefreshGeometry(Progress progress) => Refresh(progress, force: true);
+
     public void Think(int delta)
     {
         if (_disposed) return;

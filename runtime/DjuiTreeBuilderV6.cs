@@ -211,6 +211,9 @@ public static class DjuiTreeBuilderV6
             var local = parentRect is { } pr ? new DjuiRectV6(rect.X - pr.X, rect.Y - pr.Y, rect.Width, rect.Height) : rect;
             DjuiLayoutSessionV6.ApplyRect(control, local);
         }
+        // BuildNode 初次建层时尚无解算宽高；克隆不走 authored Relayout，必须在返回前补齐绘制矩形。
+        imageVisuals.RefreshGeometry(control);
+        if (control is Progress progress) progressVisuals.RefreshGeometry(progress);
         DjuiRectV6? ownRect = solved.TryGetValue(origin.Id, out var own) ? own : null;
         for (var i = 0; i < node.Children.Count; i++)
         {

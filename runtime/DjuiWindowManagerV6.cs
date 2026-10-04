@@ -446,6 +446,33 @@ public static class DjuiWindowManagerV6
     private static ulong _nextCloneSeq;
 
     /// <summary>
+    /// 按当前设定 Width/Height 立即同步 DJUI 图片/进度条视觉矩形，默认包括已挂接的子控件。
+    /// 不重解算布局、不写页面模型、不恢复显隐或按钮状态；支持 authored 与克隆控件。
+    /// 直接修改显式尺寸后无需调用也会在下次图片同步 Think 自动更新；需要同步完成时调用本方法。
+    /// 返回 false 表示控件无效或不属于存活的 DJUI 树。Auto/百分比实际布局尺寸不在此契约内。
+    /// </summary>
+    public static bool RefreshVisuals(Control control, bool recursive = true)
+    {
+        if (control == null || !control.IsValid) return false;
+        var session = DjuiLayoutSessionV6.FindOwner(control);
+        var owner = session?.Owner;
+        if (session?.FindNodeId(control) == null) return false;
+        if (owner == null) return false;
+        RefreshVisualSubtree(control, owner, recursive);
+        return true;
+    }
+
+    private static void RefreshVisualSubtree(Control control, DjuiTreeInstanceV6 owner, bool recursive)
+    {
+        if (!control.IsValid) return;
+        owner.ImageVisuals.RefreshGeometry(control);
+        if (control is Progress progress) owner.ProgressVisuals.RefreshGeometry(progress);
+        if (!recursive) return;
+        foreach (var child in control.Children ?? [])
+            RefreshVisualSubtree(child, owner, recursive: true);
+    }
+
+    /// <summary>
     /// 复制窗口内一个节点子树，返回一份新构建的控件实例（不挂树、不绑 action/音效/数据绑定——如同 new）。
     /// 克隆体沿用源子树当前解算矩形，初始与源完全重叠；父级/位置/显隐由调用方管理。
     /// 克隆体登记进布局会话但 authored 树不变——relayout（转屏/缩放）不作用于克隆体，需要跟随重排时销毁重建。

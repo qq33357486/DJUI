@@ -82,6 +82,27 @@ DjuiWindowManagerV6.SetImage(格子控件引用, 品质底图路径);   // 直�
 4. 克隆体无数据绑定（克隆不绑行为），换图只能走 `SetImage(Control, …)`
 5. **带子件的节点，运行时建层或「撤销图片后再设回」都会把图片绘制在子件之上**（Z 序与编辑器及初始建树相反，且不会被重放纠正）：空图片的容器节点首次换图、以及任何节点 `SetImage(null)` 撤销后再设回，都会触发。**带子件的节点应避免 SetImage(null) 撤销操作**；确需恢复正确层级只能销毁重建窗口（池淘汰/CloseAll 后重开）
 
+## 克隆与动态尺寸的图片同步（Runtime 0.8.10）
+
+`CloneControl` 返回前会按克隆的最终解算矩形同步预置图片与线性进度条的绘制层，无需重复设置同一张图片。
+
+- 直接设置 DJUI 控件的显式 `Width/Height` 后，普通图片在下一次 Runtime 图片同步 `Think` 自动重算矩形；隐藏或未挂树的控件同样同步。线性进度条沿用原有帧同步机制。
+- 需要本次调用内同步完成时，使用 `public static bool DjuiWindowManagerV6.RefreshVisuals(Control control, bool recursive = true)`；默认刷新控件及当前已挂接的子树，`recursive: false` 只刷新本控件。无效控件或不属于存活 DJUI 会话的控件返回 `false`。
+- 接口只同步现有绘制层：不改宿主位置/尺寸、显隐、页面数据或锚点/拉伸约束，不触发 authored 布局重排，不换图片；图片比例、sourceSize、焦点、九宫格、染色和按钮当前状态沿用。放射状进度条仍由引擎原生渲染。
+- 契约是 **显式设定的 Width/Height**，不保证引擎 Auto/百分比布局计算出的 `ActualSize` 同步。业务修改多个子控件时，先挂接到克隆树、批量设完尺寸，再刷新克隆根。仅改变 Position/Visible 无需刷新。
+- authored 控件的业务尺寸修改是临时覆盖，后续 authored Relayout 仍按页面模型重新布局；克隆体保持既有「不参与 authored Relayout」语义。尺寸刷新不缩放或重新排布业务子控件。
+- 新 API 需 Runtime ≥ 0.8.10；既有 CloneControl/SetImage/SetTint 调用兼容，预置图片的自动同步不要求修改业务代码。同步 Runtime 与脚本区后再接入新 API。
+
+```csharp
+var cell = DjuiWindowManagerV6.CloneControl(windowInstanceId, templateNodeId);
+cell.Parent = list;
+cell.Width = 96;
+cell.Height = 96;
+// 子控件 Position/Width/Height 按业务规则设置完毕之后：
+DjuiWindowManagerV6.RefreshVisuals(cell); // 本次调用内同步整棵克隆子树
+badge.Visible = true;                    // 预置图无需重复 SetImage
+```
+
 ## 运行时染色（SetTint）
 
 游戏代码可在运行时给节点图片染上乘算色，**只染色不动图片与排版**。三个公开重载与 SetImage 一一同构：

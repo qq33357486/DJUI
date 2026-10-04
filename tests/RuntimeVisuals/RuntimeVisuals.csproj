@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>CLIENT</DefineConstants>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- 现有窗口池 TryReusePooled 的可空 out 标注，不属于本回归范围。 -->
+    <WarningsNotAsErrors>CS8603</WarningsNotAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../runtime/DjuiProtocolV6.cs" Link="Runtime/DjuiProtocolV6.cs" />
+    <Compile Include="../../runtime/DjuiCanvasV6.cs" Link="Runtime/DjuiCanvasV6.cs" />
+    <Compile Include="../../runtime/DjuiResponsiveResolverV6.cs" Link="Runtime/DjuiResponsiveResolverV6.cs" />
+    <Compile Include="../../runtime/DjuiTemplateExpanderV6.cs" Link="Runtime/DjuiTemplateExpanderV6.cs" />
+    <Compile Include="../../runtime/DjuiLayoutSessionV6.cs" Link="Runtime/DjuiLayoutSessionV6.cs" />
+    <Compile Include="../../runtime/DjuiTreeBuilderV6.cs" Link="Runtime/DjuiTreeBuilderV6.cs" />
+    <Compile Include="../../runtime/DjuiWindowManagerV6.cs" Link="Runtime/DjuiWindowManagerV6.cs" />
+    <Compile Include="../../runtime/DjuiImageVisualLayerV6.cs" Link="Runtime/DjuiImageVisualLayerV6.cs" />
+    <Compile Include="../../runtime/DjuiProgressVisualLayerV6.cs" Link="Runtime/DjuiProgressVisualLayerV6.cs" />
+    <Compile Include="../../runtime/DjuiButtonStateV6.cs" Link="Runtime/DjuiButtonStateV6.cs" />
+  </ItemGroup>
+</Project>

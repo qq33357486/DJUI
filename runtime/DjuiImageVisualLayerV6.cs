@@ -9,11 +9,25 @@ namespace DjuiRuntime;
 /// Manages non-authored image children. StarEngine's public Texture API exposes only Path,
 /// so contain/cover use appearance.sourceSize as the synchronous intrinsic-size contract.
 /// </summary>
-internal sealed class DjuiImageVisualLayerV6 : IDisposable
+internal sealed class DjuiImageVisualLayerV6 : IDisposable, IThinker
 {
     internal const string ReservedNamePrefix = "__djui.v6.visual.image.";
-    private readonly Dictionary<Control, Panel> _visuals = new();
+    private readonly Dictionary<Control, State> _visuals = new();
     private readonly HashSet<string> _warnedMissingSourceSize = new(StringComparer.Ordinal);
+    private bool _disposed;
+
+    public bool DoesThink { get; set; } = true;
+
+    public DjuiImageVisualLayerV6() => Game.RegisterThinker(this);
+
+    private sealed class State(Panel visual, string nodeId)
+    {
+        public Panel Visual { get; } = visual;
+        public string NodeId { get; } = nodeId;
+        public DjuiAppearanceV6? Appearance { get; set; }
+        public float LastWidth { get; set; } = float.NaN;
+        public float LastHeight { get; set; } = float.NaN;
+    }
 
     public void Apply(string nodeId, Control authored, DjuiAppearanceV6? appearance)
     {
@@ -27,12 +41,15 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
 
         // The authored control remains layout/control only; rendering lives in one persistent static child.
         authored.Image = "";
-        if (!_visuals.TryGetValue(authored, out var visual))
+        if (!_visuals.TryGetValue(authored, out var state))
         {
-            visual = new Panel { Name = ReservedNamePrefix + nodeId, IsStatic = true };
-            visual.Parent = authored;
-            _visuals.Add(authored, visual);
+            var created = new Panel { Name = ReservedNamePrefix + nodeId, IsStatic = true };
+            state = new State(created, nodeId);
+            created.Parent = authored;
+            _visuals.Add(authored, state);
         }
+        state.Appearance = appearance;
+        var visual = state.Visual;
 
         visual.Image = image;
         visual.Desaturated = appearance?.Desaturated ?? false;
@@ -49,15 +66,26 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
             ? new Thickness(edges[0], edges[1], edges[2], edges[3])
             : new Thickness(0, 0, 0, 0);
 
+        // cover/圆角需要宿主裁剪；尺寸同步只更新矩形，不回退业务后续设置的裁剪属性。
+        authored.ClipContent = string.Equals(appearance?.ImageFit, "cover", StringComparison.Ordinal)
+            || (appearance?.CornerRadius ?? 0f) > 0f || (appearance?.ClipContent ?? false);
+
+        RefreshGeometry(authored);
+    }
+
+    // 仅重算图片矩形：不重放 normal 图、灰度、染色或宿主显隐/透明度，保持按钮当前状态。
+    internal void RefreshGeometry(Control authored)
+    {
+        if (_disposed || !authored.IsValid || !_visuals.TryGetValue(authored, out var state)) return;
+        var visual = state.Visual;
+        if (!visual.IsValid) return;
+        var appearance = state.Appearance;
         var fit = appearance?.ImageFit ?? "stretch";
         var cover = string.Equals(fit, "cover", StringComparison.Ordinal);
-        // 圆角裁剪与进度条视觉层同款（宿主 CornerRadius + ClipContent）：宿主圆角由 TreeBuilder.ApplyAppearance
-        // 设置，但贴图绘制在子 visual 上，宿主不裁剪则圆角对图片完全无效。
-        var cornerRadius = appearance?.CornerRadius ?? 0f;
-        authored.ClipContent = cover || cornerRadius > 0f || (appearance?.ClipContent ?? false);
-
         var parentWidth = Math.Max(0, authored.Width);
         var parentHeight = Math.Max(0, authored.Height);
+        state.LastWidth = parentWidth;
+        state.LastHeight = parentHeight;
         var x = 0f;
         var y = 0f;
         var width = parentWidth;
@@ -75,27 +103,49 @@ internal sealed class DjuiImageVisualLayerV6 : IDisposable
             x = (parentWidth - width) * focalX;
             y = (parentHeight - height) * focalY;
         }
-        else if (!string.Equals(fit, "stretch", StringComparison.Ordinal) && _warnedMissingSourceSize.Add(nodeId + "\n" + image))
+        else if (!string.Equals(fit, "stretch", StringComparison.Ordinal) && _warnedMissingSourceSize.Add(state.NodeId + "\n" + appearance?.Image))
         {
-            Game.Logger.LogWarning("DJUI v6: node {NodeId} uses imageFit={ImageFit} without positive appearance.sourceSize; falling back to stretch because StarEngine does not expose synchronous intrinsic texture dimensions.", nodeId, fit);
+            Game.Logger.LogWarning("DJUI v6: node {NodeId} uses imageFit={ImageFit} without positive appearance.sourceSize; falling back to stretch because StarEngine does not expose synchronous intrinsic texture dimensions.", state.NodeId, fit);
         }
 
         DjuiLayoutSessionV6.ApplyRect(visual, new DjuiRectV6(x, y, width, height));
     }
 
+    public void Think(int delta)
+    {
+        if (_disposed) return;
+        // 与线性进度条同样按设定宽高同步，不依赖布局后的 OnSizeChanged（隐藏/未挂树也要同步）。
+        List<Control>? invalid = null;
+        foreach (var (authored, state) in _visuals)
+        {
+            if (!authored.IsValid || !state.Visual.IsValid)
+            {
+                (invalid ??= new()).Add(authored);
+                continue;
+            }
+            if (state.LastWidth != Math.Max(0, authored.Width) || state.LastHeight != Math.Max(0, authored.Height))
+                RefreshGeometry(authored);
+        }
+        if (invalid != null) foreach (var authored in invalid) _visuals.Remove(authored);
+    }
+
     /// <summary>取回宿主对应的 visual 子 Panel（未创建图片层时为 null）。按钮状态机用它切换状态图。</summary>
-    internal Panel? GetVisual(Control authored) => _visuals.TryGetValue(authored, out var visual) ? visual : null;
+    internal Panel? GetVisual(Control authored) => _visuals.TryGetValue(authored, out var state) ? state.Visual : null;
 
     private void Remove(Control authored)
     {
         authored.Image = "";
-        if (!_visuals.Remove(authored, out var visual)) return;
-        visual.Dispose();
+        if (!_visuals.Remove(authored, out var state)) return;
+        state.Visual.Dispose();
     }
 
     public void Dispose()
     {
-        foreach (var visual in _visuals.Values) visual.Dispose();
+        if (_disposed) return;
+        _disposed = true;
+        DoesThink = false;
+        Game.UnregisterThinker(this);
+        foreach (var state in _visuals.Values) if (state.Visual.IsValid) state.Visual.Dispose();
         _visuals.Clear();
         _warnedMissingSourceSize.Clear();
     }

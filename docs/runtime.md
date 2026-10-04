@@ -2,6 +2,8 @@
 
 DJUI Runtime 是 `runtime/*.cs` 中的一组 C# 源码。编辑器会把这些文件复制到 StarEngine 工程：
 
+Runtime 0.8.10 起，克隆预置图片会在返回前同步绘制尺寸；直接修改显式 Width/Height 后也会自动同步。需要批量调整后立即刷新整棵子树时，调用 `DjuiWindowManagerV6.RefreshVisuals(control, recursive: true)`。使用契约和限制见 [Runtime 随附文档](../runtime/AGENTS.md#克隆与动态尺寸的图片同步runtime-0810)。
+
 ```text
 StarEngine 工程/src/DjuiRuntime/
 ```

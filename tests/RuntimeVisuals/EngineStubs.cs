@@ -87,6 +87,8 @@ namespace GameUI.Control
         public event EventHandler? OnPointerExited;
         public event EventHandler<PointerEventArgs>? OnPointerPressed;
         public event EventHandler<PointerEventArgs>? OnPointerReleased;
+        public event EventHandler<PointerEventArgs>? OnPointerClicked;
+        public void Click() => OnPointerClicked?.Invoke(this, new());
         public void Hover() => OnPointerEntered?.Invoke(this, EventArgs.Empty);
         public void Exit() => OnPointerExited?.Invoke(this, EventArgs.Empty);
         public void Press() => OnPointerPressed?.Invoke(this, new());
@@ -120,6 +122,7 @@ namespace GameUI.Control.Extensions
     public static class StubExtensions
     {
         public static void FullScreen(this Control control) { control.Width = 900; control.Height = 1600; }
+        public static void FillParent(this Control control) { control.Width = control.Parent?.Width ?? 0; control.Height = control.Parent?.Height ?? 0; }
         public static void AddTouchBehavior(this Control control, float scale, bool animation, bool longPress) { }
         public static void RemoveFromVisualTreeAndParent(this Control control) => control.Parent = null;
         public static void AddToVisualTree(this Control control) { }

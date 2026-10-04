@@ -54,6 +54,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        DjuiTransitionPlayer.Stop(Root);
         foreach (var registration in _bindingRegistrations) registration.Dispose();
         _bindingRegistrations.Clear();
 

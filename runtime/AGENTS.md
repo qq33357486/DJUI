@@ -129,6 +129,23 @@ DjuiWindowManagerV6.SetTint(格子控件引用, "#7B61FF");                     
 DjuiWindowManagerV6.SetTint(页面标识.艺人列表, "star_icon_3", null);       // 撤销染色
 ```
 
+## 窗口转场（Runtime 0.9.0）
+
+`mode: popup` 的内置 pop / slide / fade 转场自动按布局约束协调，无需新增动效目标配置：
+
+- 根层节点声明 `stretch.style: Both`，四边 margins 为零（省略按零处理），且 `anchor.target` 为 `screen` 或 `parent`（省略按 parent），转场中保持原有位置和尺寸，仅继承根节点透明度变化。带非 None 宽高比约束的节点不属于铺满层。
+- 其余根层内容以页面中心执行同一个缩放/平移变换。独立关闭提示与主体的相对位置一起变化；全屏层下的提示随其原有父层固定，不搬节点、不改层级。
+- 因此 popup 的主体如果本身也是双向零边距铺满层（例如全屏拍摄 sheet），自然仅淡入淡出。`fullscreen` 页面维持原有整根转场，不按模态规则分层。
+- 保留全部节点的 Visible 和子层 Opacity；隐藏概率层、透明度零层不会被转场恢复成可见。遮罩 action 原样执行，队列继续等业务语义仍由业务处理。
+- 关闭期间新增无视觉的全屏输入阻挡，动画结束并触发 OnClose 后摘栈；取消关闭移除阻挡，不触发 OnClose/OnOpen。重复关闭被合并，池复用与多实例销毁会清理临时变换。
+- 转屏时先撤销转场几何，按新视口解算，再继续同一进度。控件 ID 寻址、父子树、克隆、action 和绑定保持原有契约。
+
+绝对定位控件的 slide 转场使用 Position（而非被绝对定位忽略的 Margin）。纯淡入淡出和 none 沿用已有预设与时序。
+
+自定义 `DjuiTransitionPreset` 默认保留单控件行为；只包含统一轴向缩放/平移/透明度，且缩放与节点旋转可交换的自定义预设，可显式传 `coordinateWindowContent: true`。不要将旋转、重排或任意属性动画声明为该模式。内置 pop 为统一等比例缩放。
+
+接入时通过网页「更新 Runtime」或同代本地发布器 `upgrade-runtime` 更新整套源码（版本标记为 0.9.0），再通过星火编辑器完整 `debug_start` 编译和部署。无需修改现有 Movie 页面 JSON 或业务遮罩接线。
+
 ## 响应式宽屏层（基础层 / 宽屏层）
 
 页面分两层：**基础层**（页面 JSON 里的节点与属性本体）与**宽屏层**（`responsive.wide.overrides` 差异补丁表）。运行时按**方向感知**规则自动选层：

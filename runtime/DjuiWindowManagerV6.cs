@@ -21,6 +21,7 @@ public static class DjuiWindowManagerV6
     private static readonly Dictionary<string, List<string>> PageInstances = new();
     private static readonly Dictionary<string, string> SingletonInstances = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> ClosingTransitions = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, Panel> ClosingInputGuards = new(StringComparer.Ordinal);
     private static DjuiProjectV6? _project;
     private static ulong _nextInstanceId;
 
@@ -171,7 +172,7 @@ public static class DjuiWindowManagerV6
         instance.Session.Relayout();              // 隐藏期间可能转屏——重解算布局
         _reuseCount++;
         Game.Logger.LogInformation("DJUI v6: 复用窗口 {Page}#{Id}（{Kind}）", pageId, id, hit.Pinned ? "钉住" : "窗口池");
-        DjuiTransitionPlayer.Play(instance.Root, Pages.TryGetValue(pageId, out var page) ? page.Window?.Transition?.Open : null);
+        DjuiTransitionPlayer.PlayWindow(instance, Pages.TryGetValue(pageId, out var page) ? page.Window?.Transition?.Open : null);
         RaiseEvent(OpenHandlers, pageId, "OnOpen");
         root = instance.Root;
         return true;
@@ -194,7 +195,7 @@ public static class DjuiWindowManagerV6
             Instances.Add(id, instance);
             if (!PageInstances.TryGetValue(pageId, out var list)) PageInstances[pageId] = list = new List<string>();
             list.Add(id);
-            DjuiTransitionPlayer.Play(instance.Root, page.Window?.Transition?.Open);
+            DjuiTransitionPlayer.PlayWindow(instance, page.Window?.Transition?.Open);
             _buildCount++;
             Game.Logger.LogInformation("DJUI v6: 建树 {Page}#{Id}", pageId, id);
             RaiseEvent(CreateHandlers, pageId, "OnCreate");
@@ -509,7 +510,19 @@ public static class DjuiWindowManagerV6
         if (!Instances.TryGetValue(windowInstanceId, out var instance) || ClosingTransitions.ContainsKey(windowInstanceId)) return;
         var closePreset = instance.Session.CurrentPage.Window?.Transition?.Close;
         // 无 close 转场不再同帧销毁——摘栈隐藏进保留池，销毁统一延后（僵尸动画兜底）
-        var transitionId = DjuiTransitionPlayer.Play(instance.Root, closePreset, () => DetachWindow(windowInstanceId));
+        ClosingTransitions[windowInstanceId] = -1; // 同帧重入也只能关闭一次
+        if (instance.Session.CurrentPage.Window?.Mode == "popup")
+        {
+            // Host 保持全屏，阻挡层为 Root 的后置兄弟：既不淡出，也不更改业务 Disabled/Visible/action。
+            var guard = new Panel { Name = "DJUI.closing-input", IsStatic = false, ZIndex = int.MaxValue, Parent = instance.Host };
+            guard.FillParent();
+            // 原生命中需要事件接收者；仅放一个无订阅的透明 Panel 会继续命中下层。
+            guard.OnPointerPressed += (_, _) => { };
+            guard.OnPointerReleased += (_, _) => { };
+            guard.OnPointerClicked += (_, _) => { };
+            ClosingInputGuards[windowInstanceId] = guard;
+        }
+        var transitionId = DjuiTransitionPlayer.PlayWindow(instance, closePreset, () => DetachWindow(windowInstanceId));
         if (transitionId < 0) DetachWindow(windowInstanceId);
         else ClosingTransitions[windowInstanceId] = transitionId;
     }
@@ -518,6 +531,7 @@ public static class DjuiWindowManagerV6
     {
         if (!ClosingTransitions.Remove(windowInstanceId, out var transitionId)) return;
         DjuiTransitionPlayer.Stop(transitionId);
+        RemoveClosingInputGuard(windowInstanceId);
         if (Instances.TryGetValue(windowInstanceId, out var instance)) instance.Session.Relayout();
     }
 
@@ -529,13 +543,16 @@ public static class DjuiWindowManagerV6
     /// </summary>
     private static void DetachWindow(string windowInstanceId)
     {
-        ClosingTransitions.Remove(windowInstanceId);
         if (!Instances.TryGetValue(windowInstanceId, out var instance)) return;
+        ClosingTransitions[windowInstanceId] = -1; // OnClose 回调内再次关闭也不递归
         var pageId = instance.Session.CurrentPage.PageId;
         var fromSingleton = SingletonOpened.Remove(windowInstanceId);
 
         // OnClose 必须在注销寻址注册表之前触发——此时 IsOpen 仍为 true、GetSingletonControl 仍可用
         RaiseEvent(CloseHandlers, pageId, "OnClose");
+
+        ClosingTransitions.Remove(windowInstanceId);
+        RemoveClosingInputGuard(windowInstanceId);
 
         Instances.Remove(windowInstanceId);
         foreach (var singleton in SingletonInstances.Where(pair => pair.Value == windowInstanceId).ToArray()) SingletonInstances.Remove(singleton.Key);
@@ -558,6 +575,15 @@ public static class DjuiWindowManagerV6
         var entry = new RetainedEntry { InstanceId = windowInstanceId, Instance = instance, PageId = pageId, Pinned = pinned };
         entry.Node = Pool.AddLast(entry);
         TrimPool();
+    }
+
+    internal static bool IsClosing(string windowInstanceId) => ClosingTransitions.ContainsKey(windowInstanceId);
+
+    private static void RemoveClosingInputGuard(string windowInstanceId)
+    {
+        if (!ClosingInputGuards.Remove(windowInstanceId, out var guard)) return;
+        guard.RemoveFromVisualTreeAndParent();
+        guard.Dispose();
     }
 
     /// <summary>容量检查：非钉住条目超容量时，从池头（最老）逐个淘汰进销毁缓冲。</summary>

@@ -49,6 +49,8 @@ public static class DjuiActionRouter
 
         ctrl.OnPointerClicked += (sender, args) =>
         {
+            var owner = DjuiLayoutSessionV6.FindOwner(ctrl);
+            if (owner != null && DjuiWindowManagerV6.IsClosing(owner.WindowInstanceId)) return;
             if (_handlers.TryGetValue(actionName, out var handler))
             {
                 handler(ctrl, args);

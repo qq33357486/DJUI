@@ -3,22 +3,29 @@
 using System.Numerics;
 using GameUI.Control;
 using GameUI.Struct;
+using GameUI.Enum;
 
 namespace DjuiRuntime;
 
 public sealed class DjuiTransitionPreset
 {
-    public DjuiTransitionPreset(float duration, Action<Control, float, DjuiTransitionSnapshot> apply)
+    public DjuiTransitionPreset(float duration, Action<Control, float, DjuiTransitionSnapshot> apply, bool coordinateWindowContent = false)
     {
         Duration = MathF.Max(0.01f, duration);
         Apply = apply;
+        CoordinateWindowContent = coordinateWindowContent;
     }
 
     public float Duration { get; }
     public Action<Control, float, DjuiTransitionSnapshot> Apply { get; }
+    /// <summary>内置转场使用统一的轴向缩放/平移；自定义预设默认保留单控件行为。</summary>
+    public bool CoordinateWindowContent { get; }
 }
 
-public readonly record struct DjuiTransitionSnapshot(Vector2 Scale, float Opacity, Thickness Margin);
+public readonly record struct DjuiTransitionSnapshot(Vector2 Scale, float Opacity, Thickness Margin)
+{
+    public UIPosition Position { get; init; }
+}
 
 public static class DjuiTransitionRegistry
 {
@@ -39,7 +46,7 @@ public static class DjuiTransitionRegistry
             ctrl.Scale = p < 0.62f
                 ? Lerp(startScale, overshootScale, EaseOutCubic(p / 0.62f))
                 : Lerp(overshootScale, targetScale, EaseOutCubic((p - 0.62f) / 0.38f));
-        }));
+        }, coordinateWindowContent: true));
 
         Register("pop_out", new DjuiTransitionPreset(0.16f, static (ctrl, progress, snapshot) =>
         {
@@ -49,17 +56,17 @@ public static class DjuiTransitionRegistry
 
             ctrl.Opacity = GetTargetOpacity(snapshot) * (1f - eased);
             ctrl.Scale = Lerp(targetScale, targetScale * 0.9f, eased);
-        }));
+        }, coordinateWindowContent: true));
 
         Register("fade_in", new DjuiTransitionPreset(0.25f, static (ctrl, progress, snapshot) =>
         {
             ctrl.Opacity = GetTargetOpacity(snapshot) * EaseOutQuad(Math.Clamp(progress, 0f, 1f));
-        }));
+        }, coordinateWindowContent: true));
 
         Register("fade_out", new DjuiTransitionPreset(0.2f, static (ctrl, progress, snapshot) =>
         {
             ctrl.Opacity = GetTargetOpacity(snapshot) * (1f - EaseInCubic(Math.Clamp(progress, 0f, 1f)));
-        }));
+        }, coordinateWindowContent: true));
 
         Register("slide_up_in", new DjuiTransitionPreset(0.3f, static (ctrl, progress, snapshot) =>
         {
@@ -68,8 +75,11 @@ public static class DjuiTransitionRegistry
             var margin = snapshot.Margin;
 
             ctrl.Opacity = GetTargetOpacity(snapshot) * p;
-            ctrl.Margin = new Thickness(margin.Left, margin.Top + offset, margin.Right, margin.Bottom);
-        }));
+            if (ctrl.PositionType == UIPositionType.Absolute)
+                ctrl.Position = new UIPosition(snapshot.Position.X, snapshot.Position.Y + offset);
+            else
+                ctrl.Margin = new Thickness(margin.Left, margin.Top + offset, margin.Right, margin.Bottom);
+        }, coordinateWindowContent: true));
 
         Register("slide_down_out", new DjuiTransitionPreset(0.2f, static (ctrl, progress, snapshot) =>
         {
@@ -77,8 +87,11 @@ public static class DjuiTransitionRegistry
             var margin = snapshot.Margin;
 
             ctrl.Opacity = GetTargetOpacity(snapshot) * (1f - p);
-            ctrl.Margin = new Thickness(margin.Left, margin.Top + 60f * p, margin.Right, margin.Bottom);
-        }));
+            if (ctrl.PositionType == UIPositionType.Absolute)
+                ctrl.Position = new UIPosition(snapshot.Position.X, snapshot.Position.Y + 60f * p);
+            else
+                ctrl.Margin = new Thickness(margin.Left, margin.Top + 60f * p, margin.Right, margin.Bottom);
+        }, coordinateWindowContent: true));
     }
 
     public static void Register(string name, DjuiTransitionPreset preset)
@@ -97,14 +110,12 @@ public static class DjuiTransitionRegistry
 
     private static Vector2 GetTargetScale(DjuiTransitionSnapshot snapshot)
     {
-        return snapshot.Scale is { X: > 0.01f, Y: > 0.01f }
-            ? snapshot.Scale
-            : Vector2.One;
+        return snapshot.Scale;
     }
 
     private static float GetTargetOpacity(DjuiTransitionSnapshot snapshot)
     {
-        return snapshot.Opacity > 0.01f ? snapshot.Opacity : 1f;
+        return snapshot.Opacity;
     }
 
     private static Vector2 Lerp(Vector2 from, Vector2 to, float progress)

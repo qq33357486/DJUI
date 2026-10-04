@@ -13,6 +13,13 @@ public sealed class DjuiTransitionPlayer : IThinker
     public bool DoesThink { get; set; } = true;
 
     public static int Play(Control control, string? presetName, Action? onComplete = null)
+        => PlayCore(control, presetName, onComplete, null);
+
+    /// <summary>v6 窗口统一入口；只有 popup 的内置几何转场自动固定全屏层。</summary>
+    public static int PlayWindow(DjuiTreeInstanceV6 instance, string? presetName, Action? onComplete = null)
+        => PlayCore(instance.Root, presetName, onComplete, instance);
+
+    private static int PlayCore(Control control, string? presetName, Action? onComplete, DjuiTreeInstanceV6? instance)
     {
         if (control == null || !control.IsValid)
             return -1;
@@ -29,10 +36,12 @@ public sealed class DjuiTransitionPlayer : IThinker
         Stop(control);
 
         var id = ++_nextId;
-        var snapshot = new DjuiTransitionSnapshot(control.Scale, control.Opacity, control.Margin);
-        var animation = new TransitionAnimation(id, control, preset, snapshot, onComplete);
+        var snapshot = DjuiWindowTransitionV6.Snapshot(control);
+        var windowTarget = instance != null && instance.Session.CurrentPage.Window?.Mode == "popup" && preset.CoordinateWindowContent
+            ? new DjuiWindowTransitionV6(instance, preset) : null;
+        var animation = new TransitionAnimation(id, control, preset, snapshot, onComplete, windowTarget);
         Animations.Add(animation);
-        preset.Apply(control, 0f, snapshot);
+        animation.Apply(0f);
         EnsureRegistered();
         return id;
     }
@@ -71,28 +80,28 @@ public sealed class DjuiTransitionPlayer : IThinker
     public void Think(int delta)
     {
         var dt = delta / 1000f;
-        for (var i = Animations.Count - 1; i >= 0; i--)
+        // 完成回调可开/关其他窗口；遍历本帧快照避免回调修改列表后越界或重放。
+        var frameAnimations = Animations.ToArray();
+        for (var i = frameAnimations.Length - 1; i >= 0; i--)
         {
-            var animation = Animations[i];
+            var animation = frameAnimations[i];
+            if (!Animations.Contains(animation)) continue;
             if (!animation.Control.IsValid)
             {
-                Animations.RemoveAt(i);
+                Animations.Remove(animation);
+                animation.Restore();
                 continue;
             }
 
             animation.Elapsed += dt;
             var progress = Math.Clamp(animation.Elapsed / animation.Preset.Duration, 0f, 1f);
-            animation.Preset.Apply(animation.Control, progress, animation.Snapshot);
+            animation.Apply(progress);
 
             if (progress >= 1f)
             {
-                Animations.RemoveAt(i);
+                Animations.Remove(animation);
                 animation.Restore();   // 终帧归一：恢复转场前快照——close 转场终态（opacity=0 等）不能残留，窗口保留池复用时 open 转场会以当前值为快照初始
                 animation.OnComplete?.Invoke();
-            }
-            else
-            {
-                Animations[i] = animation;
             }
         }
     }
@@ -104,13 +113,15 @@ public sealed class DjuiTransitionPlayer : IThinker
             Control control,
             DjuiTransitionPreset preset,
             DjuiTransitionSnapshot snapshot,
-            Action? onComplete)
+            Action? onComplete,
+            DjuiWindowTransitionV6? windowTarget)
         {
             Id = id;
             Control = control;
             Preset = preset;
             Snapshot = snapshot;
             OnComplete = onComplete;
+            WindowTarget = windowTarget;
         }
 
         public int Id { get; }
@@ -119,14 +130,23 @@ public sealed class DjuiTransitionPlayer : IThinker
         public DjuiTransitionSnapshot Snapshot { get; }
         public Action? OnComplete { get; }
         public float Elapsed { get; set; }
+        private DjuiWindowTransitionV6? WindowTarget { get; }
+
+        public void Apply(float progress)
+        {
+            if (WindowTarget != null) WindowTarget.Apply(progress);
+            else Preset.Apply(Control, progress, Snapshot);
+        }
 
         /// <summary>恢复转场前快照（转场完成/取消时归一控件状态，防止中途值或终态残留）。</summary>
         public void Restore()
         {
+            if (WindowTarget != null) { WindowTarget.Dispose(); return; }
             if (!Control.IsValid) return;
             Control.Scale = Snapshot.Scale;
             Control.Opacity = Snapshot.Opacity;
             Control.Margin = Snapshot.Margin;
+            Control.Position = Snapshot.Position;
         }
     }
 }

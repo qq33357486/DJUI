@@ -37,6 +37,9 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     internal DjuiTreeInstanceV6? Owner { get; set; }
     public DjuiCanvasPlanV6 CurrentPlan { get; private set; }
     public DjuiPageV6 CurrentPage { get; private set; }
+    // 转场在解算前撤销临时几何，解算后以新布局继续同一时间进度；不重建树。
+    internal event Action? BeforeRelayout;
+    internal event Action? AfterRelayout;
 
     public DjuiLayoutSessionV6(string windowInstanceId, DjuiProjectV6 project, DjuiPageV6 page, ScreenViewport? viewport = null)
     {
@@ -164,6 +167,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     public void Relayout()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        BeforeRelayout?.Invoke();
         CurrentPlan = CreateCurrentPlan();
         CurrentPage = DjuiResponsiveResolverV6.Resolve(_page, CurrentPlan.Wide);
         var nodes = new Dictionary<string, DjuiNodeV6>(StringComparer.Ordinal);
@@ -182,6 +186,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
             if (_nodeUpdater != null && nodes.TryGetValue(nodeId, out var node))
                 _nodeUpdater(node, control, sceneScales.TryGetValue(nodeId, out var sceneScale) ? sceneScale : 1f);
         }
+        AfterRelayout?.Invoke();
     }
 
     private static void IndexNodes(DjuiNodeV6 node, Dictionary<string, DjuiNodeV6> nodes)

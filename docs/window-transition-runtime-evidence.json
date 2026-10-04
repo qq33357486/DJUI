@@ -1,0 +1,774 @@
+{
+  "date": "2026-10-04",
+  "runtime": "0.9.0",
+  "fullDebugOperations": [
+    "283657b919664820a76c2a19c46bc301",
+    "8e09f41b2396430fa0875833ccbe768c"
+  ],
+  "detailBaseline": {
+    "nodes": [
+      {
+        "id": "艺人详情_backdrop",
+        "name": "遮罩",
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 2401.4424,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": true
+      },
+      {
+        "id": "艺人详情_sheet",
+        "name": "窗口底板",
+        "x": 40,
+        "y": 403.7212,
+        "w": 1000,
+        "h": 1576,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": false
+      }
+    ],
+    "root_scale": 1,
+    "root_y": 0,
+    "root_opacity": 1,
+    "closing": false,
+    "instance": "w3",
+    "open": true,
+    "built": 3,
+    "reused": 0,
+    "disposed": 0
+  },
+  "detailPop": {
+    "nodes": [
+      {
+        "id": "艺人详情_backdrop",
+        "name": "遮罩",
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 2401.4424,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": true
+      },
+      {
+        "id": "艺人详情_sheet",
+        "name": "窗口底板",
+        "x": 40,
+        "y": 403.33728,
+        "w": 1000,
+        "h": 1576,
+        "scaleX": 1.0426565,
+        "scaleY": 1.0426565,
+        "opacity": 1,
+        "visible": true,
+        "fixed": false
+      }
+    ],
+    "root_scale": 1,
+    "root_y": 0,
+    "root_opacity": 0.57750005,
+    "closing": false,
+    "instance": "w3",
+    "open": true,
+    "built": 3,
+    "reused": 0,
+    "disposed": 0
+  },
+  "introBaseline": {
+    "nodes": [
+      {
+        "id": "新艺人介绍_backdrop",
+        "name": "遮罩",
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 2401.4424,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": true
+      },
+      {
+        "id": "新艺人介绍_sheet",
+        "name": "获得艺人内容容器",
+        "x": 40,
+        "y": 470.7212,
+        "w": 1000,
+        "h": 1420,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": false
+      }
+    ],
+    "root_scale": 1,
+    "root_y": 0,
+    "root_opacity": 1,
+    "closing": false,
+    "instance": "w4",
+    "open": true,
+    "built": 4,
+    "reused": 0,
+    "disposed": 0
+  },
+  "introSlide": {
+    "nodes": [
+      {
+        "id": "新艺人介绍_backdrop",
+        "name": "遮罩",
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 2401.4424,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": true
+      },
+      {
+        "id": "新艺人介绍_sheet",
+        "name": "获得艺人内容容器",
+        "x": 40,
+        "y": 491.30115,
+        "w": 1000,
+        "h": 1420,
+        "scaleX": 1,
+        "scaleY": 1,
+        "opacity": 1,
+        "visible": true,
+        "fixed": false
+      }
+    ],
+    "root_scale": 1,
+    "root_y": 0,
+    "root_opacity": 0.657,
+    "closing": false,
+    "instance": "w4",
+    "open": true,
+    "built": 4,
+    "reused": 0,
+    "disposed": 0
+  },
+  "pages": [
+    {
+      "page": "阵容配置",
+      "base": {
+        "nodes": [
+          {
+            "id": "阵容配置_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "阵容配置_sheet",
+            "name": "阵容配置面板",
+            "x": 40,
+            "y": 275.7212,
+            "w": 1000,
+            "h": 1850,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 1,
+        "closing": false,
+        "instance": "w5",
+        "open": true,
+        "built": 5,
+        "reused": 0,
+        "disposed": 0
+      },
+      "mid": {
+        "nodes": [
+          {
+            "id": "阵容配置_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "阵容配置_sheet",
+            "name": "阵容配置面板",
+            "x": 40,
+            "y": 275.7212,
+            "w": 1000,
+            "h": 1850,
+            "scaleX": 0.9657,
+            "scaleY": 0.9657,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 0.657,
+        "closing": false,
+        "instance": "w5",
+        "open": true,
+        "built": 5,
+        "reused": 0,
+        "disposed": 0
+      }
+    },
+    {
+      "page": "建筑详情",
+      "base": {
+        "nodes": [
+          {
+            "id": "building_detail_modal_backdrop",
+            "name": "空白关闭遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "building_detail_sheet",
+            "name": "建筑详情底板",
+            "x": 40,
+            "y": 775.7212,
+            "w": 1000,
+            "h": 850,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          },
+          {
+            "id": "building_detail_close_hint",
+            "name": "空白关闭提示",
+            "x": 0,
+            "y": 1960,
+            "w": 1080,
+            "h": 40,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 1,
+        "closing": false,
+        "instance": "w6",
+        "open": true,
+        "built": 6,
+        "reused": 0,
+        "disposed": 0
+      },
+      "mid": {
+        "nodes": [
+          {
+            "id": "building_detail_modal_backdrop",
+            "name": "空白关闭遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "building_detail_sheet",
+            "name": "建筑详情底板",
+            "x": 40,
+            "y": 775.7212,
+            "w": 1000,
+            "h": 850,
+            "scaleX": 0.9657,
+            "scaleY": 0.9657,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          },
+          {
+            "id": "building_detail_close_hint",
+            "name": "空白关闭提示",
+            "x": 0,
+            "y": 1933.2708,
+            "w": 1080,
+            "h": 40,
+            "scaleX": 0.9657,
+            "scaleY": 0.9657,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 0.657,
+        "closing": false,
+        "instance": "w6",
+        "open": true,
+        "built": 6,
+        "reused": 0,
+        "disposed": 0
+      }
+    },
+    {
+      "page": "通用奖励弹窗",
+      "base": {
+        "nodes": [
+          {
+            "id": "grew_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "grew_card",
+            "name": "奖励卡",
+            "x": 40,
+            "y": 870.7212,
+            "w": 1000,
+            "h": 660,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 1,
+        "closing": false,
+        "instance": "w7",
+        "open": true,
+        "built": 7,
+        "reused": 0,
+        "disposed": 0
+      },
+      "mid": {
+        "nodes": [
+          {
+            "id": "grew_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "grew_card",
+            "name": "奖励卡",
+            "x": 40,
+            "y": 870.7212,
+            "w": 1000,
+            "h": 660,
+            "scaleX": 0.9657,
+            "scaleY": 0.9657,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 0.657,
+        "closing": false,
+        "instance": "w7",
+        "open": true,
+        "built": 7,
+        "reused": 0,
+        "disposed": 0
+      }
+    },
+    {
+      "page": "艺人招募",
+      "base": {
+        "nodes": [
+          {
+            "id": "艺人招募_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "艺人招募_sheet",
+            "name": "窗口底板",
+            "x": 40,
+            "y": 403.7212,
+            "w": 1000,
+            "h": 1576,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          },
+          {
+            "id": "artist_recruit_probability_backdrop",
+            "name": "概率弹窗遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": false,
+            "fixed": true
+          },
+          {
+            "id": "artist_recruit_prob_panel",
+            "name": "概率面板",
+            "x": 40,
+            "y": 660.7212,
+            "w": 1000,
+            "h": 1080,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": false,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 1,
+        "closing": false,
+        "instance": "w8",
+        "open": true,
+        "built": 8,
+        "reused": 0,
+        "disposed": 0
+      },
+      "mid": {
+        "nodes": [
+          {
+            "id": "艺人招募_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "艺人招募_sheet",
+            "name": "窗口底板",
+            "x": 40,
+            "y": 424.30115,
+            "w": 1000,
+            "h": 1576,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": false
+          },
+          {
+            "id": "artist_recruit_probability_backdrop",
+            "name": "概率弹窗遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": false,
+            "fixed": true
+          },
+          {
+            "id": "artist_recruit_prob_panel",
+            "name": "概率面板",
+            "x": 40,
+            "y": 681.30115,
+            "w": 1000,
+            "h": 1080,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": false,
+            "fixed": false
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 0.657,
+        "closing": false,
+        "instance": "w8",
+        "open": true,
+        "built": 8,
+        "reused": 0,
+        "disposed": 0
+      }
+    },
+    {
+      "page": "拍摄玩法",
+      "base": {
+        "nodes": [
+          {
+            "id": "拍摄玩法_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "拍摄玩法_sheet",
+            "name": "页面",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 1,
+        "closing": false,
+        "instance": "w9",
+        "open": true,
+        "built": 9,
+        "reused": 0,
+        "disposed": 0
+      },
+      "mid": {
+        "nodes": [
+          {
+            "id": "拍摄玩法_backdrop",
+            "name": "遮罩",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          },
+          {
+            "id": "拍摄玩法_sheet",
+            "name": "页面",
+            "x": 0,
+            "y": 0,
+            "w": 1080,
+            "h": 2401.4424,
+            "scaleX": 1,
+            "scaleY": 1,
+            "opacity": 1,
+            "visible": true,
+            "fixed": true
+          }
+        ],
+        "root_scale": 1,
+        "root_y": 0,
+        "root_opacity": 0.657,
+        "closing": false,
+        "instance": "w9",
+        "open": true,
+        "built": 9,
+        "reused": 0,
+        "disposed": 0
+      }
+    }
+  ],
+  "lifecycle": {
+    "base": {
+      "nodes": [
+        {
+          "id": "艺人详情_backdrop",
+          "name": "遮罩",
+          "x": 0,
+          "y": 0,
+          "w": 1080,
+          "h": 2401.4424,
+          "scaleX": 1,
+          "scaleY": 1,
+          "opacity": 1,
+          "visible": true,
+          "fixed": true
+        },
+        {
+          "id": "艺人详情_sheet",
+          "name": "窗口底板",
+          "x": 40,
+          "y": 403.7212,
+          "w": 1000,
+          "h": 1576,
+          "scaleX": 1,
+          "scaleY": 1,
+          "opacity": 1,
+          "visible": true,
+          "fixed": false
+        }
+      ],
+      "root_scale": 1,
+      "root_y": 0,
+      "root_opacity": 1,
+      "closing": false,
+      "instance": "w11",
+      "open": true,
+      "built": 11,
+      "reused": 0,
+      "disposed": 2
+    },
+    "closing": {
+      "nodes": [
+        {
+          "id": "艺人详情_backdrop",
+          "name": "遮罩",
+          "x": 0,
+          "y": 0,
+          "w": 1080,
+          "h": 2401.4424,
+          "scaleX": 1,
+          "scaleY": 1,
+          "opacity": 1,
+          "visible": true,
+          "fixed": true
+        },
+        {
+          "id": "艺人详情_sheet",
+          "name": "窗口底板",
+          "x": 40,
+          "y": 404.182,
+          "w": 1000,
+          "h": 1576,
+          "scaleX": 0.94879997,
+          "scaleY": 0.94879997,
+          "opacity": 1,
+          "visible": true,
+          "fixed": false
+        }
+      ],
+      "root_scale": 1,
+      "root_y": 0,
+      "root_opacity": 0.48799998,
+      "closing": true,
+      "instance": "w11",
+      "open": true,
+      "built": 11,
+      "reused": 0,
+      "disposed": 2
+    },
+    "reopened": {
+      "nodes": [
+        {
+          "id": "艺人详情_backdrop",
+          "name": "遮罩",
+          "x": 0,
+          "y": 0,
+          "w": 1080,
+          "h": 2401.4424,
+          "scaleX": 1,
+          "scaleY": 1,
+          "opacity": 1,
+          "visible": true,
+          "fixed": true
+        },
+        {
+          "id": "艺人详情_sheet",
+          "name": "窗口底板",
+          "x": 40,
+          "y": 403.7212,
+          "w": 1000,
+          "h": 1576,
+          "scaleX": 1,
+          "scaleY": 1,
+          "opacity": 1,
+          "visible": true,
+          "fixed": false
+        }
+      ],
+      "root_scale": 1,
+      "root_y": 0,
+      "root_opacity": 1,
+      "closing": false,
+      "instance": "w11",
+      "open": true,
+      "built": 11,
+      "reused": 0,
+      "disposed": 2
+    }
+  },
+  "input": {
+    "closingClicks": 0,
+    "completedCloses": 1,
+    "reopenedClicks": 1,
+    "multiRemaining": 0
+  }
+}

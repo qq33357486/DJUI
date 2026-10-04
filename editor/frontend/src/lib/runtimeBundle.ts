@@ -23,9 +23,10 @@ import DjuiUiLoader from '../../../../runtime/DjuiUiLoader.cs?raw'
 import DjuiViewportAdapter from '../../../../runtime/DjuiViewportAdapter.cs?raw'
 import DjuiWindowManager from '../../../../runtime/DjuiWindowManager.cs?raw'
 import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
+import DjuiWindowTransitionV6 from '../../../../runtime/DjuiWindowTransitionV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.8.10'
+export const RUNTIME_VERSION = '0.9.1'
 
 export interface BundledRuntimeFile {
   name: string
@@ -56,5 +57,6 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiViewportAdapter.cs', content: DjuiViewportAdapter },
   { name: 'DjuiWindowManager.cs', content: DjuiWindowManager },
   { name: 'DjuiWindowManagerV6.cs', content: DjuiWindowManagerV6 },
+  { name: 'DjuiWindowTransitionV6.cs', content: DjuiWindowTransitionV6 },
   { name: 'AGENTS.md', content: runtimeAgentsMd },
 ]

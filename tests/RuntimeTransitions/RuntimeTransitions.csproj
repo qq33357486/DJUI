@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><DefineConstants>CLIENT</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../runtime/DjuiProtocolV6.cs" Link="DjuiProtocolV6.cs" />
+    <Compile Include="../../runtime/DjuiCanvasV6.cs" Link="DjuiCanvasV6.cs" />
+    <Compile Include="../../runtime/DjuiResponsiveResolverV6.cs" Link="DjuiResponsiveResolverV6.cs" />
+    <Compile Include="../../runtime/DjuiTemplateExpanderV6.cs" Link="DjuiTemplateExpanderV6.cs" />
+    <Compile Include="../../runtime/DjuiTransitionRegistry.cs" Link="DjuiTransitionRegistry.cs" />
+    <Compile Include="../../runtime/DjuiTransitionPlayer.cs" Link="DjuiTransitionPlayer.cs" />
+    <Compile Include="../../runtime/DjuiWindowTransitionV6.cs" Link="DjuiWindowTransitionV6.cs" />
+  </ItemGroup>
+</Project>

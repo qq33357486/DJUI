@@ -15,6 +15,7 @@ import { auditPageAdaptation, computeImageFrameForAudit } from '@/utils/adaptati
 import { getEditorOverlayVisible, getReferenceImageVisible, setEditorOverlayVisible, setReferenceImageVisible } from '@/lib/editorPreferences'
 import type Konva from 'konva'
 import KonvaRuntime from 'konva'
+import { overflowTextPreview } from '@/utils/overflowTextPreview'
 
 // === 自定义 useImage hook：从 URL 加载 HTMLImageElement ===
 function useImage(url: string | null): HTMLImageElement | null {
@@ -83,13 +84,14 @@ function isTransparentColor(color?: string | null) {
   return /^rgba?\([^,]+,[^,]+,[^,]+,\s*0\s*\)$/i.test(value)
 }
 
-function measureTextWidth(text: string, fontSize: number, fontFamily?: string, bold?: boolean) {
-  if (typeof document === 'undefined') return text.length * fontSize * 0.6
+function createTextMeasurer(fontSize: number, fontFamily?: string, bold?: boolean) {
+  const fallback = (text: string) => text.length * fontSize * 0.6
+  if (typeof document === 'undefined') return fallback
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')
-  if (!context) return text.length * fontSize * 0.6
+  if (!context) return fallback
   context.font = `${bold ? 'bold ' : ''}${fontSize}px ${fontFamily ?? 'sans-serif'}`
-  return context.measureText(text).width
+  return (text: string) => context.measureText(text).width
 }
 
 function textAlign(value?: string | null): 'left' | 'center' | 'right' {
@@ -169,12 +171,16 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
   const wrapEnabled = node.text?.textWrap ?? false
   const overflow = node.text?.textOverflow ?? (node.starType === 'Label' ? 'None' : 'Shrink')
   const align = textAlign(node.layout?.horizontalContentAlignment)
-  const measuredWidth = Math.max(1, measureTextWidth(text, baseFontSize, fontFamily, bold))
+  const verticalAlign = verticalTextAlign(node.layout?.verticalContentAlignment)
+  const measure = createTextMeasurer(baseFontSize, fontFamily, bold)
+  const measuredWidth = Math.max(1, measure(text))
 
   let fontSize = baseFontSize
   let renderWidth = width
   let renderHeight: number | undefined = height
   let xOffset = 0
+  let yOffset = 0
+  let renderText = text
 
   if (overflow === 'Shrink' && !wrapEnabled && width > 0) {
     const widthScale = Math.min(1, width / measuredWidth)
@@ -186,26 +192,27 @@ function getTextPreview(node: UiNode, width: number, height: number, defaultFont
     const requiredHeight = lines * baseFontSize * 1.25
     fontSize = Math.max(1, Math.floor(baseFontSize * Math.min(1, height / requiredHeight)))
   } else if (overflow === 'None') {
-    // 保留控件高度作 verticalAlign 参照（Konva 不会因 height 裁剪文本，溢出照画）；
-    // 曾在此置 undefined，导致溢出模式下垂直居中/居下永远失效、文字顶格
-    if (!wrapEnabled) {
-      renderWidth = Math.max(width, measuredWidth)
-      if (align === 'right') xOffset = width - renderWidth
-      else if (align === 'center') xOffset = (width - renderWidth) / 2
-    }
+    const preview = overflowTextPreview(text, width, height, fontSize, wrapEnabled, align, verticalAlign, measure)
+    renderText = preview.text
+    renderWidth = preview.width
+    renderHeight = preview.height
+    xOffset = preview.xOffset
+    yOffset = preview.yOffset
   }
 
   return {
     xOffset,
+    yOffset,
+    text: renderText,
     width: renderWidth,
     height: renderHeight,
     fontSize,
     fontFamily,
     bold,
     align,
-    verticalAlign: verticalTextAlign(node.layout?.verticalContentAlignment),
+    verticalAlign,
     // char 模式：中文无空格，word 模式整段不断行会横向溢出被裁；引擎也按字符断行
-    wrap: wrapEnabled ? 'char' as const : 'none' as const,
+    wrap: overflow !== 'None' && wrapEnabled ? 'char' as const : 'none' as const,
     ellipsis: overflow === 'Ellipsis',
   }
 }
@@ -876,10 +883,10 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
         return (
           <Text
             x={x + preview.xOffset}
-            y={y}
+            y={y + preview.yOffset}
             width={preview.width}
             height={preview.height}
-            text={node.text?.text ?? ''}
+            text={preview.text}
             fontSize={preview.fontSize}
             fontFamily={preview.fontFamily}
             fill={node.text?.textColor ?? '#FFFFFF'}
@@ -1250,10 +1257,10 @@ function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragP
         return (
           <Text
             x={displayX + preview.xOffset}
-            y={displayY}
+            y={displayY + preview.yOffset}
             width={preview.width}
             height={preview.height}
-            text={node.text?.text ?? ''}
+            text={preview.text}
             fontSize={preview.fontSize}
             fontFamily={preview.fontFamily}
             fill={node.text?.textColor ?? '#FFFFFF'}

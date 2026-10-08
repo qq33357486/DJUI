@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.8.0'
+export const AGENTS_VERSION = '0.8.1'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -361,15 +361,16 @@ node .\\脚本区\\djui-publish.mjs publish --json
 
 ### 6.3 AI 自动化截图（页面渲染出图）
 
-AI 想确认某个页面改完后的渲染效果时，**不需要打开浏览器**，直接调用 \`脚本区/djui-shot.mjs\`：
+AI 想确认某个页面改完后的渲染效果时，**不需要打开浏览器、不需要编辑器在线**，直接调用 \`脚本区/djui-shot.mjs\`：
 
 \`\`\`powershell
 node .\\脚本区\\djui-shot.mjs <页面ID> [--scale 2] [--variant base|wide] [--out 名字]
 \`\`\`
 
 - 成功时 stdout 只打印一张 PNG 的绝对路径（落在 \`临时文件/截图/\`），AI 直接读图即可；失败时 stderr 给出原因
-- 出图走编辑器同款渲染管线（含后景合成、模板实例、九宫格、字体），看到的就是画布所见
-- 前提：**DJUI 编辑器已打开该工作区并授权目录访问**（渲染在浏览器完成）；超时报错通常就是编辑器没开
+- 默认**无头直渲染**：自动拉起本机 Chrome/Edge 无头实例渲染后即关，页面数据直接读工程磁盘——不依赖编辑器是否打开、不依赖浏览器授权；渲染代码与编辑器画布同一份（含后景合成、模板实例、九宫格、字体），所见即画布所得
+- 前提：本机装有 Chrome 或 Edge（自动探测）；渲染页默认从线上加载，可 \`--bundle <url>\` 指定其它地址（如本地 http://localhost:7321）
+- \`--via-editor\` 可切换为编辑器文件通道：要求 DJUI 编辑器已打开该工作区并授权；适合编辑器常开时省去起浏览器的开销
 - 截图反映的是**磁盘上的页面 JSON 最新内容**——AI 改完 JSON 并通过 \`validate\` 后直接截图核对，闭环不需要任何人工操作
 - \`临时文件/截图/\` 是临时产物，可随时清理，不会被发布
 

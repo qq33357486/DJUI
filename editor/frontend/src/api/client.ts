@@ -299,6 +299,12 @@ export async function loadProjectFileV6(): Promise<ProjectFileLoadResult> {
   return { status: 'blocked', kind: result.kind, issues: result.issues }
 }
 
+// 无头渲染模式（#render）：注入已解析的工程配置（数据来自本地服务而非磁盘句柄），
+// 使 uiPageFromV6 等转换拿到正确的画布尺寸与默认字体
+export function setActiveProjectV6(project: ProjectFileV6): void {
+  activeProjectFileV6 = project
+}
+
 export async function scanMigrationReportV6(): Promise<MigrationReportV6> {
   const ws = projectContext.ws
   if (!ws) return buildMigrationReportV6([])
@@ -359,7 +365,7 @@ export function saveLastPageId(pageId: string): void {
 
 // ===== 页面 CRUD =====
 
-function uiPageFromV6(page: PageFileV6): UiPage {
+export function uiPageFromV6(page: PageFileV6): UiPage {
   return {
     version: DJUI_PROTOCOL_VERSION,
     pageId: page.pageId,

@@ -17,6 +17,15 @@ function notify(key: string) {
   }
 }
 
+// 资源解析旁路：无头渲染模式（#render）下由渲染页注入，
+// 把 File System Access 读图替换为本地数据服务的 HTTP URL；null = 走正常编辑器路径
+type AssetResolver = (kind: 'asset' | 'engine' | 'workspace', path: string) => string | null
+let assetResolver: AssetResolver | null = null
+
+export function setAssetResolver(resolver: AssetResolver | null): void {
+  assetResolver = resolver
+}
+
 function subscribe(key: string, cb: () => void) {
   if (!subscribers.has(key)) subscribers.set(key, new Set())
   subscribers.get(key)!.add(cb)
@@ -46,15 +55,22 @@ export function useAssetImage(relPath: string | null): string | null {
 
     if (!loadingUrls.has(key)) {
       loadingUrls.add(key)
-      api.assetFileUrl(relPath).then(result => {
-        urlCache.set(key, result)
+      const resolved = assetResolver ? assetResolver('asset', relPath) : null
+      if (resolved !== null) {
+        urlCache.set(key, resolved)
         loadingUrls.delete(key)
         notify(key)
-      }).catch(() => {
-        urlCache.set(key, null)
-        loadingUrls.delete(key)
-        notify(key)
-      })
+      } else {
+        api.assetFileUrl(relPath).then(result => {
+          urlCache.set(key, result)
+          loadingUrls.delete(key)
+          notify(key)
+        }).catch(() => {
+          urlCache.set(key, null)
+          loadingUrls.delete(key)
+          notify(key)
+        })
+      }
     }
 
     return () => { cancelled = true; unsub() }
@@ -84,15 +100,22 @@ export function useEngineImage(enginePath: string | null): string | null {
 
     if (!loadingUrls.has(key)) {
       loadingUrls.add(key)
-      api.enginePathToUrl(enginePath).then(result => {
-        urlCache.set(key, result)
+      const resolved = assetResolver ? assetResolver('engine', enginePath) : null
+      if (resolved !== null) {
+        urlCache.set(key, resolved)
         loadingUrls.delete(key)
         notify(key)
-      }).catch(() => {
-        urlCache.set(key, null)
-        loadingUrls.delete(key)
-        notify(key)
-      })
+      } else {
+        api.enginePathToUrl(enginePath).then(result => {
+          urlCache.set(key, result)
+          loadingUrls.delete(key)
+          notify(key)
+        }).catch(() => {
+          urlCache.set(key, null)
+          loadingUrls.delete(key)
+          notify(key)
+        })
+      }
     }
 
     return () => { cancelled = true; unsub() }
@@ -122,21 +145,28 @@ export function useWorkspaceImage(fullPath: string | null): string | null {
 
     if (!loadingUrls.has(key)) {
       loadingUrls.add(key)
-      const ws = projectContext.ws
-      if (!ws) {
-        urlCache.set(key, null)
+      const resolved = assetResolver ? assetResolver('workspace', fullPath) : null
+      if (resolved !== null) {
+        urlCache.set(key, resolved)
         loadingUrls.delete(key)
         notify(key)
       } else {
-        fs.getImageBlobUrl(ws, fullPath).then(result => {
-          urlCache.set(key, result)
-          loadingUrls.delete(key)
-          notify(key)
-        }).catch(() => {
+        const ws = projectContext.ws
+        if (!ws) {
           urlCache.set(key, null)
           loadingUrls.delete(key)
           notify(key)
-        })
+        } else {
+          fs.getImageBlobUrl(ws, fullPath).then(result => {
+            urlCache.set(key, result)
+            loadingUrls.delete(key)
+            notify(key)
+          }).catch(() => {
+            urlCache.set(key, null)
+            loadingUrls.delete(key)
+            notify(key)
+          })
+        }
       }
     }
 

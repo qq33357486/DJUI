@@ -33,6 +33,15 @@ export function engineFontToCss(engineFamily: string | null | undefined): string
   return fontMap.get(engineFamily)
 }
 
+// 无头渲染模式（#render）：外部（本地数据服务）已提供字体文件时，
+// 直接登记 engineFamily → cssFamily 映射，绕过 File System Access 读盘
+export function registerFontMapping(engineFamily: string, cssFamily: string): void {
+  if (!fontMap.has(engineFamily)) {
+    fontMap.set(engineFamily, cssFamily)
+    registered.add(cssFamily)
+  }
+}
+
 // 已注册的所有 CSS family（供调试/检查）
 export function getRegisteredCssFonts(): string[] {
   return Array.from(registered)

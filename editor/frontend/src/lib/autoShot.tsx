@@ -52,7 +52,7 @@ type SliceMeta = Record<string, { left: number; top: number; right: number; bott
 
 // ===== 离屏渲染组件（与主画布同一套 NodeShape / 布局求解，只输出内容层） =====
 
-function PageShotStage({ page, variant, pixelRatio, sliceMeta, onDone }: {
+export function PageShotStage({ page, variant, pixelRatio, sliceMeta, onDone }: {
   page: UiPage
   variant: 'base' | 'wide'
   pixelRatio: number

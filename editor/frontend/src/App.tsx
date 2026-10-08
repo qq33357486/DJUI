@@ -26,6 +26,7 @@ import {
 import type { DevicePresetV6 } from './lib/devicePresetsV6'
 import { UiPage } from './types/layout'
 import { prunePageUnderlays } from './lib/pageUnderlays'
+import { startAutoShotPolling } from './lib/autoShot'
 
 const { Header, Sider, Content } = Layout
 const DEFAULT_TEMPLATE_WIDTH = 200
@@ -248,6 +249,13 @@ export default function App() {
       window.removeEventListener('focus', runFocusSync)
       document.removeEventListener('visibilitychange', onVisible)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlesReady])
+
+  // AI 自动化截图通道：工作区就绪后开始轮询 `临时文件/自动化/截图请求.json`
+  useEffect(() => {
+    if (!handlesReady) return
+    return startAutoShotPolling()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handlesReady])
 

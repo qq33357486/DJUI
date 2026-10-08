@@ -8,6 +8,7 @@ import { RUNTIME_VERSION } from './runtimeBundle'
 import greenKeyToPng from '../../../../scripts/green_key_to_png.py?raw'
 import trimCompress from '../../../../scripts/trim_compress.py?raw'
 import djuiPublish from '../../../../scripts/djui-publish.mjs?raw'
+import djuiShot from '../../../../scripts/djui-shot.mjs?raw'
 import scriptsReadme from '../../../../scripts/README.md?raw'
 import scriptsVersion from '../../../../scripts/version.txt?raw'
 
@@ -20,6 +21,7 @@ export const SCRIPT_FILES: BundledScriptFile[] = [
   { path: 'green_key_to_png.py', content: greenKeyToPng },
   { path: 'trim_compress.py', content: trimCompress },
   { path: 'djui-publish.mjs', content: djuiPublish },
+  { path: 'djui-shot.mjs', content: djuiShot },
   { path: 'README.md', content: scriptsReadme },
 ]
 

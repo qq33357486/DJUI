@@ -245,7 +245,7 @@ function cloneNodeWithOverrides(node: UiNode, overrides?: TemplateOverrides | nu
   return cloned
 }
 
-function cloneTreeWithResponsiveOverrides(root: UiNode, overrides?: Record<string, Record<string, unknown>>): UiNode {
+export function cloneTreeWithResponsiveOverrides(root: UiNode, overrides?: Record<string, Record<string, unknown>>): UiNode {
   const cloned: UiNode = JSON.parse(JSON.stringify(root))
   const apply = (node: UiNode) => {
     for (const [path, value] of Object.entries(overrides?.[node.id] ?? {})) {
@@ -259,7 +259,7 @@ function cloneTreeWithResponsiveOverrides(root: UiNode, overrides?: Record<strin
 
 // 场景画板与锚定 image 的控件需要使用页面自身的背景图帧。后景页也必须独立计算，
 // 不能复用当前编辑页的帧，否则不同背景素材的 cover 裁切会错位。
-function computePageImageFrame(root: UiNode, canvasWidth: number, canvasHeight: number): LayoutRect | null {
+export function computePageImageFrame(root: UiNode, canvasWidth: number, canvasHeight: number): LayoutRect | null {
   const sceneBackgroundId = (root.children ?? []).find(node => !!node.sceneFrame?.backgroundId)?.sceneFrame?.backgroundId
   const imageFrameHost = (root.children ?? []).find(node =>
     (node.stretch?.style ?? 'None') === 'Both' &&
@@ -923,7 +923,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
 }
 
 // === 单个控件渲染 ===
-interface NodeShapeProps {
+export interface NodeShapeProps {
   node: UiNode
   isSelected: boolean
   selectedIds: string[]    // 全局选中列表，子节点用于独立选中
@@ -947,7 +947,7 @@ interface NodeShapeProps {
   readOnly?: boolean
 }
 
-function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta, readOnly = false }: NodeShapeProps) {
+export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, onDragPreviewChange, onTransformEnd, registerRef, workspacePath, projectPath, parentRect, canvasWidth, canvasHeight, safeRect, imageFrame, showEditorOverlay, sliceMeta, dragPreview, inheritedDragDelta, readOnly = false }: NodeShapeProps) {
   const { config } = useProjectStore()
   const allPages = useEditorStore(s => s.allPages)
   const defaultFont = config?.defaultFont ?? null

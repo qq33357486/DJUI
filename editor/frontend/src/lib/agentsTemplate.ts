@@ -1,6 +1,6 @@
 // AGENTS.md 模板（从后端移植，前端唯一权威定义）
 
-export const AGENTS_VERSION = '0.7.5'
+export const AGENTS_VERSION = '0.8.0'
 
 export const AGENTS_VERSION_TAG_PREFIX = '<!-- DJUI-AGENTS-VERSION:'
 export const AGENTS_VERSION_TAG_SUFFIX = ' -->'
@@ -52,12 +52,14 @@ export function buildAgentsMd(): string {
 │   └── misc/          # 未分类
 ├── 临时文件/          # 中间产物、实验稿，可随时清理
 │   ├── 去绿幕后/      # 去绿幕脚本输出
-│   └── 待审核/        # 裁边压缩后、等待人工审批的素材（按分类子目录）
-│       ├── icons/
-│       ├── buttons/
-│       └── ...
+│   ├── 待审核/        # 裁边压缩后、等待人工审批的素材（按分类子目录）
+│   │   ├── icons/
+│   │   ├── buttons/
+│   │   └── ...
+│   ├── 自动化/        # AI 截图通道的请求/响应中转文件
+│   └── 截图/          # AI 自动化截图输出（djui-shot.mjs 落盘处）
 ├── 文档/              # 设计文档、标注
-└── 脚本区/            # 工具脚本（去绿幕、裁边、压缩等，由 DJUI 维护）
+└── 脚本区/            # 工具脚本（去绿幕、裁边、压缩、截图、发布等，由 DJUI 维护）
 \`\`\`
 
 ---
@@ -356,6 +358,20 @@ node .\\脚本区\\djui-publish.mjs publish --json
 - 若返回 \`INVALID_WORKSPACE\` 且 error 是「工作区结构校验未通过」问题清单（如 contain/cover 缺 sourceSize、节点 ID 重复、响应式覆盖引用了不存在的节点），必须逐条修复后重试；\`publish\` 与 \`validate\` 共用同一套校验，绕不过去
 - \`upgrade-runtime\` 与 \`publish\` 必须分开调用；不得自动覆盖星火工程的 Runtime
 - 当编辑器提示更新脚本区并执行同步时，会自动把旧星火工程内的布局源迁入工作区；迁移只在工作区尚无 \`.djui/layout/project.json\` 时执行，绝不会覆盖现有编辑源
+
+### 6.3 AI 自动化截图（页面渲染出图）
+
+AI 想确认某个页面改完后的渲染效果时，**不需要打开浏览器**，直接调用 \`脚本区/djui-shot.mjs\`：
+
+\`\`\`powershell
+node .\\脚本区\\djui-shot.mjs <页面ID> [--scale 2] [--variant base|wide] [--out 名字]
+\`\`\`
+
+- 成功时 stdout 只打印一张 PNG 的绝对路径（落在 \`临时文件/截图/\`），AI 直接读图即可；失败时 stderr 给出原因
+- 出图走编辑器同款渲染管线（含后景合成、模板实例、九宫格、字体），看到的就是画布所见
+- 前提：**DJUI 编辑器已打开该工作区并授权目录访问**（渲染在浏览器完成）；超时报错通常就是编辑器没开
+- 截图反映的是**磁盘上的页面 JSON 最新内容**——AI 改完 JSON 并通过 \`validate\` 后直接截图核对，闭环不需要任何人工操作
+- \`临时文件/截图/\` 是临时产物，可随时清理，不会被发布
 
 ---
 

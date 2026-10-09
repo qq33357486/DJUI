@@ -329,12 +329,12 @@ function measureChildrenBounds(
   const visibleChildren = node.children.filter(isNodeVisibleForLayout)
   if (visibleChildren.length === 0) return null
 
-  // 布局模式（Vertical/Horizontal/Grid）：autoSize 按排列后的内容边界计算（含 padding 与 spacing），
-  // 不再逐子 solveLayout；测量时强制贴起点对齐（内容对齐偏移属于摆放策略，不应放大容器自然尺寸）
+  // 布局模式（排列开启=flowOrientation 'Grid'）：autoSize 按排列后的内容边界计算（含 padding 与 spacing），
+  // 不再逐子 solveLayout；测量时强制贴起点对齐与零偏移（锚点偏移与显式偏移属于摆放策略，不应放大容器自然尺寸）
   const flow = node.layout?.flowOrientation
-  if (flow === 'Vertical' || flow === 'Horizontal' || flow === 'Grid') {
-    const params = buildArrangeParams(node.layout, flow, true)
-    const items = visibleChildren.map(child => arrangeItemFromNode(child, flow))
+  if (flow === 'Grid') {
+    const params = buildArrangeParams(node.layout, true)
+    const items = visibleChildren.map(child => arrangeItemFromNode(child))
     const arranged = arrangeChildren(containerRect.width, containerRect.height, params, items)
     if (arranged.length === 0) return null
     let maxRight = 0
@@ -424,32 +424,31 @@ function isNodeVisibleForLayout(node: UiNode) {
 // 两侧输出均不取整（取整只在烘焙写回 transform 时做）。
 // ============================================================================
 
-export type ArrangeFlow = 'Vertical' | 'Horizontal' | 'Grid'
-
 export interface ArrangeItem {
   id: string
   /** 排序键：childOrder='ByName' 时按码点序参与比较；null/undefined 归一为空串（排最前） */
   name?: string | null
   width: number
   height: number
-  /** 宽度弹性比例（= widthStretchRatio）：列表模式主轴分尺寸/交叉轴撑满用；Grid 不参与 */
-  hGrow: number
-  /** 高度弹性比例（= heightStretchRatio） */
-  vGrow: number
 }
 
 export interface ArrangeParams {
-  flow: ArrangeFlow
+  /** 排列流向：LeftToRight/RightToLeft=每行 N 个（行内左→右/右→左，换行向下）；TopDown/BottomUp=每列 N 个（列内上→下/下→上，换列向右） */
+  flowDirection: 'LeftToRight' | 'RightToLeft' | 'TopDown' | 'BottomUp'
   spacingH: number
   spacingV: number
   padLeft: number
   padTop: number
   padRight: number
   padBottom: number
+  /** 起始锚点（内容块整体停靠）：决定排列内容块在内容区内的整体偏移 */
   hAlign: 'Left' | 'Center' | 'Right' | 'Stretch'
   vAlign: 'Top' | 'Center' | 'Bottom' | 'Stretch'
-  gridFlow: 'Horizontal' | 'Vertical'
+  /** 每行/每列个数 N（流向为 Left/Right=每行个数，Top/Bottom=每列个数；1=单行条/单列列表） */
   gridCount: number
+  /** 锚点定位后的显式偏移（layout.contentOffset [x, y]），可为负、不钳制 */
+  offsetX: number
+  offsetY: number
   childOrder: 'Default' | 'ByName'
 }
 
@@ -466,16 +465,17 @@ export interface ArrangeResult {
  * a) 排序：childOrder='ByName' 时按 name 码点升序稳定排序（无名项归一空串排最前，比较相等返回 0
  *    保持文档序；禁 localeCompare——须与 C# OrderBy(Ordinal) 稳定排序一致）；Default=文档序。
  *    排序只决定排列位置的计算顺序，禁止改动 children 数组顺序。
- * b) Vertical：间距 spacingV；vGrow>0 子项按比例分「内高-总间距-固定高」的剩余高，固定子项取自身高；
- *    交叉轴宽 hGrow>0 时撑满内宽。
- * c) Horizontal：与 b) 对称（spacingH 主轴、hGrow 分宽、vGrow>0 撑满内高）。
- * d) Grid：gridCount 兜底 Math.max(1, Math.floor(v))，严格按个数断行/断列（绝不按容器宽度自动换行）；
- *    水平优先=每行 N 个放满换行，行高=行内子项最大高、行内顶对齐；垂直优先对称（列宽=列内最大宽、
- *    列内左对齐）；格子尺寸=子项自身尺寸（不设统一格宽高，stretchRatio 不参与）。
- * e) 内容对齐：先按贴起点 (padLeft, padTop) 排出内容块包围盒（含 spacing），再整体偏移——
- *    Center=max(0, (内尺寸-内容尺寸)/2)、Right/Bottom=max(0, 内尺寸-内容尺寸)、Left/Top/Stretch=0；
- *    超出内容区时贴起点照排、绝不压缩（offset 钳 0）；Stretch=维持撑满行为，不额外偏移（与 Left/Top 等价，
- *    由对拍脚本等价断言锁定）。
+ * b) 排列（单一网格语义，单列/单行/网格统一）：gridCount 兜底 Math.max(1, Math.floor(v))，
+ *    严格按个数断行/断列（绝不按容器宽度自动换行）；格子尺寸=子项自身尺寸（不设统一格宽高，
+ *    子项弹性比例不参与排列——0.30.0 起排列语义统一，旧列表模式的弹性由 patches 迁移收编）。
+ *    流向四向：LeftToRight=每行 N 个左→右换行向下；RightToLeft=行内右→左（子项右缘贴推进沿），
+ *    换行向下；TopDown=每列 N 个上→下换列向右；BottomUp=列内下→上（子项底缘贴推进沿），换列向右。
+ *    行内交叉轴对齐恒贴起点（每行的子项顶对齐、每列的子项左对齐），不随流向镜像；
+ *    行高=行内子项最大高、列宽=列内子项最大宽。
+ * c) 起始锚点 + 偏移：先按贴起点 (padLeft, padTop) 排出内容块包围盒（含 spacing），锚点整体偏移——
+ *    Center=max(0, (内尺寸-内容尺寸)/2)、Right/Bottom=max(0, 内尺寸-内容尺寸)、Left/Top/Stretch=0
+ *    （超出内容区时贴起点照排、绝不压缩，锚点偏移钳 0；Stretch 与 Left/Top 等价，由对拍等价断言锁定）；
+ *    再叠加显式偏移 offsetX/offsetY（不钳制，允许负值与越界——显式意图优先）。
  */
 export function arrangeChildren(
   containerW: number,
@@ -504,110 +504,58 @@ export function arrangeChildren(
 
   const rects: ArrangeResult[] = []
 
-  if (params.flow === 'Vertical') {
-    // b) 垂直堆叠
-    const spacing = params.spacingV
-    const totalSpacing = spacing * (ordered.length - 1)
-    const availH = innerH - totalSpacing
-
-    // 第一遍：算出固定高度和需要 flex 的
-    const heights: number[] = []
-    let fixedH = 0
-    let totalGrow = 0
-    for (const it of ordered) {
-      if (it.vGrow > 0) {
-        heights.push(-1) // 待定
-        totalGrow += it.vGrow
-      } else {
-        heights.push(it.height)
-        fixedH += it.height
-      }
-    }
-
-    // 分配 flex 空间
-    const freeH = Math.max(0, availH - fixedH)
-    for (let i = 0; i < ordered.length; i++) {
-      if (heights[i] === -1) {
-        heights[i] = totalGrow > 0 ? (freeH * ordered[i].vGrow / totalGrow) : 0
-      }
-    }
-
-    // 排列（贴起点）
-    let curY = padTop
-    for (let i = 0; i < ordered.length; i++) {
-      const it = ordered[i]
-      const w = it.hGrow > 0 ? innerW : it.width
-      rects.push({ id: it.id, x: padLeft, y: curY, width: w, height: heights[i] })
-      curY += heights[i] + spacing
-    }
-  } else if (params.flow === 'Horizontal') {
-    // c) 水平堆叠（与垂直对称）
-    const spacing = params.spacingH
-    const totalSpacing = spacing * (ordered.length - 1)
-    const availW = innerW - totalSpacing
-
-    const widths: number[] = []
-    let fixedW = 0
-    let totalGrow = 0
-    for (const it of ordered) {
-      if (it.hGrow > 0) {
-        widths.push(-1) // 待定
-        totalGrow += it.hGrow
-      } else {
-        widths.push(it.width)
-        fixedW += it.width
-      }
-    }
-
-    const freeW = Math.max(0, availW - fixedW)
-    for (let i = 0; i < ordered.length; i++) {
-      if (widths[i] === -1) {
-        widths[i] = totalGrow > 0 ? (freeW * ordered[i].hGrow / totalGrow) : 0
-      }
-    }
-
-    let curX = padLeft
-    for (let i = 0; i < ordered.length; i++) {
-      const it = ordered[i]
-      const h = it.vGrow > 0 ? innerH : it.height
-      rects.push({ id: it.id, x: curX, y: padTop, width: widths[i], height: h })
-      curX += widths[i] + spacing
-    }
-  } else {
-    // d) 网格
-    const count = Math.max(1, Math.floor(params.gridCount))
-    if (params.gridFlow === 'Vertical') {
-      // 垂直优先：每 count 个一列放满换列；列宽=列内子项最大宽，列内左对齐
-      let colLeft = padLeft
-      for (let start = 0; start < ordered.length; start += count) {
-        const col = ordered.slice(start, start + count)
-        let colW = 0
-        for (const it of col) colW = Math.max(colW, it.width)
-        let curY = padTop
-        for (const it of col) {
-          rects.push({ id: it.id, x: colLeft, y: curY, width: it.width, height: it.height })
-          curY += it.height + params.spacingV
+  // b) 排列（单一网格语义）
+  const count = Math.max(1, Math.floor(params.gridCount))
+  const horizontalRows = params.flowDirection === 'LeftToRight' || params.flowDirection === 'RightToLeft'
+  if (horizontalRows) {
+    // 每行 N 个，换行向下；行高=行内最大高，行内顶对齐（交叉轴不随流向镜像）
+    let rowTop = padTop
+    for (let start = 0; start < ordered.length; start += count) {
+      const row = ordered.slice(start, start + count)
+      let rowH = 0
+      for (const it of row) rowH = Math.max(rowH, it.height)
+      if (params.flowDirection === 'RightToLeft') {
+        // 行内右→左：子项右缘贴推进沿（起点=内容区右缘）
+        let curRight = padLeft + innerW
+        for (const it of row) {
+          rects.push({ id: it.id, x: curRight - it.width, y: rowTop, width: it.width, height: it.height })
+          curRight -= it.width + params.spacingH
         }
-        colLeft += colW + params.spacingH
-      }
-    } else {
-      // 水平优先：每 count 个一行放满换行；行高=行内子项最大高，行内顶对齐
-      let rowTop = padTop
-      for (let start = 0; start < ordered.length; start += count) {
-        const row = ordered.slice(start, start + count)
-        let rowH = 0
-        for (const it of row) rowH = Math.max(rowH, it.height)
+      } else {
         let curX = padLeft
         for (const it of row) {
           rects.push({ id: it.id, x: curX, y: rowTop, width: it.width, height: it.height })
           curX += it.width + params.spacingH
         }
-        rowTop += rowH + params.spacingV
       }
+      rowTop += rowH + params.spacingV
+    }
+  } else {
+    // 每列 N 个，换列向右；列宽=列内最大宽，列内左对齐（交叉轴不随流向镜像）
+    let colLeft = padLeft
+    for (let start = 0; start < ordered.length; start += count) {
+      const col = ordered.slice(start, start + count)
+      let colW = 0
+      for (const it of col) colW = Math.max(colW, it.width)
+      if (params.flowDirection === 'BottomUp') {
+        // 列内下→上：子项底缘贴推进沿（起点=内容区下缘）
+        let curBottom = padTop + innerH
+        for (const it of col) {
+          rects.push({ id: it.id, x: colLeft, y: curBottom - it.height, width: it.width, height: it.height })
+          curBottom -= it.height + params.spacingV
+        }
+      } else {
+        let curY = padTop
+        for (const it of col) {
+          rects.push({ id: it.id, x: colLeft, y: curY, width: it.width, height: it.height })
+          curY += it.height + params.spacingV
+        }
+      }
+      colLeft += colW + params.spacingH
     }
   }
 
-  // e) 内容对齐：内容块包围盒（相对内容起点）→ 整体偏移
+  // c) 起始锚点：内容块包围盒（相对内容起点）→ 整体偏移；再叠加显式偏移（不钳制）
   let contentW = 0
   let contentH = 0
   for (const r of rects) {
@@ -620,26 +568,29 @@ export function arrangeChildren(
   let offsetY = 0
   if (params.vAlign === 'Center') offsetY = Math.max(0, (innerH - contentH) / 2)
   else if (params.vAlign === 'Bottom') offsetY = Math.max(0, innerH - contentH)
-  if (offsetX !== 0 || offsetY !== 0) {
-    for (const r of rects) {
-      r.x += offsetX
-      r.y += offsetY
-    }
+  offsetX += params.offsetX
+  offsetY += params.offsetY
+  for (const r of rects) {
+    r.x += offsetX
+    r.y += offsetY
   }
 
   return rects
 }
 
-// 从 DjuiLayout 构造排列参数（null/缺省兜底：spacing [0,0]、padding 四零、内容对齐贴左上、网格水平优先 1 个、文档序）。
-// forMeasure=true 时强制贴起点对齐：autoSize 测自然内容边界，内容对齐偏移不应放大容器尺寸
-function buildArrangeParams(layout: DjuiLayout | null | undefined, flow: ArrangeFlow, forMeasure = false): ArrangeParams {
+// 从 DjuiLayout 构造排列参数（null/缺省兜底：spacing [0,0]、padding 四零、锚点贴左上、
+// 流向 LeftToRight、每行/每列 1 个、无偏移、文档序）。
+// forMeasure=true 时强制贴起点对齐与零偏移：autoSize 测自然内容边界，
+// 内容对齐偏移与显式偏移属于摆放策略，不应放大容器尺寸
+function buildArrangeParams(layout: DjuiLayout | null | undefined, forMeasure = false): ArrangeParams {
   const sp = layout?.spacing
   const spacingH = Array.isArray(sp) && typeof sp[0] === 'number' ? sp[0] : 0
   const spacingV = Array.isArray(sp) && typeof sp[1] === 'number' ? sp[1] : 0
   const padding = layout?.padding ?? [0, 0, 0, 0]
   const gc = layout?.gridCount
+  const co = layout?.contentOffset
   return {
-    flow,
+    flowDirection: layout?.flowDirection ?? 'LeftToRight',
     spacingH,
     spacingV,
     padLeft: padding[0] ?? 0,
@@ -648,42 +599,39 @@ function buildArrangeParams(layout: DjuiLayout | null | undefined, flow: Arrange
     padBottom: padding[3] ?? 0,
     hAlign: forMeasure ? 'Left' : (layout?.horizontalContentAlignment ?? 'Left'),
     vAlign: forMeasure ? 'Top' : (layout?.verticalContentAlignment ?? 'Top'),
-    gridFlow: layout?.gridFlow ?? 'Horizontal',
     gridCount: typeof gc === 'number' && Number.isFinite(gc) ? gc : 1,
+    offsetX: forMeasure ? 0 : (Array.isArray(co) && typeof co[0] === 'number' ? co[0] : 0),
+    offsetY: forMeasure ? 0 : (Array.isArray(co) && typeof co[1] === 'number' ? co[1] : 0),
     childOrder: layout?.childOrder === 'ByName' ? 'ByName' : 'Default',
   }
 }
 
-// UiNode → ArrangeItem（尺寸默认与原实现一致：宽缺省 100；高缺省 Vertical/Grid 50、Horizontal 100）
-function arrangeItemFromNode(child: UiNode, flow: ArrangeFlow): ArrangeItem {
+// UiNode → ArrangeItem（尺寸默认：宽 100 / 高 50；0.30.0 排列语义统一后的统一缺省——
+// 旧 Horizontal 堆叠缺省高 100 的行为随模式迁移取消，烘焙数据子项尺寸几乎都显式存在）
+function arrangeItemFromNode(child: UiNode): ArrangeItem {
   return {
     id: child.id,
     name: child.name,
     width: child.transform?.width ?? 100,
-    height: child.transform?.height ?? (flow === 'Horizontal' ? 100 : 50),
-    hGrow: child.widthStretchRatio ?? 0,
-    vGrow: child.heightStretchRatio ?? 0,
+    height: child.transform?.height ?? 50,
   }
 }
 
 /**
- * 计算容器内所有子控件的排列位置（Vertical/Horizontal/Grid）。
+ * 计算容器内所有子控件的排列位置（布局模式开启=flowOrientation 'Grid' 时调用）。
  * 纯包装：排列语义全部在 arrangeChildren（双端对拍基准）。
  * 返回子 id → 画布绝对坐标矩形；编辑器烘焙写回 transform 时须减容器绝对位置（历史漂移坑，见 editorStore.applyFlexLayout）。
  */
 export function solveChildrenFlex(
   containerRect: Rect,
-  flow: 'Vertical' | 'Horizontal' | 'Grid',
   layout: DjuiLayout | null | undefined,
   children: UiNode[],
-  canvasW: number,
-  canvasH: number
 ): Map<string, Rect> {
   const result = new Map<string, Rect>()
   if (!children || children.length === 0) return result
 
-  const params = buildArrangeParams(layout, flow)
-  const items = children.map(child => arrangeItemFromNode(child, flow))
+  const params = buildArrangeParams(layout)
+  const items = children.map(child => arrangeItemFromNode(child))
   const arranged = arrangeChildren(containerRect.width, containerRect.height, params, items)
   for (const r of arranged) {
     result.set(r.id, { x: containerRect.x + r.x, y: containerRect.y + r.y, width: r.width, height: r.height })

@@ -233,9 +233,10 @@ function patchNode(node: unknown, defaultButtonSoundId: string | null, result: P
 }
 
 /**
- * v6 布局兼容迁移（两条，均幂等）：
+ * v6 布局兼容迁移（均幂等）：
  *  1. 旧 spacing 单值 number → [v, v] 二元组（自 0.29.0 起 10 个版本后删除）
  *  2. 旧「流式容器」starType 'SpacingPanel' → 'Panel'（自 0.29.0 起 10 个版本后删除）
+ *  3. 排列模式统一：Vertical/Horizontal/gridFlow → Grid + flowDirection (+count)（自 0.30.0 起 10 个版本后删除）
  *
  * 关于「升级页面 version」：v6 页面文件没有页面级 version 字段可升（顶层 protocolVersion/schemaVersion
  * 受 Runtime 严格反序列化保护，不能新增），故按幂等形态检测实现（typeof spacing === 'number' 才转、
@@ -251,7 +252,7 @@ export function migrateV6LayoutCompat(raw: unknown): boolean {
   return migrateLayoutCompatTree(raw)
 }
 
-// 单节点的两条迁移（幂等形态检测）；patchNode 发布链与 migrateV6LayoutCompat 共用，避免重复实现
+// 单节点的迁移（幂等形态检测）；patchNode 发布链与 migrateV6LayoutCompat 共用，避免重复实现
 function applyLayoutCompatToNode(node: JsonRecord): boolean {
   let changed = false
   const layout = isRecord(node.layout) ? node.layout : null
@@ -264,6 +265,29 @@ function applyLayoutCompatToNode(node: JsonRecord): boolean {
     // 旧「流式容器」并入普通容器（自 0.29.0 起 10 个版本后删除）
     node.starType = 'Panel'
     changed = true
+  }
+  if (layout) {
+    // 排列模式统一（自 0.30.0 起 10 个版本后删除）：
+    //   Vertical → Grid + TopDown + count 1；Horizontal → Grid + LeftToRight + count 1
+    //   旧 gridFlow（Horizontal/Vertical 优先）→ flowDirection（LeftToRight/TopDown）
+    if (layout.flowOrientation === 'Vertical' || layout.flowOrientation === 'Horizontal') {
+      const isVert = layout.flowOrientation === 'Vertical'
+      layout.flowOrientation = 'Grid'
+      if (layout.flowDirection === undefined || layout.flowDirection === null) {
+        layout.flowDirection = isVert ? 'TopDown' : 'LeftToRight'
+      }
+      if (layout.gridCount === undefined || layout.gridCount === null) layout.gridCount = 1
+      changed = true
+    } else if (layout.flowOrientation === 'Grid' && (layout.gridFlow === 'Horizontal' || layout.gridFlow === 'Vertical')) {
+      if (layout.flowDirection === undefined || layout.flowDirection === null) {
+        layout.flowDirection = layout.gridFlow === 'Vertical' ? 'TopDown' : 'LeftToRight'
+      }
+      changed = true
+    }
+    if (layout.gridFlow !== undefined) {
+      delete layout.gridFlow
+      changed = true
+    }
   }
   return changed
 }

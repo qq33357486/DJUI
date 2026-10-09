@@ -355,8 +355,14 @@ public class DjuiLayoutJson
     [JsonPropertyName("gridFlow")]
     public string? GridFlow { get; set; }
 
+    [JsonPropertyName("flowDirection")]
+    public string? FlowDirection { get; set; }
+
     [JsonPropertyName("gridCount")]
     public int? GridCount { get; set; }
+
+    [JsonPropertyName("contentOffset")]
+    public float[]? ContentOffset { get; set; }
 
     [JsonPropertyName("childOrder")]
     public string? ChildOrder { get; set; }

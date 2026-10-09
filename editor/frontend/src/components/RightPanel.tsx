@@ -1,5 +1,5 @@
 import { Collapse, Empty, Input, InputNumber, Select, Switch, Button, Space, ColorPicker, Tooltip, Slider, message } from 'antd'
-import { DeleteOutlined, ColumnHeightOutlined, PictureOutlined } from '@ant-design/icons'
+import { DeleteOutlined, ColumnHeightOutlined, PictureOutlined, LinkOutlined } from '@ant-design/icons'
 import { useEditorStore, findNode } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
 import { DEFAULT_EFFECT_PRESETS, COMPONENT_LIBRARY, UiPage, DjuiAnchor } from '@/types/layout'
@@ -563,7 +563,11 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                 )}
                 <ScrubField label="圆角" value={app.cornerRadius ?? 0} onChange={v => updateNodeField(node.id, 'appearance.cornerRadius', v)} min={0} />
                 <FieldRow label="裁剪">
-                  <Switch size="small" checked={app.clipContent ?? false} onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
+                  <Tooltip title={node.starType === 'PanelScrollable' ? '滚动容器恒裁切（滚动语义，不可关）' : '裁掉超出控件范围的子内容'}>
+                    <Switch size="small" disabled={node.starType === 'PanelScrollable'}
+                      checked={node.starType === 'PanelScrollable' ? true : (app.clipContent ?? false)}
+                      onChange={v => updateNodeField(node.id, 'appearance.clipContent', v)} />
+                  </Tooltip>
                 </FieldRow>
               </Space>
       </ModuleCard>
@@ -742,14 +746,7 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
           ['Panel', 'SpacingPanel', 'PanelScrollable'].includes(node.starType) ? {
             key: 'container', label: <TypeGroupLabel title="容器布局" types="Panel · SpacingPanel · PanelScrollable" />,
             children: (
-              <Space direction="vertical" style={{ width: '100%' }} size={10}>
-                <ContainerLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
-                <SectionTitle>对齐</SectionTitle>
-                {node.layout?.flowOrientation && node.layout.flowOrientation !== 'None' && (
-                  <div style={{ fontSize: 10, color: '#5b6378' }}>开启排列后，内容对齐未设置时默认贴左上角</div>
-                )}
-                <AlignmentEditor node={node} updateNodeField={updateNodeField} />
-              </Space>
+              <ContainerLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
             ),
           } : null,
           node.starType === 'TemplateInstance' ? {
@@ -2011,7 +2008,146 @@ function filterItems(items: any[]) {
   return items.filter(Boolean)
 }
 
-// === 容器布局编辑器（仅容器类型：自适应 / 布局模式 / 间距 / 网格 / 内边距 / 子项排序 / 自动重排）===
+// === 紧凑数值行：两值（间距/偏移）与四值（内边距，带四边同值联动锁）===
+// 替代此前每值一行的堆砌：一行摆完，标签内嵌在输入框侧
+function PairNumInputs({ a, b, labelA, labelB, onChange, min = 0 }: {
+  a: number; b: number; labelA: string; labelB: string
+  onChange: (axis: 0 | 1, v: number) => void
+  min?: number
+}) {
+  const inputStyle = { flex: 1, minWidth: 0 } as const
+  const labelStyle = { fontSize: 10, color: '#9aa3b4', flexShrink: 0 } as const
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', width: '100%' }}>
+      <span style={labelStyle}>{labelA}</span>
+      <InputNumber size="small" style={inputStyle} value={a} min={min} precision={0}
+        onChange={v => onChange(0, v ?? 0)} />
+      <span style={labelStyle}>{labelB}</span>
+      <InputNumber size="small" style={inputStyle} value={b} min={min} precision={0}
+        onChange={v => onChange(1, v ?? 0)} />
+    </div>
+  )
+}
+
+function QuadNumInputs({ values, onChange }: {
+  values: [number, number, number, number]
+  onChange: (idx: number, v: number) => void
+}) {
+  const [linked, setLinked] = useState(false)
+  const labels = ['左', '上', '右', '下']
+  const handleChange = (idx: number, v: number) => {
+    if (linked) {
+      for (let i = 0; i < 4; i++) onChange(i, v)
+    } else {
+      onChange(idx, v)
+    }
+  }
+  return (
+    <div style={{ display: 'flex', gap: 3, alignItems: 'center', width: '100%' }}>
+      {values.map((v, i) => (
+        <InputNumber key={i} size="small" style={{ flex: 1, minWidth: 0 }} value={v} min={0} precision={0}
+          placeholder={labels[i]}
+          onChange={nv => handleChange(i, nv ?? 0)} />
+      ))}
+      <Tooltip title={linked ? '四边同值：开（改一个同步四个）' : '四边同值：关'}>
+        <Button size="small" type="text"
+          style={{ color: linked ? '#5ab9ff' : '#5b6378', flexShrink: 0, padding: '0 4px' }}
+          icon={<LinkOutlined />} onClick={() => setLinked(l => !l)} />
+      </Tooltip>
+    </div>
+  )
+}
+
+// === 排列流向按钮组（四向：上到下 / 下到上 / 左到右 / 右到左）===
+function FlowDirectionButtons({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const options = [
+    { value: 'TopDown', arrow: '↓', tip: '上到下（每列 N 个，换列向右）' },
+    { value: 'BottomUp', arrow: '↑', tip: '下到上（每列 N 个，换列向右）' },
+    { value: 'LeftToRight', arrow: '→', tip: '左到右（每行 N 个，换行向下）' },
+    { value: 'RightToLeft', arrow: '←', tip: '右到左（每行 N 个，换行向下）' },
+  ]
+  return (
+    <div style={{ display: 'flex', gap: 4, width: '100%' }}>
+      {options.map(o => {
+        const active = value === o.value
+        return (
+          <Tooltip key={o.value} title={o.tip}>
+            <Button size="small" style={{ flex: 1, minWidth: 0, padding: 0,
+                borderColor: active ? '#5ab9ff' : undefined,
+                color: active ? '#5ab9ff' : undefined,
+                background: active ? 'rgba(90,185,255,0.12)' : undefined }}
+              onClick={() => onChange(o.value)}>
+              {o.arrow}
+            </Button>
+          </Tooltip>
+        )
+      })}
+    </div>
+  )
+}
+
+// === 排列起始锚点九宫格（写 layout.horizontal/verticalContentAlignment）===
+// 视觉语言与 AnchorEditor/TextAlignGrid 一致：外框盒子 + 3×3 格子点选。
+// 排列语义：null/Stretch 与左上等价（贴起点），故未设置时高亮左上格；点选永远写具体值
+function AnchorStartGrid({ h, v, onPick }: {
+  h?: string | null
+  v?: string | null
+  onPick: (h: 'Left' | 'Center' | 'Right', v: 'Top' | 'Center' | 'Bottom') => void
+}) {
+  const activeCol = h === 'Center' ? 1 : h === 'Right' ? 2 : 0
+  const activeRow = v === 'Center' ? 1 : v === 'Bottom' ? 2 : 0
+  const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
+  return (
+    <div style={{ padding: 10, background: '#0f1117', border: '1px solid #2a3142', borderRadius: 6 }}>
+      <div style={{ fontSize: 10, color: '#5b6378', marginBottom: 8, textAlign: 'center' }}>
+        起始锚点 · 排列内容停靠位置
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateRows: 'repeat(3, 1fr)',
+        gap: 4,
+        width: '100%',
+        maxWidth: 150,
+        margin: '0 auto',
+        aspectRatio: '5 / 3',
+      }}>
+        {Array.from({ length: 9 }, (_, i) => {
+          const row = Math.floor(i / 3)
+          const col = i % 3
+          const active = row === activeRow && col === activeCol
+          const hover = hoverCell !== null && hoverCell[0] === row && hoverCell[1] === col
+          return (
+            <div key={i}
+              onMouseEnter={() => setHoverCell([row, col])}
+              onMouseLeave={() => setHoverCell(null)}
+              onClick={() => onPick(
+                (['Left', 'Center', 'Right'] as const)[col],
+                (['Top', 'Center', 'Bottom'] as const)[row],
+              )}
+              style={{
+                background: active ? 'rgba(90,185,255,0.55)' : hover ? 'rgba(90,185,255,0.18)' : '#1d2230',
+                border: `1px solid ${active ? '#5ab9ff' : '#2a3142'}`,
+                borderRadius: 4,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 10,
+                color: active ? '#e8f4ff' : '#5b6378',
+                userSelect: 'none',
+              }}>
+              {active ? '●' : ''}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// === 容器布局编辑器（仅容器类型）：排列（模式/流向/个数）→ 起始位置（锚点/偏移）→
+// 间距与内边距（紧凑控件）→ 子项与自动化（排序/自动重排/手动重排），四分区组织 ===
 function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
@@ -2020,8 +2156,7 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
   const layout = node.layout ?? {}
   const autoSize = layout.autoSize ?? 'None'
   const autoSizeConflicts = autoSize === 'None' ? [] : collectAutoSizeConflicts(node)
-  const flow = layout.flowOrientation ?? 'None'
-  const flowActive = flow === 'Vertical' || flow === 'Horizontal' || flow === 'Grid'
+  const flowActive = layout.flowOrientation === 'Grid'
 
   // 延迟一帧等 store 写完布局参数后再把排列结果烘焙进子控件坐标（沿用原间距编辑的触发模式）
   const relayoutSoon = () => setTimeout(() => applyFlexLayout(node.id), 0)
@@ -2032,11 +2167,22 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
 
   const handleFlowChange = (v: string) => {
     updateNodeField(node.id, 'layout.flowOrientation', v)
-    // 开启排列模式时，立即把排列结果写回子控件坐标（Grid 同样支持）
-    if (v === 'Vertical' || v === 'Horizontal' || v === 'Grid') {
-      relayoutSoon()
-    }
+    if (v === 'Grid') relayoutSoon()
     // 切回 None 不做清理：保留排列参数便于切回
+  }
+
+  // 流向（四向）+ 每行/每列个数：个数为 1 即单列列表/单行条，>1 即网格——单一概念覆盖三种形态
+  const flowDirection: string = layout.flowDirection ?? 'LeftToRight'
+  const isRowFlow = flowDirection === 'LeftToRight' || flowDirection === 'RightToLeft'
+  const gridCount = typeof layout.gridCount === 'number' && Number.isFinite(layout.gridCount) ? layout.gridCount : 1
+  const handleFlowDirectionChange = (v: string) => {
+    updateNodeField(node.id, 'layout.flowDirection', v)
+    relayoutSoon()
+  }
+  const handleGridCountChange = (v: number | null) => {
+    // 正整数（InputNumber precision=0 拦小数输入，此处再兜底钳制；normalize 是最终防线）
+    updateNodeField(node.id, 'layout.gridCount', Math.max(1, Math.floor(v ?? 1)))
+    relayoutSoon()
   }
 
   // spacing 二元组 [水平间距, 垂直间距]（旧单值已由 patches 迁移；读时兜底数组形态）
@@ -2047,7 +2193,6 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
     const next: [number, number] = [spacing[0], spacing[1]]
     next[axis] = v
     updateNodeField(node.id, 'layout.spacing', next)
-    // 间距变化时重新排列
     if (flowActive) relayoutSoon()
   }
 
@@ -2062,17 +2207,22 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
     if (flowActive) relayoutSoon()
   }
 
-  // Grid 参数：排列方向 + 每行/每列个数（单一 gridCount，非当前方向的个数项禁用置灰）
-  const gridFlow: 'Horizontal' | 'Vertical' = layout.gridFlow === 'Vertical' ? 'Vertical' : 'Horizontal'
-  const gridCount = typeof layout.gridCount === 'number' && Number.isFinite(layout.gridCount) ? layout.gridCount : 1
-  const handleGridFlowChange = (v: string) => {
-    updateNodeField(node.id, 'layout.gridFlow', v)
-    if (flow === 'Grid') relayoutSoon()
+  // 起始锚点偏移 [x, y]（锚点定位后叠加，可为负）
+  const contentOffset: [number, number] = Array.isArray(layout.contentOffset)
+    ? [typeof layout.contentOffset[0] === 'number' ? layout.contentOffset[0] : 0, typeof layout.contentOffset[1] === 'number' ? layout.contentOffset[1] : 0]
+    : [0, 0]
+  const handleOffsetChange = (axis: 0 | 1, v: number) => {
+    const next: [number, number] = [contentOffset[0], contentOffset[1]]
+    next[axis] = v
+    updateNodeField(node.id, 'layout.contentOffset', next)
+    relayoutSoon()
   }
-  const handleGridCountChange = (v: number | null) => {
-    // 正整数（InputNumber precision=0 拦小数输入，此处再兜底钳制；normalize 是最终防线）
-    updateNodeField(node.id, 'layout.gridCount', Math.max(1, Math.floor(v ?? 1)))
-    if (flow === 'Grid') relayoutSoon()
+
+  // 锚点九宫格：写内容对齐两字段（两次同步 set 后统一触发一次重排）
+  const handleAnchorPick = (h: 'Left' | 'Center' | 'Right', v: 'Top' | 'Center' | 'Bottom') => {
+    updateNodeField(node.id, 'layout.horizontalContentAlignment', h)
+    updateNodeField(node.id, 'layout.verticalContentAlignment', v)
+    relayoutSoon()
   }
 
   const handleChildOrderChange = (v: string) => {
@@ -2107,71 +2257,52 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
             : '自动尺寸按可见子控件边界计算，隐藏节点不参与。'}
         </div>
       )}
-      <FieldRow label="布局模式">
+
+      <FieldRow label="排列">
         <Select
           size="small" style={{ width: '100%' }}
-          value={flow}
+          value={flowActive ? 'Grid' : 'None'}
           onChange={handleFlowChange}
           options={[
             { value: 'None', label: '无（手动定位）' },
-            { value: 'Vertical', label: '垂直堆叠 ↓' },
-            { value: 'Horizontal', label: '水平堆叠 →' },
-            { value: 'Grid', label: '网格排列 ▦' },
+            { value: 'Grid', label: '排列' },
           ]}
         />
       </FieldRow>
       {flowActive && (
         <>
-          {/* 间距分轴：垂直列表亮垂直间距、水平列表亮水平间距、网格两个都亮 */}
-          <ScrubField label="水平间距" value={spacing[0]} onChange={v => handleSpacingChange(0, v)} min={0} disabled={flow === 'Vertical'} />
-          <ScrubField label="垂直间距" value={spacing[1]} onChange={v => handleSpacingChange(1, v)} min={0} disabled={flow === 'Horizontal'} />
-        </>
-      )}
-      {flow === 'Grid' && (
-        <>
-          <FieldRow label="排列方向">
-            <Select
-              size="small" style={{ width: '100%' }}
-              value={gridFlow}
-              onChange={handleGridFlowChange}
-              options={[
-                { value: 'Horizontal', label: '水平优先（每行放满换行）' },
-                { value: 'Vertical', label: '垂直优先（每列放满换列）' },
-              ]}
-            />
+          <FieldRow label="流向">
+            <FlowDirectionButtons value={flowDirection} onChange={handleFlowDirectionChange} />
           </FieldRow>
-          {/* 单一 gridCount：水平优先时「每行个数」生效，垂直优先时「每列个数」生效；非当前方向的项禁用置灰 */}
-          <FieldRow label="每行个数">
+          <FieldRow label={isRowFlow ? '每行个数' : '每列个数'}>
             <InputNumber
               size="small" style={{ width: '100%' }}
               min={1}
               precision={0}
               value={gridCount}
-              disabled={gridFlow !== 'Horizontal'}
-              onChange={handleGridCountChange}
-            />
-          </FieldRow>
-          <FieldRow label="每列个数">
-            <InputNumber
-              size="small" style={{ width: '100%' }}
-              min={1}
-              precision={0}
-              value={gridCount}
-              disabled={gridFlow !== 'Vertical'}
               onChange={handleGridCountChange}
             />
           </FieldRow>
           <div style={{ fontSize: 10, color: '#5b6378' }}>
-            网格严格按个数断行/断列，不按容器宽度自动换行；子项弹性比例不参与网格排列。
+            个数为 1 即单列列表/单行条；严格按个数换行，不按容器宽度；子项弹性不参与排列。
           </div>
-        </>
-      )}
-      {flowActive && (
-        <>
-          <ScrubField label="内边距·左" value={padding[0]} onChange={v => handlePaddingChange(0, v)} min={0} />
-          <ScrubField label="内边距·上" value={padding[1]} onChange={v => handlePaddingChange(1, v)} min={0} />
-          <ScrubField label="内边距·右" value={padding[2]} onChange={v => handlePaddingChange(2, v)} min={0} />
-          <ScrubField label="内边距·下" value={padding[3]} onChange={v => handlePaddingChange(3, v)} min={0} />
+
+          <SectionTitle>起始位置</SectionTitle>
+          <AnchorStartGrid h={layout.horizontalContentAlignment} v={layout.verticalContentAlignment} onPick={handleAnchorPick} />
+          <FieldRow label="偏移">
+            <PairNumInputs a={contentOffset[0]} b={contentOffset[1]} labelA="X" labelB="Y"
+              min={-9999} onChange={handleOffsetChange} />
+          </FieldRow>
+
+          <SectionTitle>间距与内边距</SectionTitle>
+          <FieldRow label="间距">
+            <PairNumInputs a={spacing[0]} b={spacing[1]} labelA="水平" labelB="垂直" onChange={handleSpacingChange} />
+          </FieldRow>
+          <FieldRow label="内边距">
+            <QuadNumInputs values={padding} onChange={handlePaddingChange} />
+          </FieldRow>
+
+          <SectionTitle>子项与自动化</SectionTitle>
           <FieldRow label="子项顺序">
             <Select
               size="small" style={{ width: '100%' }}
@@ -2183,14 +2314,11 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
               ]}
             />
           </FieldRow>
-          <div style={{ fontSize: 10, color: '#5b6378' }}>
-            按名称升序：无名子项按空名排最前；排序只影响排列位置，不改动层级顺序。
-          </div>
           <FieldRow label="自动重排">
             <Switch size="small" checked={layout.autoRelayout !== false} onChange={handleAutoRelayoutChange} />
           </FieldRow>
           <div style={{ fontSize: 10, color: '#5b6378' }}>
-            开启后子项位置由容器排列管理，增删子控件与调整顺序时自动重排；需手动定位请关闭或切回无布局。
+            开启后子项位置由容器排列管理，增删/调序/撤销时自动保持整齐；关闭后仅手动点下方按钮重排。
           </div>
           <Button size="small" block onClick={() => applyFlexLayout(node.id)}>
             重新排列子控件
@@ -2215,7 +2343,7 @@ function FlexLayoutPanel({ node, updateNodeField }: {
       <ScrubField label="垂直收缩" value={node.heightCompactRatio ?? 0} onChange={v => updateNodeField(node.id, 'heightCompactRatio', v)} step={0.05} min={0} max={1} />
       {layout.flowOrientation && layout.flowOrientation !== 'None' && (
         <div style={{ fontSize: 10, color: '#5b6378' }}>
-          增长=占据父容器剩余空间比例 · 收缩=空间不足时缩小比例
+          增长=占据父容器剩余空间比例 · 收缩=空间不足时缩小比例（父容器开启排列时不参与）
         </div>
       )}
     </Space>
@@ -2223,7 +2351,7 @@ function FlexLayoutPanel({ node, updateNodeField }: {
 }
 
 // === 文本对齐九宫格（layout.horizontal/verticalContentAlignment）===
-// 同一字段两副面孔：容器侧管子控件对齐（AlignmentEditor 下拉），文本侧管文字在控件内的对齐
+// 同一字段两副面孔：容器侧管排列起始锚点（AnchorStartGrid 九宫格），文本侧管文字在控件内的对齐
 // 视觉语言与 AnchorEditor 一致：外框盒子 + 3×3 大格子点选 + 当前值回显
 function TextAlignGrid({ node, batchUpdateNode }: {
   node: any
@@ -2317,33 +2445,4 @@ const V_ALIGN_OPTIONS = [
   { value: 'Bottom', label: '下' },
   { value: 'Stretch', label: '拉伸' },
 ]
-function AlignmentEditor({ node, updateNodeField }: {
-  node: any
-  updateNodeField: (id: string, path: string, value: unknown) => void
-}) {
-  const layout = node.layout ?? {}
-  return (
-    <Space direction="vertical" style={{ width: '100%' }} size="small">
-      <FieldRow label="水平">
-        <Select
-          size="small" style={{ width: '100%' }}
-          value={layout.horizontalContentAlignment ?? null}
-          onChange={v => updateNodeField(node.id, 'layout.horizontalContentAlignment', v)}
-          options={H_ALIGN_OPTIONS}
-          allowClear
-          placeholder="默认 Center"
-        />
-      </FieldRow>
-      <FieldRow label="垂直">
-        <Select
-          size="small" style={{ width: '100%' }}
-          value={layout.verticalContentAlignment ?? null}
-          onChange={v => updateNodeField(node.id, 'layout.verticalContentAlignment', v)}
-          options={V_ALIGN_OPTIONS}
-          allowClear
-          placeholder="默认 Center"
-        />
-      </FieldRow>
-    </Space>
-  )
-}
+

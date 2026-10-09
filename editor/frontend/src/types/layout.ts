@@ -55,14 +55,16 @@ export interface DjuiLayout {
   padding?: [number, number, number, number]
   /** 父控件按子控件边界自适应尺寸 */
   autoSize?: 'None' | 'Width' | 'Height' | 'Both' | null
-  /** 排列模式：None=手动摆放；Vertical/Horizontal=列表堆叠；Grid=网格排列 */
-  flowOrientation?: 'None' | 'Horizontal' | 'Vertical' | 'Grid' | null
-  /** 子控件间距二元组 [水平间距, 垂直间距]（列表/Grid 排列生效；旧单值 number 由 patches 迁移为 [v, v]） */
+  /** 排列模式：None=手动摆放；Grid=排列（单列/单行/网格统一，形态由 flowDirection+gridCount 决定）。旧 Vertical/Horizontal 由 patches 迁移 */
+  flowOrientation?: 'None' | 'Grid' | null
+  /** 子控件间距二元组 [水平间距, 垂直间距]（排列生效；旧单值 number 由 patches 迁移为 [v, v]） */
   spacing?: [number, number] | null
-  /** 网格排列方向：Horizontal=水平优先（每行 N 个放满换行）；Vertical=垂直优先（每列 N 个放满换列） */
-  gridFlow?: 'Horizontal' | 'Vertical' | null
-  /** 网格每行/每列个数 N（正整数：非整数在 normalize 数据边界拦截，<1 由排列算法钳制为 1） */
+  /** 排列流向：LeftToRight=每行 N 个左→右、换行向下；RightToLeft=右→左镜像；TopDown=每列 N 个上→下、换行向右；BottomUp=下→上镜像。缺省 LeftToRight（旧 gridFlow 迁移而来，见 patches） */
+  flowDirection?: 'LeftToRight' | 'RightToLeft' | 'TopDown' | 'BottomUp' | null
+  /** 每行/每列个数 N（流向为 Left/Right=每行个数，Top/Bottom=每列个数；1=单行条/单列列表。正整数：非整数在 normalize 数据边界拦截，<1 由排列算法钳制为 1） */
   gridCount?: number | null
+  /** 起始锚点偏移 [x, y]：在锚点（内容对齐九宫格）定位后附加的显式偏移，可为负、不钳制 */
+  contentOffset?: [number, number] | null
   /** 子项参与排列的顺序：Default=children 文档顺序；ByName=按 name 码点升序（无名按空串排最前，稳定排序）。只影响排列计算顺序，不改动 children 数组 */
   childOrder?: 'Default' | 'ByName' | null
   /** 自动重排开关（null/缺省=true）：开启后增删子项、调整顺序、撤销/重做时容器自动重排 */

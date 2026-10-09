@@ -151,6 +151,8 @@ public static class DjuiTreeBuilderV6
         };
 
         ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale);
+        // 滚动容器恒裁切（滚动语义的一部分，不可关；与编辑器 normalize 兜底同语义，防未经编辑器的旧数据）
+        if (control is PanelScrollable) control.ClipContent = true;
         ApplyInteraction(control, node.Interaction);
         ApplyEffects(control, node.Effects);
         session.Register(node.Id, control);

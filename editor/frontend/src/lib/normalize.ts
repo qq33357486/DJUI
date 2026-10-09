@@ -25,8 +25,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // layout 排列字段的枚举白名单（结构归一化用；旧值语义迁移如 spacing 单值→二元组在 patches.ts，职责不混）
-const LAYOUT_FLOW_ORIENTATIONS: readonly string[] = ['None', 'Horizontal', 'Vertical', 'Grid']
-const LAYOUT_GRID_FLOWS: readonly string[] = ['Horizontal', 'Vertical']
+const LAYOUT_FLOW_ORIENTATIONS: readonly string[] = ['None', 'Grid']
+const LAYOUT_FLOW_DIRECTIONS: readonly string[] = ['LeftToRight', 'RightToLeft', 'TopDown', 'BottomUp']
 const LAYOUT_CHILD_ORDERS: readonly string[] = ['Default', 'ByName']
 
 function isEnumString(value: unknown, allowed: readonly string[]): boolean {
@@ -74,7 +74,13 @@ export function normalizeNode(raw: unknown): UiNode {
     }
     node.transform = t as UiNode['transform']
   }
-  if (isRecord(raw.appearance)) node.appearance = raw.appearance as UiNode['appearance']
+  if (isRecord(raw.appearance)) {
+    const a = { ...raw.appearance } as Record<string, unknown>
+    // 滚动容器恒裁切（滚动语义的一部分，不可关）：溢出子控件裁掉、滚动可见。
+    // 画布（Konva clip）与运行时（TreeBuilder 强制 ClipContent）两侧同语义
+    if (starType === 'PanelScrollable') a.clipContent = true
+    node.appearance = a as UiNode['appearance']
+  }
   if (isRecord(raw.layout)) {
     // 浅拷贝后对排列字段做类型兜底（已有字段 padding/margin/autoSize/对齐保持原透传行为不变，避免存量回归）
     const l = { ...raw.layout } as Record<string, unknown>
@@ -86,7 +92,15 @@ export function normalizeNode(raw: unknown): UiNode {
       const isTuple = Array.isArray(sp) && sp.length === 2 && typeof sp[0] === 'number' && typeof sp[1] === 'number'
       if (!isTuple) l.spacing = null
     }
-    if (l.gridFlow !== undefined && l.gridFlow !== null && !isEnumString(l.gridFlow, LAYOUT_GRID_FLOWS)) delete l.gridFlow
+    // gridFlow 已废弃（0.30.0 迁移为 flowDirection）：数据边界直接丢弃残留，防止语义分叉
+    if (l.gridFlow !== undefined) delete l.gridFlow
+    if (l.flowDirection !== undefined && l.flowDirection !== null && !isEnumString(l.flowDirection, LAYOUT_FLOW_DIRECTIONS)) delete l.flowDirection
+    // contentOffset 必须为 [number, number] 二元组（=[x, y]，可为负）
+    if (l.contentOffset !== undefined && l.contentOffset !== null) {
+      const co = l.contentOffset
+      const isTuple = Array.isArray(co) && co.length === 2 && typeof co[0] === 'number' && typeof co[1] === 'number'
+      if (!isTuple) l.contentOffset = null
+    }
     // gridCount 字段语义为正整数：非整数（如 0.5）属类型不符，会让 C# int? 反序列化炸掉，防线必须落在数据边界；
     // 值域 ≥1 的钳制由排列算法负责，normalize 只管类型
     if (l.gridCount !== undefined && l.gridCount !== null && !(typeof l.gridCount === 'number' && Number.isInteger(l.gridCount))) delete l.gridCount

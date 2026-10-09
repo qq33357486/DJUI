@@ -557,8 +557,10 @@ public static class DjuiWindowManagerV6
     /// <summary>递归收集子树内开启排列模式的容器节点（含自身）。</summary>
     private static void CollectArrangeContainers(DjuiNodeV6 node, int depth, List<(DjuiNodeV6 Node, int Depth)> sink)
     {
+        // 排列开启判定：非 null 且非 None（0.30.0 起值域收敛为 None|Grid；
+        // Vertical/Horizontal 为未经新编辑器迁移的旧 JSON 兜底，同样按排列处理）
         var flow = node.Layout?.FlowOrientation;
-        if (flow == "Vertical" || flow == "Horizontal" || flow == "Grid") sink.Add((node, depth));
+        if (!string.IsNullOrEmpty(flow) && flow != "None") sink.Add((node, depth));
         foreach (var child in node.Children) CollectArrangeContainers(child, depth + 1, sink);
     }
 
@@ -566,7 +568,7 @@ public static class DjuiWindowManagerV6
     {
         public required Control Control { get; init; }
         public required string Id { get; init; }
-        /// <summary>authored 直接子项的 JSON 节点；克隆体/外部挂入控件不在 authored 树，为 null（弹性比例按 0）。</summary>
+        /// <summary>authored 直接子项的 JSON 节点；克隆体/外部挂入控件不在 authored 树，为 null（仅用于可见性过滤）。</summary>
         public DjuiNodeV6? Json { get; init; }
     }
 
@@ -611,7 +613,7 @@ public static class DjuiWindowManagerV6
         var padding = layout?.Padding;
         var p = new DjuiLayoutArranger.ArrangerParams
         {
-            Flow = layout?.FlowOrientation ?? "Vertical",
+            FlowDirection = ResolveFlowDirection(layout),
             // spacing 长度兜底（null/Length<2 → 0）：与 DjuiSpacingArrayConverter 的长度兜底构成双保险，
             // 防反序列化之外路径的畸形数组下游索引越界
             SpacingH = spacing is { Length: >= 2 } ? spacing[0] : 0f,
@@ -622,8 +624,9 @@ public static class DjuiWindowManagerV6
             PadBottom = padding is { Length: 4 } ? padding[3] : 0f,
             HAlign = string.IsNullOrEmpty(layout?.HorizontalContentAlignment) ? "Left" : layout!.HorizontalContentAlignment!,
             VAlign = string.IsNullOrEmpty(layout?.VerticalContentAlignment) ? "Top" : layout!.VerticalContentAlignment!,
-            GridFlow = layout?.GridFlow == "Vertical" ? "Vertical" : "Horizontal",
             GridCount = layout?.GridCount is int gridCount ? gridCount : 1,
+            OffsetX = layout?.ContentOffset is { Length: >= 2 } ? layout.ContentOffset[0] : 0f,
+            OffsetY = layout?.ContentOffset is { Length: >= 2 } ? layout.ContentOffset[1] : 0f,
             ChildOrder = order == null && orderedNodeIds == null && layout?.ChildOrder == "ByName" ? "ByName" : "Default",
         };
 
@@ -636,8 +639,6 @@ public static class DjuiWindowManagerV6
                 Name = e.Control.Name,
                 Width = ReadWidth(e.Control),
                 Height = ReadHeight(e.Control),
-                HGrow = e.Json?.WidthStretchRatio ?? 0f,
-                VGrow = e.Json?.HeightStretchRatio ?? 0f,
             });
         }
 
@@ -650,6 +651,21 @@ public static class DjuiWindowManagerV6
             if (controlsById.TryGetValue(rect.Id, out var childControl))
                 DjuiLayoutSessionV6.ApplyRect(childControl, new DjuiRectV6(rect.X, rect.Y, rect.Width, rect.Height));
         }
+    }
+
+    /// <summary>
+    /// 流向归一（含旧值兜底映射）：优先 FlowDirection 有效值；
+    /// 旧 JSON 无 FlowDirection 时按旧 FlowOrientation/GridFlow 映射——
+    /// Vertical → TopDown、Horizontal → LeftToRight、GridFlow Vertical → TopDown；缺省 LeftToRight。
+    /// （运行时可能直读未经新编辑器迁移的旧页面，发布链迁移不覆盖此路径。）
+    /// </summary>
+    private static string ResolveFlowDirection(DjuiLayoutV6? layout)
+    {
+        var fd = layout?.FlowDirection;
+        if (fd == "LeftToRight" || fd == "RightToLeft" || fd == "TopDown" || fd == "BottomUp") return fd;
+        if (layout?.FlowOrientation == "Vertical") return "TopDown";
+        if (layout?.GridFlow == "Vertical") return "TopDown";
+        return "LeftToRight";
     }
 
     /// <summary>子项 id 在显式顺序表中的名次：未列出（含克隆体）恒排已列出项之后（int.MaxValue 并列保持遍历序）。</summary>

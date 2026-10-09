@@ -182,8 +182,13 @@ public sealed class DjuiLayoutV6
     [JsonPropertyName("verticalAlignment")] public string? VerticalAlignment { get; set; }
     [JsonPropertyName("horizontalContentAlignment")] public string? HorizontalContentAlignment { get; set; }
     [JsonPropertyName("verticalContentAlignment")] public string? VerticalContentAlignment { get; set; }
+    // gridFlow 已废弃（0.30.0 迁移为 flowDirection）：属性保留以兼容旧 JSON（v6 严格反序列化 Disallow，
+    // 旧文件含该字段而类中无映射会直接炸）；运行态消费侧已切到 FlowDirection（WindowManager 含旧值兜底映射）
     [JsonPropertyName("gridFlow")] public string? GridFlow { get; set; }
+    [JsonPropertyName("flowDirection")] public string? FlowDirection { get; set; }
     [JsonPropertyName("gridCount")] public int? GridCount { get; set; }
+    // 起始锚点偏移 [x, y]（锚点定位后叠加，可为负）；畸形长度由消费侧兜 0（与 spacing 双保险同款做法）
+    [JsonPropertyName("contentOffset")] public float[]? ContentOffset { get; set; }
     [JsonPropertyName("childOrder")] public string? ChildOrder { get; set; }
     [JsonPropertyName("autoRelayout")] public bool? AutoRelayout { get; set; }
 }

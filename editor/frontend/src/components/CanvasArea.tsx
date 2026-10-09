@@ -482,6 +482,20 @@ function ProgressImagePreview({ image, x, y, width, height, rotation, opacity, v
 }
 
 // === 辅助 ===
+/** 子树内是否有任一节点被选中（容器裁切的临时展开判据：编辑可见性优先）。 */
+function subtreeHasSelected(node: UiNode, selectedIds: string[]): boolean {
+  for (const c of (node.children ?? [])) {
+    if (selectedIds.includes(c.id)) return true
+    if (subtreeHasSelected(c, selectedIds)) return true
+  }
+  return false
+}
+
+/** 容器是否裁切溢出子控件：clipContent 开关生效；滚动容器恒裁切（滚动语义，normalize 已兜 true）。 */
+function containerClipsChildren(node: UiNode): boolean {
+  return (node.appearance?.clipContent ?? node.starType === 'PanelScrollable') === true
+}
+
 function findNodeById(root: UiNode, id: string): UiNode | null {
   if (root.id === id) return root
   for (const child of root.children) {
@@ -903,21 +917,41 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
           />
         )
       })()}
-      {(node.children ?? []).map(child => (
-        <TemplatePreviewShape
-          key={child.id}
-          node={child}
-          parentRect={rect}
+      {containerClipsChildren(node) ? (
+        <Group clipX={rect.x} clipY={rect.y} clipWidth={rect.width} clipHeight={rect.height}>
+          {(node.children ?? []).map(child => (
+            <TemplatePreviewShape
+              key={child.id}
+              node={child}
+              parentRect={rect}
           canvasWidth={canvasWidth}
           canvasHeight={canvasHeight}
           screenOrigin={screenOrigin}
           workspacePath={workspacePath}
           projectPath={projectPath}
-          defaultFont={defaultFont}
-          showEditorOverlay={showEditorOverlay}
-          sliceMeta={sliceMeta}
-        />
-      ))}
+              defaultFont={defaultFont}
+              showEditorOverlay={showEditorOverlay}
+              sliceMeta={sliceMeta}
+            />
+          ))}
+        </Group>
+      ) : (
+        (node.children ?? []).map(child => (
+          <TemplatePreviewShape
+            key={child.id}
+            node={child}
+            parentRect={rect}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
+            screenOrigin={screenOrigin}
+            workspacePath={workspacePath}
+            projectPath={projectPath}
+            defaultFont={defaultFont}
+            showEditorOverlay={showEditorOverlay}
+            sliceMeta={sliceMeta}
+          />
+        ))
+      )}
     </>
   )
 }
@@ -1111,7 +1145,7 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
   const sceneFrame = node.sceneFrame
 
   // === 布局容器内容超界检测（决议 12）===
-  // 开排列模式（Vertical/Horizontal/Grid）且选中的容器：逐可见子项按容器已解算矩形求解，
+  // 开排列模式（flowOrientation='Grid'）且选中的容器：逐可见子项按容器已解算矩形求解，
   // 取画布绝对坐标包围盒；任一边超出容器矩形即提示（排列语义：照排溢出、绝不压缩）。
   // 烘焙后子项即排列结果，包围盒法等价于排列内容块且覆盖 anchor 子项等一切情况。
   // sceneFrame 容器的子项按 artboard 坐标映射求解，不在此口径内，跳过。
@@ -1120,7 +1154,7 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
   if (
     isSelected &&
     !sceneFrame?.artboard &&
-    (flowMode === 'Vertical' || flowMode === 'Horizontal' || flowMode === 'Grid')
+    flowMode === 'Grid'
   ) {
     const visibleKids = (node.children ?? []).filter(c => c.basic?.visible !== false)
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -1412,31 +1446,63 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
           ))}
         </Group>
       ) : (
-        (node.children ?? []).map(child => (
-          <NodeShape
-            key={child.id}
-            node={child}
-            isSelected={selectedIds.includes(child.id)}
-            selectedIds={selectedIds}
-            onSelect={onSelect}
-            onDragEnd={onDragEnd}
-            onDragPreviewChange={onDragPreviewChange}
-            onTransformEnd={onTransformEnd}
-            registerRef={registerRef}
-            workspacePath={workspacePath}
-            projectPath={projectPath}
-            parentRect={solved}
-            canvasWidth={canvasWidth}
-            canvasHeight={canvasHeight}
-            safeRect={safeRect}
-            imageFrame={imageFrame}
-            showEditorOverlay={showEditorOverlay}
-            sliceMeta={sliceMeta}
-            dragPreview={dragPreview}
-            inheritedDragDelta={renderDelta}
-            readOnly={readOnly}
-          />
-        ))
+        containerClipsChildren(node) && !subtreeHasSelected(node, selectedIds) ? (
+          // 裁切渲染（所见即所得）：clip 区=容器画布矩形（溢出子项裁掉，滚动容器语义）。
+          // 选中链在本子树内时临时展开：被裁的溢出子项仍可从层级树选中并编辑（编辑可见性优先）
+          <Group clipX={solved.x} clipY={solved.y} clipWidth={solved.width} clipHeight={solved.height}>
+            {(node.children ?? []).map(child => (
+              <NodeShape
+                key={child.id}
+                node={child}
+                isSelected={selectedIds.includes(child.id)}
+                selectedIds={selectedIds}
+                onSelect={onSelect}
+                onDragEnd={onDragEnd}
+                onDragPreviewChange={onDragPreviewChange}
+                onTransformEnd={onTransformEnd}
+                registerRef={registerRef}
+                workspacePath={workspacePath}
+                projectPath={projectPath}
+                parentRect={solved}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                safeRect={safeRect}
+                imageFrame={imageFrame}
+                showEditorOverlay={showEditorOverlay}
+                sliceMeta={sliceMeta}
+                dragPreview={dragPreview}
+                inheritedDragDelta={renderDelta}
+                readOnly={readOnly}
+              />
+            ))}
+          </Group>
+        ) : (
+          (node.children ?? []).map(child => (
+            <NodeShape
+              key={child.id}
+              node={child}
+              isSelected={selectedIds.includes(child.id)}
+              selectedIds={selectedIds}
+              onSelect={onSelect}
+              onDragEnd={onDragEnd}
+              onDragPreviewChange={onDragPreviewChange}
+              onTransformEnd={onTransformEnd}
+              registerRef={registerRef}
+              workspacePath={workspacePath}
+              projectPath={projectPath}
+              parentRect={solved}
+              canvasWidth={canvasWidth}
+              canvasHeight={canvasHeight}
+              safeRect={safeRect}
+              imageFrame={imageFrame}
+              showEditorOverlay={showEditorOverlay}
+              sliceMeta={sliceMeta}
+              dragPreview={dragPreview}
+              inheritedDragDelta={renderDelta}
+              readOnly={readOnly}
+            />
+          ))
+        )
       )}
     </>
   )

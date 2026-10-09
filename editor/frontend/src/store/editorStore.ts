@@ -197,9 +197,9 @@ function removeFromParent(root: UiNode, id: string): boolean {
 }
 
 // ============================================================================
-// 自动重排（决议 7）：容器开启排列模式（Vertical/Horizontal/Grid）且 autoRelayout!==false
+// 自动重排（决议 7）：容器开启排列模式（flowOrientation='Grid'）且 autoRelayout!==false
 // （null/缺省=默认 true）时，增删子项 / 层级拖动改顺序 / 撤销重做 自动把排列结果写回子控件 transform。
-// 排列语义（Grid/padding/内容对齐/childOrder 排序）全部由 solveChildrenFlex→arrangeChildren 提供。
+// 排列语义（流向/锚点/偏移/padding/childOrder 排序）全部由 solveChildrenFlex→arrangeChildren 提供。
 // 约定：本函数直接在 immer draft 上操作、绝不调 pushHistory——
 // 调用点全部位于各 action 的「pushHistory → set」结构内 set 回调尾部，与触发操作合并为单步撤销；
 // undo/redo 的兜底重排同样直接改 draft 不入栈（否则撤销永不到底，决议 7）。
@@ -207,15 +207,14 @@ function removeFromParent(root: UiNode, id: string): boolean {
 function applyAutoRelayout(root: UiNode, containerId: string, canvasW: number, canvasH: number): void {
   const container = findNode(root, containerId)
   if (!container) return
-  const flow = container.layout?.flowOrientation
-  if (flow !== 'Vertical' && flow !== 'Horizontal' && flow !== 'Grid') return
+  if (container.layout?.flowOrientation !== 'Grid') return
   if (container.layout?.autoRelayout === false) return
   const containerRect = solveAbsoluteRect(root, containerId, canvasW, canvasH)
   if (!containerRect) return
   // 不可见子项不参与排列测量（与 applyFlexLayout/排列口径一致）
   const children = container.children.filter(c => c.basic?.visible !== false)
   if (children.length === 0) return
-  const flexRects = solveChildrenFlex(containerRect, flow, container.layout, children, canvasW, canvasH)
+  const flexRects = solveChildrenFlex(containerRect, container.layout, children)
   for (const child of children) {
     const rect = flexRects.get(child.id)
     if (!rect) continue
@@ -241,7 +240,7 @@ function collectLayoutChildIds(allPages: Record<string, UiPage>): Map<string, st
     if (!page?.root) continue
     const walk = (n: UiNode) => {
       const flow = n.layout?.flowOrientation
-      if (flow === 'Vertical' || flow === 'Horizontal' || flow === 'Grid') {
+      if (flow === 'Grid') {
         map.set(`${pageId}::${n.id}`, (n.children ?? []).filter(c => c.basic?.visible !== false).map(c => c.id))
       }
       for (const c of (n.children ?? [])) walk(c)
@@ -731,8 +730,7 @@ export const useEditorStore = create<EditorState>()(
       if (!s0.page) return
       const parent = findNode(s0.page.root, parentId)
       if (!parent) return
-      const flow = parent.layout?.flowOrientation
-      if (flow !== 'Vertical' && flow !== 'Horizontal' && flow !== 'Grid') return
+      if (parent.layout?.flowOrientation !== 'Grid') return
 
       const canvasW = s0.page.designWidth
       const canvasH = s0.page.designHeight
@@ -744,7 +742,7 @@ export const useEditorStore = create<EditorState>()(
       // 语义在 solveChildrenFlex → arrangeChildren（JS/C# 双端唯一权威算法）
       // 不可见子项不参与 Flex 布局测量（对齐 Runtime 行为）
       const children = parent.children.filter(c => c.basic?.visible !== false)
-      const flexRects = solveChildrenFlex(containerRect, flow, parent.layout, children, canvasW, canvasH)
+      const flexRects = solveChildrenFlex(containerRect, parent.layout, children)
 
       get().pushHistory()
       set((s) => {

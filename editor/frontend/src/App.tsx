@@ -3,6 +3,7 @@ import { pushRecentProject } from '@/lib/recentProjects'
 import { Layout, Modal, Spin, message, Button, Result, Space } from 'antd'
 import TopBar from './components/TopBar'
 import LeftPanel from './components/LeftPanel'
+import ResizeHandle from './components/ResizeHandle'
 import CanvasArea from './components/CanvasArea'
 import RightPanel from './components/RightPanel'
 import ConfigModal from './components/ConfigModal'
@@ -31,6 +32,28 @@ import { startAutoShotPolling } from './lib/autoShot'
 const { Header, Sider, Content } = Layout
 const DEFAULT_TEMPLATE_WIDTH = 200
 const DEFAULT_TEMPLATE_HEIGHT = 100
+
+// 左侧层级栏宽度：可拖拽调整并记忆（localStorage）
+const LEFT_PANEL_WIDTH_KEY = 'djui.leftPanelWidth'
+const LEFT_PANEL_WIDTH_DEFAULT = 280
+const LEFT_PANEL_WIDTH_MIN = 200
+const LEFT_PANEL_WIDTH_MAX = 640
+
+// 上限同时受视口约束：给中间画布和右侧属性栏留出最小空间（右栏 340 + 画布约 440）
+function clampLeftPanelWidth(w: number) {
+  const max = Math.max(LEFT_PANEL_WIDTH_MIN, Math.min(LEFT_PANEL_WIDTH_MAX, window.innerWidth - 780))
+  return Math.round(Math.min(Math.max(w, LEFT_PANEL_WIDTH_MIN), max))
+}
+
+function loadLeftPanelWidth() {
+  try {
+    const saved = Number(localStorage.getItem(LEFT_PANEL_WIDTH_KEY))
+    if (Number.isFinite(saved) && saved > 0) return clampLeftPanelWidth(saved)
+  } catch {
+    // localStorage 不可用时用默认宽度
+  }
+  return LEFT_PANEL_WIDTH_DEFAULT
+}
 const SOUND_SETUP_NOTICE_KEY_PREFIX = 'djui.soundSetupNotice.v1.'
 
 function soundSetupNeedsAttention(soundSetup: api.SoundSetupStatus | null) {
@@ -70,6 +93,30 @@ export default function App() {
   const [auditDeviceReturn, setAuditDeviceReturn] = useState<{ presetId: string; variant: 'base' | 'wide' } | null>(null)
   const [soundSetup, setSoundSetup] = useState<api.SoundSetupStatus | null>(null)
   const [pages, setPages] = useState<string[]>([])
+  // 左侧层级栏自定义宽度：拖拽期间直接写 DOM 宽度（避免每个 pointermove 都重渲染整棵 App），松手才提交 state
+  const [leftPanelWidth, setLeftPanelWidth] = useState(loadLeftPanelWidth)
+  const leftAsideRef = useRef<HTMLElement>(null)
+  const leftDragBaseRef = useRef(0)
+
+  const handleLeftDragStart = () => {
+    leftDragBaseRef.current = leftAsideRef.current?.offsetWidth ?? leftPanelWidth
+  }
+  const handleLeftDrag = (dx: number) => {
+    if (leftAsideRef.current) leftAsideRef.current.style.width = `${clampLeftPanelWidth(leftDragBaseRef.current + dx)}px`
+  }
+  const commitLeftPanelWidth = (w: number) => {
+    setLeftPanelWidth(w)
+    try { localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(w)) } catch { /* 存储失败只影响下次记忆宽度 */ }
+  }
+  const handleLeftDragEnd = (dx: number) => commitLeftPanelWidth(clampLeftPanelWidth(leftDragBaseRef.current + dx))
+  const handleLeftReset = () => commitLeftPanelWidth(LEFT_PANEL_WIDTH_DEFAULT)
+
+  // 视口变窄时把超出上限的宽度拉回
+  useEffect(() => {
+    const onResize = () => setLeftPanelWidth(clampLeftPanelWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const [syncConflictOpen, setSyncConflictOpen] = useState(false)
   const [syncResolving, setSyncResolving] = useState(false)
   const initialized = useRef(false)
@@ -552,7 +599,7 @@ export default function App() {
         />
       ) : (
         <Layout>
-          <Sider width={280} style={{ overflow: 'auto', background: '#1a1d28' }}>
+          <aside ref={leftAsideRef} style={{ width: leftPanelWidth, flexShrink: 0, background: '#1a1d28', position: 'relative' }}>
             <LeftPanel
               pages={pages}
               onNewPage={(pageId, nodeKind) => {
@@ -578,7 +625,14 @@ export default function App() {
               onSwitchPage={switchPage}
               onDeletePage={deletePage}
             />
-          </Sider>
+            <ResizeHandle
+              edge="right"
+              onDragStart={handleLeftDragStart}
+              onDrag={handleLeftDrag}
+              onDragEnd={handleLeftDragEnd}
+              onReset={handleLeftReset}
+            />
+          </aside>
           <Content style={{ overflow: 'hidden', background: '#0f1117' }}>
             <CanvasArea />
           </Content>

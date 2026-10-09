@@ -745,6 +745,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
               <Space direction="vertical" style={{ width: '100%' }} size={10}>
                 <ContainerLayoutPanel node={node} updateNodeField={updateNodeField} applyFlexLayout={applyFlexLayout} />
                 <SectionTitle>对齐</SectionTitle>
+                {node.layout?.flowOrientation && node.layout.flowOrientation !== 'None' && (
+                  <div style={{ fontSize: 10, color: '#5b6378' }}>开启排列后，内容对齐未设置时默认贴左上角</div>
+                )}
                 <AlignmentEditor node={node} updateNodeField={updateNodeField} />
               </Space>
             ),
@@ -1923,7 +1926,8 @@ function ModuleCard({ color, title, sub, children }: {
 // === NGUI 风格拖拽改值组件 ===
 // 标签可拖拽（左右滑动改值），InputNumber 可手动输入
 // onScrub：拖动路径的增量回调（本次 move 相对上次应用的差值），供多选相对移动使用
-function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffix, dragSensitivity }: {
+// disabled：置灰（当前模式不生效的轴，如垂直列表下的水平间距）
+function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffix, dragSensitivity, disabled = false }: {
   label: string
   value: number
   onChange: (v: number) => void
@@ -1933,11 +1937,13 @@ function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffi
   max?: number
   suffix?: string
   dragSensitivity?: number
+  disabled?: boolean
 }) {
   const dragRef = useRef<{ startX: number; lastApplied: number } | null>(null)
   const inputRef = useRef<any>(null)
 
   const handleScrubStart = (e: React.MouseEvent) => {
+    if (disabled) return
     // 仅左键
     if (e.button !== 0) return
     e.preventDefault()
@@ -1974,10 +1980,10 @@ function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffi
       <span
         onMouseDown={handleScrubStart}
         onDoubleClick={() => inputRef.current?.focus?.()}
-        title="拖动调整 · Shift精细 · Ctrl粗略 · 双击输入"
+        title={disabled ? undefined : '拖动调整 · Shift精细 · Ctrl粗略 · 双击输入'}
         style={{
           width: 56, textAlign: 'right', fontSize: 12,
-          color: '#9aa3b4', flexShrink: 0, cursor: 'ew-resize',
+          color: disabled ? '#4a5163' : '#9aa3b4', flexShrink: 0, cursor: disabled ? 'not-allowed' : 'ew-resize',
           userSelect: 'none',
         }}
       >
@@ -1993,6 +1999,7 @@ function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffi
           min={min}
           max={max}
           addonAfter={suffix}
+          disabled={disabled}
           style={{ width: '100%' }}
         />
       </div>
@@ -2004,7 +2011,7 @@ function filterItems(items: any[]) {
   return items.filter(Boolean)
 }
 
-// === 容器布局编辑器（仅容器类型：自适应 / 流向 / 间距）===
+// === 容器布局编辑器（仅容器类型：自适应 / 布局模式 / 间距 / 网格 / 内边距 / 子项排序 / 自动重排）===
 function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
   node: any
   updateNodeField: (id: string, path: string, value: unknown) => void
@@ -2013,6 +2020,11 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
   const layout = node.layout ?? {}
   const autoSize = layout.autoSize ?? 'None'
   const autoSizeConflicts = autoSize === 'None' ? [] : collectAutoSizeConflicts(node)
+  const flow = layout.flowOrientation ?? 'None'
+  const flowActive = flow === 'Vertical' || flow === 'Horizontal' || flow === 'Grid'
+
+  // 延迟一帧等 store 写完布局参数后再把排列结果烘焙进子控件坐标（沿用原间距编辑的触发模式）
+  const relayoutSoon = () => setTimeout(() => applyFlexLayout(node.id), 0)
 
   const handleAutoSizeChange = (v: string) => {
     updateNodeField(node.id, 'layout.autoSize', v === 'None' ? null : v)
@@ -2020,19 +2032,57 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
 
   const handleFlowChange = (v: string) => {
     updateNodeField(node.id, 'layout.flowOrientation', v)
-    // 开启自动布局时，立即把 flex 结果写回子控件坐标
-    if (v === 'Vertical' || v === 'Horizontal') {
-      // 延迟一帧等 store 更新完 flowOrientation
-      setTimeout(() => applyFlexLayout(node.id), 0)
+    // 开启排列模式时，立即把排列结果写回子控件坐标（Grid 同样支持）
+    if (v === 'Vertical' || v === 'Horizontal' || v === 'Grid') {
+      relayoutSoon()
     }
+    // 切回 None 不做清理：保留排列参数便于切回
   }
 
-  const handleSpacingChange = (v: number) => {
-    updateNodeField(node.id, 'layout.spacing', v)
+  // spacing 二元组 [水平间距, 垂直间距]（旧单值已由 patches 迁移；读时兜底数组形态）
+  const spacing: [number, number] = Array.isArray(layout.spacing)
+    ? [typeof layout.spacing[0] === 'number' ? layout.spacing[0] : 0, typeof layout.spacing[1] === 'number' ? layout.spacing[1] : 0]
+    : [0, 0]
+  const handleSpacingChange = (axis: 0 | 1, v: number) => {
+    const next: [number, number] = [spacing[0], spacing[1]]
+    next[axis] = v
+    updateNodeField(node.id, 'layout.spacing', next)
     // 间距变化时重新排列
-    if (layout.flowOrientation === 'Vertical' || layout.flowOrientation === 'Horizontal') {
-      setTimeout(() => applyFlexLayout(node.id), 0)
-    }
+    if (flowActive) relayoutSoon()
+  }
+
+  // padding [left, top, right, bottom]：内容区 = 容器矩形减四边内边距
+  const padding: [number, number, number, number] = Array.isArray(layout.padding)
+    ? [layout.padding[0] ?? 0, layout.padding[1] ?? 0, layout.padding[2] ?? 0, layout.padding[3] ?? 0]
+    : [0, 0, 0, 0]
+  const handlePaddingChange = (idx: number, v: number) => {
+    const next: [number, number, number, number] = [padding[0], padding[1], padding[2], padding[3]]
+    next[idx] = v
+    updateNodeField(node.id, 'layout.padding', next)
+    if (flowActive) relayoutSoon()
+  }
+
+  // Grid 参数：排列方向 + 每行/每列个数（单一 gridCount，非当前方向的个数项禁用置灰）
+  const gridFlow: 'Horizontal' | 'Vertical' = layout.gridFlow === 'Vertical' ? 'Vertical' : 'Horizontal'
+  const gridCount = typeof layout.gridCount === 'number' && Number.isFinite(layout.gridCount) ? layout.gridCount : 1
+  const handleGridFlowChange = (v: string) => {
+    updateNodeField(node.id, 'layout.gridFlow', v)
+    if (flow === 'Grid') relayoutSoon()
+  }
+  const handleGridCountChange = (v: number | null) => {
+    // 正整数（InputNumber precision=0 拦小数输入，此处再兜底钳制；normalize 是最终防线）
+    updateNodeField(node.id, 'layout.gridCount', Math.max(1, Math.floor(v ?? 1)))
+    if (flow === 'Grid') relayoutSoon()
+  }
+
+  const handleChildOrderChange = (v: string) => {
+    updateNodeField(node.id, 'layout.childOrder', v === 'Default' ? null : v)
+    if (flowActive) relayoutSoon()
+  }
+
+  // 自动重排开关：null/缺省 = true（默认开）
+  const handleAutoRelayoutChange = (v: boolean) => {
+    updateNodeField(node.id, 'layout.autoRelayout', v ? null : false)
   }
 
   return (
@@ -2060,18 +2110,88 @@ function ContainerLayoutPanel({ node, updateNodeField, applyFlexLayout }: {
       <FieldRow label="布局模式">
         <Select
           size="small" style={{ width: '100%' }}
-          value={layout.flowOrientation ?? 'None'}
+          value={flow}
           onChange={handleFlowChange}
           options={[
             { value: 'None', label: '无（手动定位）' },
             { value: 'Vertical', label: '垂直堆叠 ↓' },
             { value: 'Horizontal', label: '水平堆叠 →' },
+            { value: 'Grid', label: '网格排列 ▦' },
           ]}
         />
       </FieldRow>
-      {layout.flowOrientation && layout.flowOrientation !== 'None' && (
+      {flowActive && (
         <>
-          <ScrubField label="间距" value={layout.spacing ?? 0} onChange={handleSpacingChange} min={0} />
+          {/* 间距分轴：垂直列表亮垂直间距、水平列表亮水平间距、网格两个都亮 */}
+          <ScrubField label="水平间距" value={spacing[0]} onChange={v => handleSpacingChange(0, v)} min={0} disabled={flow === 'Vertical'} />
+          <ScrubField label="垂直间距" value={spacing[1]} onChange={v => handleSpacingChange(1, v)} min={0} disabled={flow === 'Horizontal'} />
+        </>
+      )}
+      {flow === 'Grid' && (
+        <>
+          <FieldRow label="排列方向">
+            <Select
+              size="small" style={{ width: '100%' }}
+              value={gridFlow}
+              onChange={handleGridFlowChange}
+              options={[
+                { value: 'Horizontal', label: '水平优先（每行放满换行）' },
+                { value: 'Vertical', label: '垂直优先（每列放满换列）' },
+              ]}
+            />
+          </FieldRow>
+          {/* 单一 gridCount：水平优先时「每行个数」生效，垂直优先时「每列个数」生效；非当前方向的项禁用置灰 */}
+          <FieldRow label="每行个数">
+            <InputNumber
+              size="small" style={{ width: '100%' }}
+              min={1}
+              precision={0}
+              value={gridCount}
+              disabled={gridFlow !== 'Horizontal'}
+              onChange={handleGridCountChange}
+            />
+          </FieldRow>
+          <FieldRow label="每列个数">
+            <InputNumber
+              size="small" style={{ width: '100%' }}
+              min={1}
+              precision={0}
+              value={gridCount}
+              disabled={gridFlow !== 'Vertical'}
+              onChange={handleGridCountChange}
+            />
+          </FieldRow>
+          <div style={{ fontSize: 10, color: '#5b6378' }}>
+            网格严格按个数断行/断列，不按容器宽度自动换行；子项弹性比例不参与网格排列。
+          </div>
+        </>
+      )}
+      {flowActive && (
+        <>
+          <ScrubField label="内边距·左" value={padding[0]} onChange={v => handlePaddingChange(0, v)} min={0} />
+          <ScrubField label="内边距·上" value={padding[1]} onChange={v => handlePaddingChange(1, v)} min={0} />
+          <ScrubField label="内边距·右" value={padding[2]} onChange={v => handlePaddingChange(2, v)} min={0} />
+          <ScrubField label="内边距·下" value={padding[3]} onChange={v => handlePaddingChange(3, v)} min={0} />
+          <FieldRow label="子项顺序">
+            <Select
+              size="small" style={{ width: '100%' }}
+              value={layout.childOrder === 'ByName' ? 'ByName' : 'Default'}
+              onChange={handleChildOrderChange}
+              options={[
+                { value: 'Default', label: '默认顺序（文档顺序）' },
+                { value: 'ByName', label: '按名称升序' },
+              ]}
+            />
+          </FieldRow>
+          <div style={{ fontSize: 10, color: '#5b6378' }}>
+            按名称升序：无名子项按空名排最前；排序只影响排列位置，不改动层级顺序。
+          </div>
+          <FieldRow label="自动重排">
+            <Switch size="small" checked={layout.autoRelayout !== false} onChange={handleAutoRelayoutChange} />
+          </FieldRow>
+          <div style={{ fontSize: 10, color: '#5b6378' }}>
+            开启后子项位置由容器排列管理，增删子控件与调整顺序时自动重排；需手动定位请关闭或切回无布局。
+          </div>
           <Button size="small" block onClick={() => applyFlexLayout(node.id)}>
             重新排列子控件
           </Button>

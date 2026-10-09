@@ -221,10 +221,63 @@ function patchNode(node: unknown, defaultButtonSoundId: string | null, result: P
     }
   }
 
+  // 布局兼容迁移（旧 spacing 单值 / 旧流式容器），与 migrateV6LayoutCompat 共用同一实现，
+  // 使发布链 patchPageNodeTree 对磁盘直读的旧 JSON 也完成迁移
+  if (applyLayoutCompatToNode(node)) result.changed = true
+
+
   const children = node.children
   if (Array.isArray(children)) {
     for (const child of children) patchNode(child, defaultButtonSoundId, result)
   }
+}
+
+/**
+ * v6 布局兼容迁移（两条，均幂等）：
+ *  1. 旧 spacing 单值 number → [v, v] 二元组（自 0.29.0 起 10 个版本后删除）
+ *  2. 旧「流式容器」starType 'SpacingPanel' → 'Panel'（自 0.29.0 起 10 个版本后删除）
+ *
+ * 关于「升级页面 version」：v6 页面文件没有页面级 version 字段可升（顶层 protocolVersion/schemaVersion
+ * 受 Runtime 严格反序列化保护，不能新增），故按幂等形态检测实现（typeof spacing === 'number' 才转、
+ * starType === 'SpacingPanel' 才改），这是「升级页面 version」决议在 v6 协议下的替代落地，非遗漏。
+ * 挂载点：client.loadPage / renderShot 加载链 / patchNode 发布链（patchPageNodeTree）。
+ *
+ * @returns 是否有改动
+ */
+export function migrateV6LayoutCompat(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  // v6 页面对象：节点树在 root 下；直接传节点树亦可
+  if (isRecord(raw.root)) return migrateLayoutCompatTree(raw.root)
+  return migrateLayoutCompatTree(raw)
+}
+
+// 单节点的两条迁移（幂等形态检测）；patchNode 发布链与 migrateV6LayoutCompat 共用，避免重复实现
+function applyLayoutCompatToNode(node: JsonRecord): boolean {
+  let changed = false
+  const layout = isRecord(node.layout) ? node.layout : null
+  if (layout && typeof layout.spacing === 'number') {
+    // 旧 spacing 单值 → [v, v] 二元组（自 0.29.0 起 10 个版本后删除）
+    layout.spacing = [layout.spacing, layout.spacing]
+    changed = true
+  }
+  if (node.starType === 'SpacingPanel') {
+    // 旧「流式容器」并入普通容器（自 0.29.0 起 10 个版本后删除）
+    node.starType = 'Panel'
+    changed = true
+  }
+  return changed
+}
+
+function migrateLayoutCompatTree(node: unknown): boolean {
+  if (!isRecord(node)) return false
+  let changed = applyLayoutCompatToNode(node)
+  const children = node.children
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      if (migrateLayoutCompatTree(child)) changed = true
+    }
+  }
+  return changed
 }
 
 export function patchPageData(page: unknown, defaultButtonSoundId: string | null): PagePatchResult {

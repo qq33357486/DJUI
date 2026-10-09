@@ -196,6 +196,88 @@ function removeFromParent(root: UiNode, id: string): boolean {
   return false
 }
 
+// ============================================================================
+// 自动重排（决议 7）：容器开启排列模式（Vertical/Horizontal/Grid）且 autoRelayout!==false
+// （null/缺省=默认 true）时，增删子项 / 层级拖动改顺序 / 撤销重做 自动把排列结果写回子控件 transform。
+// 排列语义（Grid/padding/内容对齐/childOrder 排序）全部由 solveChildrenFlex→arrangeChildren 提供。
+// 约定：本函数直接在 immer draft 上操作、绝不调 pushHistory——
+// 调用点全部位于各 action 的「pushHistory → set」结构内 set 回调尾部，与触发操作合并为单步撤销；
+// undo/redo 的兜底重排同样直接改 draft 不入栈（否则撤销永不到底，决议 7）。
+// ============================================================================
+function applyAutoRelayout(root: UiNode, containerId: string, canvasW: number, canvasH: number): void {
+  const container = findNode(root, containerId)
+  if (!container) return
+  const flow = container.layout?.flowOrientation
+  if (flow !== 'Vertical' && flow !== 'Horizontal' && flow !== 'Grid') return
+  if (container.layout?.autoRelayout === false) return
+  const containerRect = solveAbsoluteRect(root, containerId, canvasW, canvasH)
+  if (!containerRect) return
+  // 不可见子项不参与排列测量（与 applyFlexLayout/排列口径一致）
+  const children = container.children.filter(c => c.basic?.visible !== false)
+  if (children.length === 0) return
+  const flexRects = solveChildrenFlex(containerRect, flow, container.layout, children, canvasW, canvasH)
+  for (const child of children) {
+    const rect = flexRects.get(child.id)
+    if (!rect) continue
+    // 写回 transform（容器局部坐标：flexRects 是画布绝对坐标，须减容器绝对位置——历史漂移坑，
+    // 写法与 applyFlexLayout 逐字一致，绝不能写回画布绝对坐标）
+    if (!child.transform) child.transform = {}
+    child.transform.x = Math.round(rect.x - containerRect.x)
+    child.transform.y = Math.round(rect.y - containerRect.y)
+    child.transform.width = Math.round(rect.width)
+    child.transform.height = Math.round(rect.height)
+    // 设为无锚点（父容器局部绝对定位）
+    if (!child.anchor) child.anchor = {}
+    child.anchor.side = 'None'
+  }
+}
+
+// 收集所有页面中开排列模式容器的「可见子项 id 序列」（undo/redo 兜底重排的条件判据）。
+// 口径与排列一致过滤 basic.visible!==false：可见性切换使序列变化同样触发重排——
+// 等效于排列口径的增删（隐藏项本就不参与排列），属预期行为推广而非缺陷。
+function collectLayoutChildIds(allPages: Record<string, UiPage>): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  for (const [pageId, page] of Object.entries(allPages ?? {})) {
+    if (!page?.root) continue
+    const walk = (n: UiNode) => {
+      const flow = n.layout?.flowOrientation
+      if (flow === 'Vertical' || flow === 'Horizontal' || flow === 'Grid') {
+        map.set(`${pageId}::${n.id}`, (n.children ?? []).filter(c => c.basic?.visible !== false).map(c => c.id))
+      }
+      for (const c of (n.children ?? [])) walk(c)
+    }
+    walk(page.root)
+  }
+  return map
+}
+
+// undo/redo 兜底重排（决议 7）：比较换入快照前后各布局容器的可见子项 id 序列，
+// 仅对序列变化的容器重排（树深度降序：先排内层容器，外层按内层排完的结果测量）。
+// - 序列变化 = 被撤销/重做的操作属于增删/顺序/可见性类，携带重排（对自洽快照幂等无害）；
+// - children 不变的纯 transform/参数撤销不触发重排：手动摆放位置被忠实还原；
+//   「子项集合不变但容器参数被撤销穿越」同样不触发，属预期限制。
+// 直接改 draft，不入撤销栈。
+function relayoutChangedContainers(s: { allPages: Record<string, UiPage> }, before: Map<string, string[]>): void {
+  const after = collectLayoutChildIds(s.allPages)
+  const changed = new Set<string>()
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    if ((before.get(key) ?? []).join('\u0000') !== (after.get(key) ?? []).join('\u0000')) changed.add(key)
+  }
+  if (changed.size === 0) return
+  for (const [pageId, page] of Object.entries(s.allPages)) {
+    if (!page?.root) continue
+    const targets: Array<{ id: string; depth: number }> = []
+    const walk = (n: UiNode, depth: number) => {
+      if (changed.has(`${pageId}::${n.id}`)) targets.push({ id: n.id, depth })
+      for (const c of (n.children ?? [])) walk(c, depth + 1)
+    }
+    walk(page.root, 0)
+    if (targets.length === 0) continue
+    targets.sort((a, b) => b.depth - a.depth)
+    for (const t of targets) applyAutoRelayout(page.root, t.id, page.designWidth, page.designHeight)
+  }
+}
+
 export const useEditorStore = create<EditorState>()(
   immer((set, get) => ({
     allPages: {},
@@ -442,6 +524,10 @@ export const useEditorStore = create<EditorState>()(
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
         s.selectedIds = [node.id]
+        // 自动重排：新增子控件后立即排列容器（set 回调尾部执行，与本次新增合并为单步撤销）
+        if (parentId !== null) {
+          applyAutoRelayout(s.page.root, parentId, s.page.designWidth, s.page.designHeight)
+        }
       })
     },
 
@@ -449,9 +535,14 @@ export const useEditorStore = create<EditorState>()(
       get().pushHistory()
       set((s) => {
         if (!s.page) return
+        // 先记原父（移除后找不到），删除后对其重排（与本次删除合并为单步撤销）
+        const origParent = findParent(s.page.root, id)
         removeFromParent(s.page.root, id)
         if (s.activePageId) s.allPages[s.activePageId] = s.page
         s.selectedIds = s.selectedIds.filter(x => x !== id)
+        if (origParent) {
+          applyAutoRelayout(s.page.root, origParent.id, s.page.designWidth, s.page.designHeight)
+        }
       })
     },
 
@@ -531,6 +622,16 @@ export const useEditorStore = create<EditorState>()(
           parent.children.splice(insertAt, 0, dragCopy)
         }
         if (s.activePageId) s.allPages[s.activePageId] = s.page
+        // 自动重排：层级拖动改顺序 / 跨容器移动后，对原父与新父各重排一次（同容器去重），
+        // 深度降序（内层先排），与本次拖动合并为单步撤销
+        const relayoutTargets = new Map<string, number>()
+        for (const pid of [origParent?.id, newParentId]) {
+          if (!pid) continue
+          relayoutTargets.set(pid, (findPath(root, pid)?.length ?? 1) - 1)
+        }
+        ;[...relayoutTargets.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([pid]) => applyAutoRelayout(root, pid, canvasW, canvasH))
       })
     },
 
@@ -631,7 +732,7 @@ export const useEditorStore = create<EditorState>()(
       const parent = findNode(s0.page.root, parentId)
       if (!parent) return
       const flow = parent.layout?.flowOrientation
-      if (flow !== 'Vertical' && flow !== 'Horizontal') return
+      if (flow !== 'Vertical' && flow !== 'Horizontal' && flow !== 'Grid') return
 
       const canvasW = s0.page.designWidth
       const canvasH = s0.page.designHeight
@@ -639,10 +740,11 @@ export const useEditorStore = create<EditorState>()(
       const containerRect = solveAbsoluteRect(s0.page.root, parentId, canvasW, canvasH)
       if (!containerRect) return
 
-      const spacing = parent.layout?.spacing ?? 0
+      // 排列参数（Grid/padding/内容对齐/childOrder/spacing 二元组）全部从 layout 读取，
+      // 语义在 solveChildrenFlex → arrangeChildren（JS/C# 双端唯一权威算法）
       // 不可见子项不参与 Flex 布局测量（对齐 Runtime 行为）
       const children = parent.children.filter(c => c.basic?.visible !== false)
-      const flexRects = solveChildrenFlex(containerRect, flow, spacing, children, canvasW, canvasH)
+      const flexRects = solveChildrenFlex(containerRect, flow, parent.layout, children, canvasW, canvasH)
 
       get().pushHistory()
       set((s) => {
@@ -652,13 +754,14 @@ export const useEditorStore = create<EditorState>()(
           if (!rect) continue
           const node = findNode(s.page!.root, child.id)
           if (!node) continue
-          // 写回 transform（绝对坐标）
+          // 写回 transform（父容器局部坐标：side=None 语义是 ref.x + t.x，见 layoutSolver；
+          // flexRects 是画布绝对坐标，须减去容器绝对位置，否则子控件整体多偏一个容器偏移）
           if (!node.transform) node.transform = {}
-          node.transform.x = Math.round(rect.x)
-          node.transform.y = Math.round(rect.y)
+          node.transform.x = Math.round(rect.x - containerRect.x)
+          node.transform.y = Math.round(rect.y - containerRect.y)
           node.transform.width = Math.round(rect.width)
           node.transform.height = Math.round(rect.height)
-          // 设为无锚点（纯绝对定位）
+          // 设为无锚点（父容器局部绝对定位）
           if (!node.anchor) node.anchor = {}
           node.anchor.side = 'None'
         }
@@ -692,6 +795,8 @@ export const useEditorStore = create<EditorState>()(
         }
         s.selectedIds = [cloned.id]
         if (s.activePageId) s.allPages[s.activePageId] = s.page
+        // 自动重排：复制新增子控件后重排父容器（与本次复制合并为单步撤销）
+        applyAutoRelayout(root, parent ? parent.id : root.id, s.page.designWidth, s.page.designHeight)
       })
     },
 
@@ -723,6 +828,9 @@ export const useEditorStore = create<EditorState>()(
         }
         s.selectedIds = [cloned.id]
         if (s.activePageId) s.allPages[s.activePageId] = s.page
+        // 自动重排：粘贴新增子控件后重排父容器（与本次粘贴合并为单步撤销）
+        const relayoutParent = targetId ? (findParent(root, cloned.id)?.id ?? root.id) : root.id
+        applyAutoRelayout(root, relayoutParent, s.page.designWidth, s.page.designHeight)
       })
     },
 
@@ -731,6 +839,9 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         if (s.undoStack.length === 0 || !s.page) return
         const entry = s.undoStack.pop()!
+        // 兜底重排判据：换入快照前先取当前各布局容器的可见子项 id 序列
+        // （redo 快照在重排发生前压入，不会被重排结果污染）
+        const before = collectLayoutChildIds(s.allPages)
         s.redoStack.push({
           allPages: clonePages(s.allPages),
           activePageId: s.activePageId,
@@ -742,6 +853,8 @@ export const useEditorStore = create<EditorState>()(
         s.page = entry.activePageId ? entry.allPages[entry.activePageId] ?? null : null
         s.selectedIds = entry.selectedIds
         s.selectionAnchor = entry.selectionAnchor
+        // 撤销后的兜底重排：仅子项序列变化的容器重排，直接改 draft 不入撤销栈（决议 7）
+        relayoutChangedContainers(s, before)
       })
     },
 
@@ -750,6 +863,8 @@ export const useEditorStore = create<EditorState>()(
       set((s) => {
         if (s.redoStack.length === 0 || !s.page) return
         const entry = s.redoStack.pop()!
+        // 同 undo：换入前取判据，undo 快照在重排发生前压入
+        const before = collectLayoutChildIds(s.allPages)
         s.undoStack.push({
           allPages: clonePages(s.allPages),
           activePageId: s.activePageId,
@@ -761,6 +876,8 @@ export const useEditorStore = create<EditorState>()(
         s.page = entry.activePageId ? entry.allPages[entry.activePageId] ?? null : null
         s.selectedIds = entry.selectedIds
         s.selectionAnchor = entry.selectionAnchor
+        // 重做后的兜底重排：同 undo 口径，不入撤销栈
+        relayoutChangedContainers(s, before)
       })
     },
   }))

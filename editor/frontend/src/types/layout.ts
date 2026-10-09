@@ -55,9 +55,18 @@ export interface DjuiLayout {
   padding?: [number, number, number, number]
   /** 父控件按子控件边界自适应尺寸 */
   autoSize?: 'None' | 'Width' | 'Height' | 'Both' | null
-  flowOrientation?: 'None' | 'Horizontal' | 'Vertical' | null
-  /** 子控件间距（SpacingPanel.Spacing） */
-  spacing?: number | null
+  /** 排列模式：None=手动摆放；Vertical/Horizontal=列表堆叠；Grid=网格排列 */
+  flowOrientation?: 'None' | 'Horizontal' | 'Vertical' | 'Grid' | null
+  /** 子控件间距二元组 [水平间距, 垂直间距]（列表/Grid 排列生效；旧单值 number 由 patches 迁移为 [v, v]） */
+  spacing?: [number, number] | null
+  /** 网格排列方向：Horizontal=水平优先（每行 N 个放满换行）；Vertical=垂直优先（每列 N 个放满换列） */
+  gridFlow?: 'Horizontal' | 'Vertical' | null
+  /** 网格每行/每列个数 N（正整数：非整数在 normalize 数据边界拦截，<1 由排列算法钳制为 1） */
+  gridCount?: number | null
+  /** 子项参与排列的顺序：Default=children 文档顺序；ByName=按 name 码点升序（无名按空串排最前，稳定排序）。只影响排列计算顺序，不改动 children 数组 */
+  childOrder?: 'Default' | 'ByName' | null
+  /** 自动重排开关（null/缺省=true）：开启后增删子项、调整顺序、撤销/重做时容器自动重排 */
+  autoRelayout?: boolean | null
   horizontalAlignment?: 'Left' | 'Center' | 'Right' | 'Stretch' | null
   verticalAlignment?: 'Top' | 'Center' | 'Bottom' | 'Stretch' | null
   horizontalContentAlignment?: 'Left' | 'Center' | 'Right' | 'Stretch' | null
@@ -349,16 +358,8 @@ export const COMPONENT_LIBRARY: ComponentDef[] = [
       transform: { positionType: 'Absolute', width: 300, height: 400 },
     },
   },
-  {
-    label: '流式容器',
-    starType: 'SpacingPanel',
-    icon: '📋',
-    defaultProps: {
-      starType: 'SpacingPanel',
-      basic: { visible: true },
-      transform: { positionType: 'Absolute', width: 300, height: 200 },
-    },
-  },
+  // 「流式容器」(SpacingPanel) 已并入普通容器（0.29.0 起组件库移除，存量节点由 patches 迁移为 Panel）；
+  // StarType 联合与 normalize/schemaV6 白名单仍保留 'SpacingPanel' 以读旧数据
 ]
 
 // 动效预设（从后端读取，初始硬编码）

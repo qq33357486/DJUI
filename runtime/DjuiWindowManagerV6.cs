@@ -493,6 +493,194 @@ public static class DjuiWindowManagerV6
         return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.ButtonStates, suffix, solved, sceneScales);
     }
 
+    /// <summary>
+    /// 手动重排：重排窗口内 containerNodeId 子树中所有开启排列模式（layout.flowOrientation 为
+    /// Vertical/Horizontal/Grid）的容器，自底向上（深层容器先排——父容器读取子项引擎实际尺寸时，
+    /// 已拿到子容器刚写好的新尺寸）。排列语义与编辑器端排列完全一致（DjuiLayoutArranger，双端对拍基准）。
+    /// 子项尺寸数据源＝引擎控件当前实际尺寸（克隆体可能被业务改过、不在 JSON 里）；authored 子项的
+    /// 弹性比例取 JSON stretchRatio，克隆体无 JSON 记录按 0。子项集合＝容器控件引擎 Children 遍历序
+    /// （含克隆体；DJUI 内部 visual 辅助层与 JSON 里 visible=false 的 authored 子项不参与排列）。
+    /// 排序优先级：order 参数 &gt; JSON layout.childOrder（'ByName'＝按控件 Name 码点升序稳定排序，
+    /// 无名归一空串排最前）&gt; 引擎 Children 遍历序；排序只决定排列位置的计算顺序，不改控件树结构/ZIndex。
+    /// 排列结果经 DjuiLayoutSessionV6.ApplyRect 写入（Absolute 定位，容器局部坐标）。
+    /// 注意：本 API 不写会话数据模型——authored 节点位置会被后续转屏/缩放触发的 session.Relayout
+    /// （JSON solved 基准）覆盖回 JSON 排布；克隆体不在 authored 树，不受影响。业务改过尺寸的 Auto
+    /// 控件（如克隆体）读 ActualSize，帧末才生效，建树同帧调用可能取到旧值。
+    /// 返回 false＝子树内没有开启排列模式的容器（已记日志）；未 Initialize 抛 InvalidOperationException、
+    /// 实例/节点不存在抛 KeyNotFoundException（编程错误，CloneControl 同款口径）。
+    /// </summary>
+    public static bool Relayout(string windowInstanceId, string containerNodeId, IComparer<Control>? order = null)
+    {
+        if (_project == null) throw new InvalidOperationException("DJUI v6: 请先 Initialize");
+        var instance = Instances.TryGetValue(windowInstanceId, out var tree)
+            ? tree
+            : throw new KeyNotFoundException($"DJUI v6: 窗口实例不存在: {windowInstanceId}");
+        var container = FindNode(instance.Session.CurrentPage.Root, containerNodeId)
+            ?? throw new KeyNotFoundException($"DJUI v6: 节点不存在: {containerNodeId}");
+        return RelayoutCore(instance, container, order, null);
+    }
+
+    /// <summary>
+    /// 同 Relayout，但子项顺序显式给定：orderedNodeIds 内的子项按其相对顺序排前，未列出的（含克隆体）
+    /// 按引擎 Children 遍历序附后（稳定排序，并列保持原序）；orderedNodeIds 里的 id 只在其所属容器内
+    /// 生效（子树多层容器时各取所需）。显式顺序优先于 JSON layout.childOrder。
+    /// </summary>
+    public static bool RelayoutByOrder(string windowInstanceId, string containerNodeId, IReadOnlyList<string> orderedNodeIds)
+    {
+        if (orderedNodeIds == null) throw new ArgumentNullException(nameof(orderedNodeIds));
+        if (_project == null) throw new InvalidOperationException("DJUI v6: 请先 Initialize");
+        var instance = Instances.TryGetValue(windowInstanceId, out var tree)
+            ? tree
+            : throw new KeyNotFoundException($"DJUI v6: 窗口实例不存在: {windowInstanceId}");
+        var container = FindNode(instance.Session.CurrentPage.Root, containerNodeId)
+            ?? throw new KeyNotFoundException($"DJUI v6: 节点不存在: {containerNodeId}");
+        return RelayoutCore(instance, container, null, orderedNodeIds);
+    }
+
+    /// <summary>Relayout / RelayoutByOrder 共用核心：收集子树内全部排列容器，按深度降序自底向上逐个重排。</summary>
+    private static bool RelayoutCore(DjuiTreeInstanceV6 instance, DjuiNodeV6 container, IComparer<Control>? order, IReadOnlyList<string>? orderedNodeIds)
+    {
+        var containers = new List<(DjuiNodeV6 Node, int Depth)>();
+        CollectArrangeContainers(container, 0, containers);
+        if (containers.Count == 0)
+        {
+            Game.Logger.LogWarning("DJUI v6: Relayout 子树内没有开启排列模式的容器: 实例 {Instance} 节点 {Node}",
+                instance.Session.WindowInstanceId, container.Id);
+            return false;
+        }
+        // 自底向上＝深度降序（OrderByDescending 稳定排序；禁 List.Sort/Array.Sort——比较相等必须保持原序）
+        foreach (var (node, _) in containers.OrderByDescending(c => c.Depth))
+            RelayoutOneContainer(instance, node, order, orderedNodeIds);
+        return true;
+    }
+
+    /// <summary>递归收集子树内开启排列模式的容器节点（含自身）。</summary>
+    private static void CollectArrangeContainers(DjuiNodeV6 node, int depth, List<(DjuiNodeV6 Node, int Depth)> sink)
+    {
+        var flow = node.Layout?.FlowOrientation;
+        if (flow == "Vertical" || flow == "Horizontal" || flow == "Grid") sink.Add((node, depth));
+        foreach (var child in node.Children) CollectArrangeContainers(child, depth + 1, sink);
+    }
+
+    private sealed class RelayoutChild
+    {
+        public required Control Control { get; init; }
+        public required string Id { get; init; }
+        /// <summary>authored 直接子项的 JSON 节点；克隆体/外部挂入控件不在 authored 树，为 null（弹性比例按 0）。</summary>
+        public DjuiNodeV6? Json { get; init; }
+    }
+
+    /// <summary>重排单个容器：读 JSON 排列参数与子项引擎实际尺寸，调 DjuiLayoutArranger 排列并 ApplyRect 写回。</summary>
+    private static void RelayoutOneContainer(DjuiTreeInstanceV6 instance, DjuiNodeV6 node, IComparer<Control>? order, IReadOnlyList<string>? orderedNodeIds)
+    {
+        var session = instance.Session;
+        var containerControl = session.GetControl<Control>(node.Id);
+        if (containerControl == null)
+        {
+            Game.Logger.LogWarning("DJUI v6: Relayout 容器控件未登记: 实例 {Instance} 节点 {Node}", session.WindowInstanceId, node.Id);
+            return;
+        }
+
+        // authored 直接子项索引（id → JSON 节点）：弹性比例与可见性过滤的数据源
+        var authored = new Dictionary<string, DjuiNodeV6>(StringComparer.Ordinal);
+        foreach (var child in node.Children) authored[child.Id] = child;
+
+        // 子项集合＝引擎 Children 遍历序（含克隆体）；剔除 DJUI 内部 visual 辅助层、未登记控件与隐藏的 authored 子项
+        var entries = new List<RelayoutChild>();
+        foreach (var child in containerControl.Children ?? [])
+        {
+            if (IsAuxiliaryVisual(child)) continue;
+            var id = session.FindNodeId(child);
+            if (id == null) continue;
+            var json = authored.TryGetValue(id, out var childNode) ? childNode : null;
+            if (json?.Basic?.Visible == false) continue;   // 隐藏子项不参与排列（与编辑器排列口径一致）
+            entries.Add(new RelayoutChild { Control = child, Id = id, Json = json });
+        }
+        if (entries.Count == 0) return;
+
+        // 排序优先级：order 参数 > orderedNodeIds > JSON childOrder（ByName 交给 Arranger 内部处理，勿在此排）。
+        // OrderBy 稳定排序，比较相等保持 Children 遍历序。
+        IEnumerable<RelayoutChild> sorted = entries;
+        if (order != null)
+            sorted = entries.OrderBy(e => e.Control, order);
+        else if (orderedNodeIds != null)
+            sorted = entries.OrderBy(e => RankInOrder(e.Id, orderedNodeIds));
+
+        var layout = node.Layout;
+        var spacing = layout?.Spacing;
+        var padding = layout?.Padding;
+        var p = new DjuiLayoutArranger.ArrangerParams
+        {
+            Flow = layout?.FlowOrientation ?? "Vertical",
+            // spacing 长度兜底（null/Length<2 → 0）：与 DjuiSpacingArrayConverter 的长度兜底构成双保险，
+            // 防反序列化之外路径的畸形数组下游索引越界
+            SpacingH = spacing is { Length: >= 2 } ? spacing[0] : 0f,
+            SpacingV = spacing is { Length: >= 2 } ? spacing[1] : 0f,
+            PadLeft = padding is { Length: 4 } ? padding[0] : 0f,
+            PadTop = padding is { Length: 4 } ? padding[1] : 0f,
+            PadRight = padding is { Length: 4 } ? padding[2] : 0f,
+            PadBottom = padding is { Length: 4 } ? padding[3] : 0f,
+            HAlign = string.IsNullOrEmpty(layout?.HorizontalContentAlignment) ? "Left" : layout!.HorizontalContentAlignment!,
+            VAlign = string.IsNullOrEmpty(layout?.VerticalContentAlignment) ? "Top" : layout!.VerticalContentAlignment!,
+            GridFlow = layout?.GridFlow == "Vertical" ? "Vertical" : "Horizontal",
+            GridCount = layout?.GridCount is int gridCount ? gridCount : 1,
+            ChildOrder = order == null && orderedNodeIds == null && layout?.ChildOrder == "ByName" ? "ByName" : "Default",
+        };
+
+        var items = new List<DjuiLayoutArranger.ArrangerItem>(entries.Count);
+        foreach (var e in sorted)
+        {
+            items.Add(new DjuiLayoutArranger.ArrangerItem
+            {
+                Id = e.Id,
+                Name = e.Control.Name,
+                Width = ReadWidth(e.Control),
+                Height = ReadHeight(e.Control),
+                HGrow = e.Json?.WidthStretchRatio ?? 0f,
+                VGrow = e.Json?.HeightStretchRatio ?? 0f,
+            });
+        }
+
+        var rects = DjuiLayoutArranger.Arrange(ReadWidth(containerControl), ReadHeight(containerControl), p, items);
+        var controlsById = new Dictionary<string, Control>(StringComparer.Ordinal);
+        foreach (var e in entries) controlsById[e.Id] = e.Control;
+        foreach (var rect in rects)
+        {
+            // 写位置沿用 DjuiLayoutSessionV6.ApplyRect 的写法（Absolute + UIPosition），不发明新写法
+            if (controlsById.TryGetValue(rect.Id, out var childControl))
+                DjuiLayoutSessionV6.ApplyRect(childControl, new DjuiRectV6(rect.X, rect.Y, rect.Width, rect.Height));
+        }
+    }
+
+    /// <summary>子项 id 在显式顺序表中的名次：未列出（含克隆体）恒排已列出项之后（int.MaxValue 并列保持遍历序）。</summary>
+    private static int RankInOrder(string id, IReadOnlyList<string> orderedNodeIds)
+    {
+        for (var i = 0; i < orderedNodeIds.Count; i++)
+            if (string.Equals(orderedNodeIds[i], id, StringComparison.Ordinal)) return i;
+        return int.MaxValue;
+    }
+
+    /// <summary>DJUI 内部 visual 辅助层（图片/进度条子层、按钮文本 Label）不参与容器排列。</summary>
+    private static bool IsAuxiliaryVisual(Control control)
+    {
+        var name = control.Name;
+        if (string.IsNullOrEmpty(name)) return false;
+        return name.StartsWith(DjuiImageVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
+            || name.StartsWith(DjuiProgressVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
+            || name == DjuiButtonStateV6.ButtonLabelName;
+    }
+
+    /// <summary>
+    /// 读控件当前实际宽（DIP）。非 Auto 走 Width.Value（ApplyRect 显式设值、同步可读，引擎文档：
+    /// Width 只反映用户设置的值）；Auto（业务改过尺寸的克隆体）退 ActualSize（引擎文档：帧末才生效，
+    /// 建树同帧调用可能取到旧值）。负值兜 0。先例：DjuiWindowTransitionV6 同款读法。
+    /// </summary>
+    private static float ReadWidth(Control control)
+        => Math.Max(0f, control.Width.IsAuto ? control.ActualSize.Width : control.Width.Value);
+
+    private static float ReadHeight(Control control)
+        => Math.Max(0f, control.Height.IsAuto ? control.ActualSize.Height : control.Height.Value);
+
     private static DjuiNodeV6? FindNode(DjuiNodeV6 root, string id)
     {
         if (string.Equals(root.Id, id, StringComparison.Ordinal)) return root;

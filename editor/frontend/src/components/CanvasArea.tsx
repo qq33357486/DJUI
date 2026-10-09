@@ -1110,6 +1110,45 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
   const borderThickness = positiveNumber(app.borderThickness)
   const sceneFrame = node.sceneFrame
 
+  // === 布局容器内容超界检测（决议 12）===
+  // 开排列模式（Vertical/Horizontal/Grid）且选中的容器：逐可见子项按容器已解算矩形求解，
+  // 取画布绝对坐标包围盒；任一边超出容器矩形即提示（排列语义：照排溢出、绝不压缩）。
+  // 烘焙后子项即排列结果，包围盒法等价于排列内容块且覆盖 anchor 子项等一切情况。
+  // sceneFrame 容器的子项按 artboard 坐标映射求解，不在此口径内，跳过。
+  const flowMode = node.layout?.flowOrientation
+  let contentOverflow: { bbox: { x: number; y: number; width: number; height: number }; label: string } | null = null
+  if (
+    isSelected &&
+    !sceneFrame?.artboard &&
+    (flowMode === 'Vertical' || flowMode === 'Horizontal' || flowMode === 'Grid')
+  ) {
+    const visibleKids = (node.children ?? []).filter(c => c.basic?.visible !== false)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const child of visibleKids) {
+      const r = solveLayout(child, solved, canvasWidth, canvasHeight, { safeRect, imageFrame: imageFrame ?? undefined }).rect
+      if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !Number.isFinite(r.width) || !Number.isFinite(r.height)) continue
+      minX = Math.min(minX, r.x)
+      minY = Math.min(minY, r.y)
+      maxX = Math.max(maxX, r.x + r.width)
+      maxY = Math.max(maxY, r.y + r.height)
+    }
+    const overLeft = solved.x - minX
+    const overTop = solved.y - minY
+    const overRight = maxX - (solved.x + solved.width)
+    const overBottom = maxY - (solved.y + solved.height)
+    if (Number.isFinite(minX) && (overLeft > 0.5 || overTop > 0.5 || overRight > 0.5 || overBottom > 0.5)) {
+      const parts: string[] = []
+      if (overLeft > 0.5) parts.push(`左${Math.round(overLeft)}`)
+      if (overTop > 0.5) parts.push(`上${Math.round(overTop)}`)
+      if (overRight > 0.5) parts.push(`右${Math.round(overRight)}`)
+      if (overBottom > 0.5) parts.push(`下${Math.round(overBottom)}`)
+      contentOverflow = {
+        bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+        label: parts.join(' '),
+      }
+    }
+  }
+
   return (
     <>
       <Rect
@@ -1307,6 +1346,32 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
           fill="#5ab9ff"
           listening={false}
         />
+      )}
+      {/* 布局容器内容超界提示（决议 12）：红色虚线外框 + 超界量标注。
+          坐标差值换算：辅助块与类型标签同源用 displayX/displayY（含拖拽预览 delta），
+          直接按画布绝对坐标画会双重偏移——rectX = displayX + (bbox.x - solved.x) = bbox.x + renderDelta.x */}
+      {contentOverflow && (
+        <Group
+          x={displayX + (contentOverflow.bbox.x - solved.x)}
+          y={displayY + (contentOverflow.bbox.y - solved.y)}
+          listening={false}
+        >
+          <Rect
+            width={contentOverflow.bbox.width}
+            height={contentOverflow.bbox.height}
+            stroke="#ff4d4f"
+            strokeWidth={1.5}
+            dash={[6, 4]}
+            listening={false}
+          />
+          <Text
+            y={-16}
+            text={`内容超界 ${contentOverflow.label}`}
+            fontSize={11}
+            fill="#ff4d4f"
+            listening={false}
+          />
+        </Group>
       )}
       {/* 子节点：场景画板内的坐标以 artboard 为准，再整体映射到背景完整图帧。 */}
       {sceneFrame?.artboard && sceneFrame.artboard.width > 0 && sceneFrame.artboard.height > 0 ? (

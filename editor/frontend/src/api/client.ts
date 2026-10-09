@@ -25,6 +25,7 @@ import {
   readSoundConfig,
   getDefaultSoundConfig,
   SOUND_CONFIG_VERSION,
+  migrateV6LayoutCompat,
 } from '@/lib/patches'
 import { normalizePage } from '@/lib/normalize'
 import { type PageUnderlayMap } from '@/lib/pageUnderlays'
@@ -437,7 +438,11 @@ export async function loadPage(pageId: string): Promise<UiPage | null> {
     throw new Error('页面 ' + pageId + ' 不是可编辑的 DJUI v6 文件：' + detail)
   }
   // v6 仍经过结构边界归一化，但不再运行旧协议补丁或静默写回。
-  const page = normalizePage(uiPageFromV6(result.value))
+  // 布局语义迁移（旧 spacing 单值→二元组、SpacingPanel→Panel）必须先于 normalize：
+  // normalize 会把非二元组 spacing 置 null，不先迁移，0.28.x 及更早页面的间距在打开/保存链丢失。
+  const uiPage = uiPageFromV6(result.value)
+  migrateV6LayoutCompat(uiPage)
+  const page = normalizePage(uiPage)
   if (!page) return null
   // 参考图配置从编辑器私有 meta 恢复（visible 无记录时留空，画布端回退 localStorage 旧偏好）
   const refMeta = (await loadPageReferenceMeta())[pageId]

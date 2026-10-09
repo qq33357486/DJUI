@@ -173,10 +173,78 @@ public sealed class DjuiLayoutV6
     [JsonPropertyName("margin")] public float[]? Margin { get; set; }
     [JsonPropertyName("padding")] public float[]? Padding { get; set; }
     [JsonPropertyName("autoSize")] public string? AutoSize { get; set; }
+    [JsonPropertyName("flowOrientation")] public string? FlowOrientation { get; set; }
+    // 间距二元组 [水平, 垂直]；旧编辑器产出的单值 number 由 DjuiSpacingArrayConverter 兼容读为 [v, v]
+    [JsonPropertyName("spacing")]
+    [JsonConverter(typeof(DjuiSpacingArrayConverter))]
+    public float[]? Spacing { get; set; }
     [JsonPropertyName("horizontalAlignment")] public string? HorizontalAlignment { get; set; }
     [JsonPropertyName("verticalAlignment")] public string? VerticalAlignment { get; set; }
     [JsonPropertyName("horizontalContentAlignment")] public string? HorizontalContentAlignment { get; set; }
     [JsonPropertyName("verticalContentAlignment")] public string? VerticalContentAlignment { get; set; }
+    [JsonPropertyName("gridFlow")] public string? GridFlow { get; set; }
+    [JsonPropertyName("gridCount")] public int? GridCount { get; set; }
+    [JsonPropertyName("childOrder")] public string? ChildOrder { get; set; }
+    [JsonPropertyName("autoRelayout")] public bool? AutoRelayout { get; set; }
+}
+
+/// <summary>
+/// layout.spacing 过渡期兼容：v6 页面严格反序列化（UnmappedMemberHandling=Disallow）下，
+/// 旧编辑器产出的单值 number 读为 [v, v] 二元组（自 0.29.0 起 10 个版本后删除）。
+/// 畸形数组长度兜底：0 → [0,0]、1 → [v,v]、≥2 取前两项——防下游 Spacing[1] 索引越界。
+/// Write 只写数组形态（同款长度兜底），保证回写文件恒为新格式。
+/// </summary>
+public sealed class DjuiSpacingArrayConverter : JsonConverter<float[]?>
+{
+    public override float[]? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null) return null;
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            var single = reader.GetSingle();
+            return new[] { single, single };
+        }
+        if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            var values = new List<float>();
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndArray) break;
+                if (reader.TokenType == JsonTokenType.Number) values.Add(reader.GetSingle());
+                else reader.Skip();
+            }
+            if (values.Count == 0) return new[] { 0f, 0f };
+            if (values.Count == 1) return new[] { values[0], values[0] };
+            return new[] { values[0], values[1] };
+        }
+        throw new JsonException($"DJUI v6: layout.spacing 非法形态: {reader.TokenType}");
+    }
+
+    public override void Write(Utf8JsonWriter writer, float[]? value, JsonSerializerOptions options)
+    {
+        if (value == null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+        writer.WriteStartArray();
+        switch (value.Length)
+        {
+            case 0:
+                writer.WriteNumberValue(0f);
+                writer.WriteNumberValue(0f);
+                break;
+            case 1:
+                writer.WriteNumberValue(value[0]);
+                writer.WriteNumberValue(value[0]);
+                break;
+            default:
+                writer.WriteNumberValue(value[0]);
+                writer.WriteNumberValue(value[1]);
+                break;
+        }
+        writer.WriteEndArray();
+    }
 }
 
 public sealed class DjuiExtensionsV6

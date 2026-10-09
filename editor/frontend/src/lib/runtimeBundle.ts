@@ -6,6 +6,7 @@ import DjuiBindingSystem from '../../../../runtime/DjuiBindingSystem.cs?raw'
 import DjuiEffectPlayer from '../../../../runtime/DjuiEffectPlayer.cs?raw'
 import DjuiEffectPresets from '../../../../runtime/DjuiEffectPresets.cs?raw'
 import DjuiFlowBorder from '../../../../runtime/DjuiFlowBorder.cs?raw'
+import DjuiLayoutArranger from '../../../../runtime/DjuiLayoutArranger.cs?raw'
 import DjuiLayoutSolver from '../../../../runtime/DjuiLayoutSolver.cs?raw'
 import DjuiCanvasV6 from '../../../../runtime/DjuiCanvasV6.cs?raw'
 import DjuiLayoutSessionV6 from '../../../../runtime/DjuiLayoutSessionV6.cs?raw'
@@ -26,7 +27,7 @@ import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
 import DjuiWindowTransitionV6 from '../../../../runtime/DjuiWindowTransitionV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.9.1'
+export const RUNTIME_VERSION = '0.10.0'
 
 export interface BundledRuntimeFile {
   name: string
@@ -40,6 +41,7 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiEffectPlayer.cs', content: DjuiEffectPlayer },
   { name: 'DjuiEffectPresets.cs', content: DjuiEffectPresets },
   { name: 'DjuiFlowBorder.cs', content: DjuiFlowBorder },
+  { name: 'DjuiLayoutArranger.cs', content: DjuiLayoutArranger },
   { name: 'DjuiLayoutSolver.cs', content: DjuiLayoutSolver },
   { name: 'DjuiCanvasV6.cs', content: DjuiCanvasV6 },
   { name: 'DjuiLayoutSessionV6.cs', content: DjuiLayoutSessionV6 },

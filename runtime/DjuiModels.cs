@@ -336,7 +336,7 @@ public class DjuiLayoutJson
     public string? FlowOrientation { get; set; }
 
     [JsonPropertyName("spacing")]
-    public float? Spacing { get; set; }
+    public float? Spacing { get; set; } // v6 协议为 float[] 二元组 [水平, 垂直]；v4 仅历史单值（新编辑器只产 v6 文件，v4 链路零消费）
 
     [JsonPropertyName("horizontalAlignment")]
     public string? HorizontalAlignment { get; set; }
@@ -349,6 +349,20 @@ public class DjuiLayoutJson
 
     [JsonPropertyName("verticalContentAlignment")]
     public string? VerticalContentAlignment { get; set; }
+
+    // 以下四个为 0.29.0 容器排列系统的布局组字段，与 v6 DjuiLayoutV6 对齐的模型文档性声明：
+    // v4 运行态零排版（见 DjuiUiLoader 的运行态零排版注释）、宽松反序列化自动跳过未映射成员，新字段零消费。
+    [JsonPropertyName("gridFlow")]
+    public string? GridFlow { get; set; }
+
+    [JsonPropertyName("gridCount")]
+    public int? GridCount { get; set; }
+
+    [JsonPropertyName("childOrder")]
+    public string? ChildOrder { get; set; }
+
+    [JsonPropertyName("autoRelayout")]
+    public bool? AutoRelayout { get; set; }
 }
 
 public class DjuiInteractionJson

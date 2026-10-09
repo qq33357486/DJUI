@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import * as api from '@/api/client'
 import { inspectPageV6, inspectProjectV6 } from '@/lib/schemaV6'
 import { normalizePage } from '@/lib/normalize'
+import { migrateV6LayoutCompat } from '@/lib/patches'
 import { setAssetResolver } from '@/hooks/useImageUrl'
 import { useProjectStore } from '@/store/projectStore'
 import { useEditorStore } from '@/store/editorStore'
@@ -46,7 +47,10 @@ async function loadPageTree(base: string, pageId: string, underlays: PageUnderla
       if (id === pageId) throw new Error(`页面 ${id} 不是可编辑的 DJUI v6 文件`)
       return
     }
-    const page = normalizePage(api.uiPageFromV6(result.value))
+    // 与 client.loadPage 同序：布局语义迁移先于 normalize，防止旧 spacing 单值被归一化置 null
+    const uiPage = api.uiPageFromV6(result.value)
+    migrateV6LayoutCompat(uiPage)
+    const page = normalizePage(uiPage)
     if (!page) {
       if (id === pageId) throw new Error(`页面 ${id} 归一化失败`)
       return

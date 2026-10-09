@@ -24,6 +24,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+// layout 排列字段的枚举白名单（结构归一化用；旧值语义迁移如 spacing 单值→二元组在 patches.ts，职责不混）
+const LAYOUT_FLOW_ORIENTATIONS: readonly string[] = ['None', 'Horizontal', 'Vertical', 'Grid']
+const LAYOUT_GRID_FLOWS: readonly string[] = ['Horizontal', 'Vertical']
+const LAYOUT_CHILD_ORDERS: readonly string[] = ['Default', 'ByName']
+
+function isEnumString(value: unknown, allowed: readonly string[]): boolean {
+  return typeof value === 'string' && allowed.includes(value)
+}
+
 // 递归归一化单个节点，确保结构完整
 export function normalizeNode(raw: unknown): UiNode {
   if (!isRecord(raw)) {
@@ -66,7 +75,25 @@ export function normalizeNode(raw: unknown): UiNode {
     node.transform = t as UiNode['transform']
   }
   if (isRecord(raw.appearance)) node.appearance = raw.appearance as UiNode['appearance']
-  if (isRecord(raw.layout)) node.layout = raw.layout as UiNode['layout']
+  if (isRecord(raw.layout)) {
+    // 浅拷贝后对排列字段做类型兜底（已有字段 padding/margin/autoSize/对齐保持原透传行为不变，避免存量回归）
+    const l = { ...raw.layout } as Record<string, unknown>
+    if (l.flowOrientation !== undefined && l.flowOrientation !== null && !isEnumString(l.flowOrientation, LAYOUT_FLOW_ORIENTATIONS)) delete l.flowOrientation
+    // spacing 必须为 [number, number] 二元组（=[水平间距, 垂直间距]）；正常链路旧单值已在迁移层转好，
+    // 丢弃非法结构是 normalize 的终极防御（语义迁移不在此做）
+    if (l.spacing !== undefined && l.spacing !== null) {
+      const sp = l.spacing
+      const isTuple = Array.isArray(sp) && sp.length === 2 && typeof sp[0] === 'number' && typeof sp[1] === 'number'
+      if (!isTuple) l.spacing = null
+    }
+    if (l.gridFlow !== undefined && l.gridFlow !== null && !isEnumString(l.gridFlow, LAYOUT_GRID_FLOWS)) delete l.gridFlow
+    // gridCount 字段语义为正整数：非整数（如 0.5）属类型不符，会让 C# int? 反序列化炸掉，防线必须落在数据边界；
+    // 值域 ≥1 的钳制由排列算法负责，normalize 只管类型
+    if (l.gridCount !== undefined && l.gridCount !== null && !(typeof l.gridCount === 'number' && Number.isInteger(l.gridCount))) delete l.gridCount
+    if (l.childOrder !== undefined && l.childOrder !== null && !isEnumString(l.childOrder, LAYOUT_CHILD_ORDERS)) delete l.childOrder
+    if (l.autoRelayout !== undefined && l.autoRelayout !== null && typeof l.autoRelayout !== 'boolean') delete l.autoRelayout
+    node.layout = l as UiNode['layout']
+  }
   if (isRecord(raw.interaction)) node.interaction = raw.interaction as UiNode['interaction']
   if (isRecord(raw.effects)) node.effects = raw.effects as UiNode['effects']
   if (isRecord(raw.text)) node.text = raw.text as UiNode['text']

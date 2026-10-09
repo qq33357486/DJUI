@@ -64,7 +64,7 @@ interface EditorState {
   setAllFonts: (font: string | null) => void
   applyFlexLayout: (parentId: string) => void
   batchUpdateNode: (id: string, updates: Record<string, unknown>) => void
-  batchUpdateNodes: (updatesById: Record<string, Record<string, unknown>>) => void
+  batchUpdateNodes: (updatesById: Record<string, Record<string, unknown>>, opts?: { queueHistory?: boolean }) => void
 
   pushHistory: () => void
   queueHistory: () => void
@@ -580,9 +580,11 @@ export const useEditorStore = create<EditorState>()(
       })
     },
 
-    batchUpdateNodes: (updatesById) => {
+    batchUpdateNodes: (updatesById, opts) => {
       if (Object.keys(updatesById).length === 0) return
-      get().pushHistory()
+      // queueHistory：属性面板拖动等连续操作，只留开始前快照，空闲后合并为一个撤销步骤
+      if (opts?.queueHistory) get().queueHistory()
+      else get().pushHistory()
       set((s) => {
         if (!s.page) return
         for (const [id, updates] of Object.entries(updatesById)) {

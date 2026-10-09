@@ -290,6 +290,12 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
   const aspectRatioWH = (t.width ?? 100) / (t.height ?? 100)  // 当前 W:H
   const xLabel = anchor.side === 'None' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
   const yLabel = anchor.side === 'None' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
+  // 多选：X/Y 调整不再是单节点绝对赋值，而是对全部选中控件做相对平移（画布按锚点/拉伸语义反算）
+  const multiSelect = selectedIds.length > 1
+  const nudgeSelection = (dx: number, dy: number) => {
+    if (dx === 0 && dy === 0) return
+    window.dispatchEvent(new CustomEvent('djui:nudge', { detail: { ids: selectedIds, dx, dy } }))
+  }
   const templateOptions = Object.values(allPages)
     .filter(p => p.nodeKind === 'template')
     .map(p => ({ value: p.pageId, label: `${p.pageId} (${p.designWidth}×${p.designHeight})` }))
@@ -335,11 +341,32 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
       </ModuleCard>
       <ModuleCard color={MODULE_COLORS.transform} title="变换" sub="锚点 · 偏移 · 拉伸 · 尺寸 · 弹性">
         <Space direction="vertical" style={{ width: '100%' }} size={10}>
+                {multiSelect && (
+                  <div style={{ padding: '6px 10px', border: '1px solid #1f4a66', borderRadius: 6, background: '#0e2433', color: '#5ab9ff', fontSize: 12 }}>
+                    已选 {selectedIds.length} 个控件 · 坐标调整将整体相对移动
+                  </div>
+                )}
                 <SectionTitle color={MODULE_COLORS.transform}>锚点</SectionTitle>
                 <AnchorEditor node={node} selectedIds={selectedIds} />
                 <SectionTitle color={MODULE_COLORS.transform}>偏移</SectionTitle>
-                <ScrubField label={xLabel} value={t.x ?? 0} onChange={v => updateNodeField(node.id, 'transform.x', v)} />
-                <ScrubField label={yLabel} value={t.y ?? 0} onChange={v => updateNodeField(node.id, 'transform.y', v)} />
+                <ScrubField
+                  label={xLabel}
+                  value={t.x ?? 0}
+                  onChange={v => {
+                    if (multiSelect) nudgeSelection(v - (t.x ?? 0), 0)
+                    else updateNodeField(node.id, 'transform.x', v)
+                  }}
+                  onScrub={multiSelect ? (delta) => nudgeSelection(delta, 0) : undefined}
+                />
+                <ScrubField
+                  label={yLabel}
+                  value={t.y ?? 0}
+                  onChange={v => {
+                    if (multiSelect) nudgeSelection(0, v - (t.y ?? 0))
+                    else updateNodeField(node.id, 'transform.y', v)
+                  }}
+                  onScrub={multiSelect ? (delta) => nudgeSelection(0, delta) : undefined}
+                />
                 {(stretchWidth || stretchHeight) && (
                   <div style={{ fontSize: 10, color: '#5b6378', paddingLeft: 64 }}>
                     拉伸轴的位置由边距决定（见下方「拉伸」）；画布拖拽和缩放会自动更新边距。
@@ -1895,35 +1922,43 @@ function ModuleCard({ color, title, sub, children }: {
 
 // === NGUI 风格拖拽改值组件 ===
 // 标签可拖拽（左右滑动改值），InputNumber 可手动输入
-function ScrubField({ label, value, onChange, step = 1, min, max, suffix, dragSensitivity }: {
+// onScrub：拖动路径的增量回调（本次 move 相对上次应用的差值），供多选相对移动使用
+function ScrubField({ label, value, onChange, onScrub, step = 1, min, max, suffix, dragSensitivity }: {
   label: string
   value: number
   onChange: (v: number) => void
+  onScrub?: (delta: number) => void
   step?: number
   min?: number
   max?: number
   suffix?: string
   dragSensitivity?: number
 }) {
-  const dragRef = useRef<{ startX: number; startVal: number } | null>(null)
+  const dragRef = useRef<{ startX: number; lastApplied: number } | null>(null)
   const inputRef = useRef<any>(null)
 
   const handleScrubStart = (e: React.MouseEvent) => {
     // 仅左键
     if (e.button !== 0) return
     e.preventDefault()
-    dragRef.current = { startX: e.clientX, startVal: value }
+    dragRef.current = { startX: e.clientX, lastApplied: value }
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return
       const dx = ev.clientX - dragRef.current.startX
       let speed = dragSensitivity ?? 1
       if (ev.shiftKey) speed *= 0.1
       else if (ev.ctrlKey || ev.metaKey) speed *= 10
-      const raw = dragRef.current.startVal + dx * speed
+      const raw = value + dx * speed
       const rounded = step >= 1 ? Math.round(raw) : Math.round(raw * 100) / 100
-      if (min !== undefined && rounded < min) { onChange(min); return }
-      if (max !== undefined && rounded > max) { onChange(max); return }
-      onChange(rounded)
+      let next = rounded
+      if (min !== undefined && next < min) next = min
+      if (max !== undefined && next > max) next = max
+      const delta = next - dragRef.current.lastApplied
+      if (delta !== 0) {
+        dragRef.current.lastApplied = next
+        if (onScrub) onScrub(delta)
+        else onChange(next)
+      }
     }
     const onUp = () => {
       dragRef.current = null

@@ -1839,6 +1839,40 @@ function computeRenderDims(
     return () => window.removeEventListener('djui:reanchor', handler)
   }, [])
 
+  // 属性面板多选调整 X/Y：对所有选中节点做相对平移。
+  // 与画布多选拖拽同一路径：先求当前布局矩形，平移后按锚点/拉伸语义反算（拉伸轴写 margins）。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ ids: string[]; dx: number; dy: number }>).detail
+      const layoutContext = reanchorContextRef.current
+      if (!detail?.ids?.length || !layoutContext) return
+      if (!detail.dx && !detail.dy) return
+      const store = useEditorStore.getState()
+      const currentPage = store.page
+      if (!currentPage) return
+      const displayRoot = store.responsiveVariant === 'wide'
+        ? cloneTreeWithResponsiveOverrides(currentPage.root, currentPage.responsive?.wide.overrides)
+        : currentPage.root
+      const updatesById: Record<string, Record<string, unknown>> = {}
+      for (const id of detail.ids) {
+        const node = findNode(displayRoot, id)
+        if (!node || node.editorLocked || node.basic?.visible === false) continue
+        const parentRect = solveParentRectForNode(displayRoot, id, layoutContext.actualW, layoutContext.actualH, layoutContext.safeRect, layoutContext.imageFrame)
+        const rect = solveLayout(node, parentRect, layoutContext.actualW, layoutContext.actualH, { safeRect: layoutContext.safeRect, imageFrame: layoutContext.imageFrame ?? undefined }).rect
+        updatesById[id] = computeLayoutPatchFromRect(node, parentRect, layoutContext.actualW, layoutContext.actualH, {
+          x: rect.x + detail.dx,
+          y: rect.y + detail.dy,
+          width: rect.width,
+          height: rect.height,
+        }, layoutContext.safeRect, layoutContext.imageFrame)
+      }
+      // 拖动会连续触发：队列式历史，一次连续操作合并为一个撤销步骤
+      store.batchUpdateNodes(updatesById, { queueHistory: true })
+    }
+    window.addEventListener('djui:nudge', handler)
+    return () => window.removeEventListener('djui:nudge', handler)
+  }, [])
+
   if (!page) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>

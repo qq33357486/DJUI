@@ -422,7 +422,13 @@ export async function listPages(): Promise<string[]> {
   return allFiles.map(f => f.replace(/\.json$/i, ''))
 }
 
-export async function loadPage(pageId: string): Promise<UiPage | null> {
+// recordBaseline=false 供「辅助读取」使用（截图渲染、素材扫描等只读不进编辑器内存的场景）：
+// 若这类读取也记基线，会把外部修改检测的基线磁盘文本悄悄刷成最新内容，
+// 导致 AI 改完文件后回到编辑器不再自动同步（只能手动刷新）。
+export interface LoadPageOptions {
+  recordBaseline?: boolean
+}
+export async function loadPage(pageId: string, opts: LoadPageOptions = {}): Promise<UiPage | null> {
   const ws = projectContext.ws
   if (!ws) return null
   const rawText = await fs.readFileText(ws, `${PAGES_DIR}/${pageId}.json`)
@@ -451,7 +457,7 @@ export async function loadPage(pageId: string): Promise<UiPage | null> {
     if (typeof refMeta.opacity === 'number') page.referenceOpacity = refMeta.opacity
     if (typeof refMeta.visible === 'boolean') page.referenceVisible = refMeta.visible
   }
-  recordBaseline(pageId, rawText ?? '', page)
+  if (opts.recordBaseline !== false) recordBaseline(pageId, rawText ?? '', page)
   return page
 }
 

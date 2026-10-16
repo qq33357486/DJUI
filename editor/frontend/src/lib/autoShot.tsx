@@ -263,7 +263,8 @@ async function handleScreenshotRequest(req: ShotRequest): Promise<ShotResponse> 
   }
   let page: UiPage | null = null
   try {
-    page = await api.loadPage(req.page)
+    // 只读磁盘渲染，不记基线：截图后外部修改检测仍能发现 AI 的改动并自动同步
+    page = await api.loadPage(req.page, { recordBaseline: false })
   } catch (e) {
     return { id: req.id, status: 'error', error: e instanceof Error ? e.message : String(e), ts: Date.now() }
   }

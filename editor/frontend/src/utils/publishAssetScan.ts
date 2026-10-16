@@ -109,7 +109,8 @@ export async function scanPublishAssets(): Promise<PublishAssetScanResult> {
   for (const pageId of pageIds) {
     let page: UiPage | null = null
     try {
-      page = await loadPage(pageId)
+      // 辅助扫描只读不进编辑器内存，不记基线，避免吞掉外部修改检测
+      page = await loadPage(pageId, { recordBaseline: false })
     } catch {
       // 读取/校验失败按跳过处理
     }

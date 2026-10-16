@@ -34,7 +34,7 @@ public static class DjuiActionRouter
 
     public static bool Trigger(string actionName)
     {
-#if DENGINE_TESTS
+#if DENGINE_TESTS || DJUI_TESTS
         ProbeRecordProgrammatic(actionName);
 #endif
         if (!_handlers.TryGetValue(actionName, out var handler))
@@ -53,7 +53,7 @@ public static class DjuiActionRouter
 
         ctrl.OnPointerClicked += (sender, args) =>
         {
-#if DENGINE_TESTS
+#if DENGINE_TESTS || DJUI_TESTS
             ProbeRecordRealClick(actionName, ctrl);
 #endif
             var owner = DjuiLayoutSessionV6.FindOwner(ctrl);
@@ -69,10 +69,12 @@ public static class DjuiActionRouter
         };
     }
 
-#if DENGINE_TESTS
+#if DENGINE_TESTS || DJUI_TESTS
 
     // ------------------------------------------------------------------
-    // Action 触发探针（DENGINE_TESTS 专用）：区分「真实输入管线点击」与「程序化 Trigger 直调」。
+    // Action 触发探针（测试编译符号门控：DENGINE_TESTS 或 DJUI_TESTS 任一定义即启用，
+    // 前者是 DEngine 测试框架的既有约定、后者供不使用 DEngine 的星火工程独立启用）：
+    // 区分「真实输入管线点击」与「程序化 Trigger 直调」。
     // 供 DjuiTestSupport 转发查询；不计入正常业务流程，仅做记录，不影响任何既有行为。
     // ------------------------------------------------------------------
 
@@ -110,10 +112,10 @@ public static class DjuiActionRouter
 #endif
 }
 
-#if DENGINE_TESTS
+#if DENGINE_TESTS || DJUI_TESTS
 
 /// <summary>
-/// Action 触发探针记录（仅 DENGINE_TESTS 编译）。
+/// Action 触发探针记录（测试编译符号门控：DENGINE_TESTS 或 DJUI_TESTS 任一）。
 /// 背景：2026-10-16 阵容页事故中自动测试直调业务方法，无法发现「真实点击永远到不了 handler」。
 /// 该记录让测试能断言「真实点击 → action 触发」全链路：RealClickCount 只会在引擎输入管线
 /// （命中测试 + 事件派发）真实送达时递增；ProgrammaticCount 则是绕过输入管线的直调计数，

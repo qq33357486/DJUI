@@ -110,9 +110,11 @@ public static class DjuiTestSupport
 
     // ------------------------------------------------------------------
     // 探针查询 / 清零（转发 DjuiActionRouter 的触发记录）
+    // 门控与探针本体一致：DENGINE_TESTS 或 DJUI_TESTS 任一定义即编译
+    // （DENGINE_TESTS 是 DEngine 测试框架约定；无 DEngine 的星火工程可定义 DJUI_TESTS 启用探针）。
     // ------------------------------------------------------------------
 
-#if DENGINE_TESTS
+#if DENGINE_TESTS || DJUI_TESTS
 
     /// <summary>
     /// 取全部 action 触发探针记录的快照（按 ActionName 排序）。

@@ -37,7 +37,8 @@ import {
   SCRIPTS_VERSION,
 } from '@/lib/bundledAssets'
 import { createBrowserPublishStore } from '@/lib/browserPublishStore'
-import { applyProjectPatchesCore, checkRuntimeCore, migrateLegacyLayoutCore, publishCore, upgradeRuntimeCore } from '@/lib/publishCore'
+import { applyProjectPatchesCore, checkRuntimeCore, collectStaticClickIssuesCore, migrateLegacyLayoutCore, publishCore, upgradeRuntimeCore, type StaticClickPageReport } from '@/lib/publishCore'
+export type { StaticClickPageReport }
 
 // ===== API 类型定义 =====
 export interface GameDataSoundEntry {
@@ -828,6 +829,14 @@ export async function publishAssets(_workspacePath: string = '', _projectPath: s
   const star = projectContext.star
   if (!ws || !star) return { ok: false, error: '未选择工程目录' }
   return publishCore(createBrowserPublishStore(ws), createBrowserPublishStore(star))
+}
+
+// 工作区静态点击不可达扫描（发布前确认弹窗用）：读全部页面磁盘 JSON，纯读不写，
+// 与发布校验 warnings 共用同一规则（collectStaticClickIssuesCore），规则单源不漂移
+export async function collectStaticClickIssues(): Promise<StaticClickPageReport[]> {
+  const ws = projectContext.ws
+  if (!ws) return []
+  return collectStaticClickIssuesCore(createBrowserPublishStore(ws))
 }
 
 // ===== AGENTS.md =====

@@ -16,6 +16,8 @@ import { setDefaultButtonSoundId, setDefaultFontForNew, useEditorStore } from '.
 import { projectContext } from './fs/projectContext'
 import { loadEngineFonts } from './lib/fontLoader'
 import * as api from './api/client'
+import { findStaticActionIssues } from '@/lib/clickGuard'
+import { confirmStaticClickBlock } from './components/StaticClickConfirm'
 import { APP_VERSION } from './lib/changelog'
 import {
   applyDiskVersions,
@@ -471,15 +473,27 @@ export default function App() {
     const cfg = useProjectStore.getState().config
     if (cfg) {
       const state = useEditorStore.getState()
+      // 先收集本次要批量重存的页面（尺寸与工程配置不一致的 window 页面）
+      const dirtyPages: { pid: string; page: UiPage; designWidth: number; designHeight: number }[] = []
       for (const [pid, p] of Object.entries(state.allPages)) {
         if (p.nodeKind === 'template') continue
         const designWidth = cfg.designWidth ?? p.designWidth
         const designHeight = cfg.designHeight ?? p.designHeight
-        const dirty = designWidth !== p.designWidth || designHeight !== p.designHeight
-        if (dirty) {
+        if (designWidth !== p.designWidth || designHeight !== p.designHeight) {
+          dirtyPages.push({ pid, page: p, designWidth, designHeight })
+        }
+      }
+      // 批量重存与手动保存同一防线：写盘前做静态点击可达性警示（可仍要保存；返回修改则本次不重存，
+      // 页面保持磁盘版，待静态开关修复后再次保存工程配置或逐页保存即可落盘新尺寸）
+      const staticReports = dirtyPages
+        .map(({ pid, page }) => ({ file: `${pid}.json`, displayName: pid, issues: findStaticActionIssues(page.root) }))
+        .filter(report => report.issues.length > 0)
+      const proceed = staticReports.length === 0 || (await confirmStaticClickBlock(staticReports, 'save'))
+      if (proceed) {
+        for (const { pid, page, designWidth, designHeight } of dirtyPages) {
           // 通过 store 写入，确保工程级撤回能保留变更前的完整快照。
           updatePageMeta(pid, { designWidth, designHeight })
-          await api.savePage(p)
+          await api.savePage(page)
         }
       }
     }

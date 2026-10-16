@@ -18,6 +18,7 @@ import DjuiModels from '../../../../runtime/DjuiModels.cs?raw'
 import DjuiProtocolV6 from '../../../../runtime/DjuiProtocolV6.cs?raw'
 import DjuiResponsiveResolverV6 from '../../../../runtime/DjuiResponsiveResolverV6.cs?raw'
 import DjuiTemplateExpanderV6 from '../../../../runtime/DjuiTemplateExpanderV6.cs?raw'
+import DjuiTestSupport from '../../../../runtime/DjuiTestSupport.cs?raw'
 import DjuiTransitionPlayer from '../../../../runtime/DjuiTransitionPlayer.cs?raw'
 import DjuiTransitionRegistry from '../../../../runtime/DjuiTransitionRegistry.cs?raw'
 import DjuiUiLoader from '../../../../runtime/DjuiUiLoader.cs?raw'
@@ -27,7 +28,7 @@ import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
 import DjuiWindowTransitionV6 from '../../../../runtime/DjuiWindowTransitionV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.11.0'
+export const RUNTIME_VERSION = '0.12.0'
 
 export interface BundledRuntimeFile {
   name: string
@@ -53,6 +54,7 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiProtocolV6.cs', content: DjuiProtocolV6 },
   { name: 'DjuiResponsiveResolverV6.cs', content: DjuiResponsiveResolverV6 },
   { name: 'DjuiTemplateExpanderV6.cs', content: DjuiTemplateExpanderV6 },
+  { name: 'DjuiTestSupport.cs', content: DjuiTestSupport },
   { name: 'DjuiTransitionPlayer.cs', content: DjuiTransitionPlayer },
   { name: 'DjuiTransitionRegistry.cs', content: DjuiTransitionRegistry },
   { name: 'DjuiUiLoader.cs', content: DjuiUiLoader },

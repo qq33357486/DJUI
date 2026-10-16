@@ -9,6 +9,7 @@ import {
 } from './patches'
 import { DJUI_PROTOCOL_VERSION } from '../types/protocolV6'
 import { inspectPageV6, inspectProjectV6 } from './schemaV6'
+import { findStaticActionIssues, formatStaticActionWarning, type StaticActionIssue } from './clickGuard'
 import { RUNTIME_FILES, RUNTIME_VERSION, type BundledRuntimeFile } from './runtimeBundle'
 
 export type StoreEntry = { name: string; kind: 'file' | 'directory' }
@@ -261,14 +262,49 @@ export interface WorkspaceValidationIssue {
 export interface WorkspaceValidationResult {
   ok: boolean
   issues: WorkspaceValidationIssue[]
-  /** 不阻塞发布的提醒（音效引用对账等） */
+  /** 不阻塞发布的提醒（音效引用对账、静态节点点击不可达等） */
   warnings: string[]
+}
+
+/** 工作区单页的静态点击不可达扫描结果 */
+export interface StaticClickPageReport {
+  /** 工作区内相对路径，如 .djui/layout/pages/main.json */
+  file: string
+  /** 展示名（去掉目录前缀的文件名），如 main.json */
+  displayName: string
+  /** 该页面内点击不可达的节点清单 */
+  issues: StaticActionIssue[]
+}
+
+/**
+ * 扫描工作区全部页面磁盘 JSON：收集「绑定动作但被设为静态」的节点（点击不可达）。
+ * 纯读不写；发布前确认弹窗与 validateWorkspaceCore 的 warnings 共用本函数，规则单源。
+ * 读取失败/坏 JSON 直接跳过——结构问题由 validateWorkspaceCore 的 issues 单独报告，不在这里重复。
+ */
+export async function collectStaticClickIssuesCore(store: PublishStore): Promise<StaticClickPageReport[]> {
+  const reports: StaticClickPageReport[] = []
+  if (!(await store.dirExists(PAGES_DIR))) return reports
+  for (const file of (await walkFiles(store, PAGES_DIR)).filter(f => f.toLowerCase().endsWith('.json'))) {
+    const raw = await store.readText(file)
+    if (raw === null) continue
+    let page: unknown
+    try {
+      page = JSON.parse(raw.replace(/^\uFEFF/, ''))
+    } catch {
+      continue
+    }
+    if (!isRecord(page)) continue
+    const issues = findStaticActionIssues(page.root)
+    if (issues.length > 0) reports.push({ file, displayName: file.slice(PAGES_DIR.length + 1), issues })
+  }
+  return reports
 }
 
 /**
  * 发布与本地自检（CLI validate）共用的结构校验关卡，纯读不写。
  * 规则唯一来源是 schemaV6 —— 与编辑器加载/保存拦截同一套。音效引用缺失只算警告：
  * 补丁只会写入经 sanitizeSoundConfig 校验的默认音效 ID，发布前对账的结果与补丁后一致。
+ * 「绑定动作 + 静态」的点击不可达节点同样只算警告：结构合法但运行时点击无响应，由发布弹窗二次确认兜底。
  */
 export async function validateWorkspaceCore(store: PublishStore): Promise<WorkspaceValidationResult> {
   const issues: WorkspaceValidationIssue[] = []
@@ -309,6 +345,9 @@ export async function validateWorkspaceCore(store: PublishStore): Promise<Worksp
 
   const warnings: string[] = []
   for (const ref of refs) if (!soundIds.has(ref)) warnings.push(`音效引用 ${ref} 在 sounds.json 中不存在`)
+  for (const report of await collectStaticClickIssuesCore(store)) {
+    warnings.push(formatStaticActionWarning(report.displayName, report.issues))
+  }
   return { ok: issues.length === 0, issues, warnings }
 }
 

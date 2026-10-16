@@ -18,6 +18,8 @@ import FontManagerModal from './FontManagerModal'
 import SyncConflictModal from './SyncConflictModal'
 import { buildFontSelectOptions, FONT_MANAGE_VALUE, ENGINE_DEFAULT_FONT_VALUE } from './RightPanel'
 import * as api from '@/api/client'
+import { findStaticActionIssues } from '@/lib/clickGuard'
+import { confirmStaticClickBlock } from './StaticClickConfirm'
 import {
   applyDiskVersions,
   checkCurrentPageExternalChange,
@@ -147,6 +149,15 @@ export default function TopBar(props: TopBarProps) {
       }
       const current = useEditorStore.getState().page
       if (!current) return
+      // 静态点击可达性警示：绑定动作 + isStatic 的节点渲染正常但真人点击无响应，保存前征询（可仍要保存）
+      const staticIssues = findStaticActionIssues(current.root)
+      if (staticIssues.length > 0) {
+        const go = await confirmStaticClickBlock(
+          [{ file: `${current.pageId}.json`, displayName: current.pageId, issues: staticIssues }],
+          'save',
+        )
+        if (!go) return
+      }
       await api.savePage(current)
       message.success('页面已保存')
     })
@@ -158,6 +169,15 @@ export default function TopBar(props: TopBarProps) {
     await runExclusive(async () => {
       const current = useEditorStore.getState().page
       if (!current) return
+      // 覆盖保存同样是显式保存动作，静态点击警示与手动保存一致
+      const staticIssues = findStaticActionIssues(current.root)
+      if (staticIssues.length > 0) {
+        const go = await confirmStaticClickBlock(
+          [{ file: `${current.pageId}.json`, displayName: current.pageId, issues: staticIssues }],
+          'save',
+        )
+        if (!go) return
+      }
       await api.savePage(current)
       message.success('页面已保存（磁盘上的外部修改已被覆盖）')
     })
@@ -246,6 +266,9 @@ export default function TopBar(props: TopBarProps) {
         }
         const current = useEditorStore.getState().page
         if (current) await api.savePage(current)
+        // 发布覆盖工作区全部页面：静态点击警示按全工作区预检（比单页保存更严），确认后才继续发布
+        const staticReports = await api.collectStaticClickIssues()
+        if (staticReports.length > 0 && !(await confirmStaticClickBlock(staticReports, 'publish'))) return
         const result = await api.publishAssets()
         if (result.ok) {
           Modal.success({

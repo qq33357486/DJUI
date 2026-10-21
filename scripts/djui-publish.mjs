@@ -1042,6 +1042,156 @@ internal sealed class DjuiProgressVisualLayerV6 : IDisposable, IThinker
 #endif
 `;
 
+// raw:D:\git\DJUI\runtime\DjuiBorderVisualLayerV6.cs
+var DjuiBorderVisualLayerV6_default = `// DJUI Runtime - protocol v6 border visual sublayer
+#if CLIENT
+
+using GameUI.Control;
+using GameUI.Control.Primitive;
+using GameUI.Graphics;
+
+namespace DjuiRuntime;
+
+/// <summary>
+/// Renders appearance.borderThickness/borderColor as a stroked rectangle on an engine Canvas
+/// sublayer. The stroke path runs exactly on the node bounds (centered like the editor canvas),
+/// so the Canvas control itself is grown by thickness/2 on each side to keep the outer half of
+/// the stroke inside its own bounds. cornerRadius follows the host fill radius (StrokeRoundedRectangle).
+/// </summary>
+internal sealed class DjuiBorderVisualLayerV6 : IDisposable, IThinker
+{
+    internal const string ReservedNamePrefix = "__djui.v6.visual.border.";
+    private readonly Dictionary<Control, State> _states = new();
+    private bool _disposed;
+
+    public bool DoesThink { get; set; } = true;
+
+    public DjuiBorderVisualLayerV6() => Game.RegisterThinker(this);
+
+    private sealed class State(Canvas canvas, SolidPaint paint)
+    {
+        public Canvas Canvas { get; } = canvas;
+        public SolidPaint Paint { get; } = paint;
+        public float Thickness { get; set; }
+        public float Radius { get; set; }
+        public float Width { get; set; } = float.NaN;
+        public float Height { get; set; } = float.NaN;
+
+        public void Draw(object? sender, EventArgs e)
+        {
+            var canvas = Canvas;
+            if (float.IsNaN(Width) || float.IsNaN(Height) || Width <= 0f || Height <= 0f) return;
+            canvas.StrokePaint = Paint;
+            canvas.StrokeWidth = Thickness;
+            var half = Thickness / 2f;
+            if (Radius > 0f)
+            {
+                var radius = Math.Clamp(Radius, 0f, MathF.Min(Width, Height) / 2f);
+                canvas.StrokeRoundedRectangle(half, half, Width, Height, radius);
+            }
+            else
+            {
+                canvas.StrokeRectangle(half, half, Width, Height);
+            }
+        }
+    }
+
+    /// <summary>
+    /// \u5EFA\u6811/relayout \u91CD\u653E/SetImage \u540C\u6784\u5165\u53E3\u3002thickness \u4E3A 0/\u7F3A\u7701\u5373\u62C6\u9664\u8FB9\u6846\u5C42\uFF08\u5E42\u7B49\uFF09\u3002
+    /// sceneScale\uFF1A\u573A\u666F\u753B\u677F\u5B50\u6811\u5185\u63A7\u4EF6\u77E9\u5F62\u7531 solver \u7F29\u653E\uFF0C\u63CF\u8FB9\u7C97\u7EC6\u662F"\u975E\u77E9\u5F62\u5C5E\u6027"\u987B\u81EA\u884C\u8865\u4E58
+    /// \uFF08\u4E0E\u5B57\u53F7/\u6587\u5B57\u63CF\u8FB9\u540C\u89C4\u5219\uFF09\uFF1BcornerRadius \u4E0E\u5BBF\u4E3B\u586B\u5145\u5706\u89D2\u540C\u503C\uFF0C\u4FDD\u8BC1\u63CF\u8FB9\u8D34\u7740\u5E95\u8272\u5706\u89D2\u8D70\u3002
+    /// </summary>
+    public void Apply(string nodeId, Control authored, DjuiAppearanceV6? appearance, float sceneScale = 1f)
+    {
+        var thickness = MathF.Max(0f, (appearance?.BorderThickness ?? 0f) * sceneScale);
+        if (thickness <= 0f)
+        {
+            Remove(authored);
+            return;
+        }
+
+        if (!_states.TryGetValue(authored, out var state))
+        {
+            var canvas = new Canvas { Name = ReservedNamePrefix + nodeId, IsStatic = true };
+            var paint = new SolidPaint(TryParseBorderColor(appearance));
+            state = new State(canvas, paint);
+            canvas.OnRender += state.Draw;
+            canvas.Parent = authored;
+            _states.Add(authored, state);
+        }
+        else
+        {
+            state.Paint.Color = TryParseBorderColor(appearance);
+        }
+
+        state.Thickness = thickness;
+        state.Radius = (appearance?.CornerRadius ?? 0f) * sceneScale;
+        RefreshGeometry(authored);
+    }
+
+    // \u8FB9\u6846\u5C42\u753B\u5E03\u5916\u6269 thickness/2\uFF08\u5C45\u4E2D\u63CF\u8FB9\u7684\u5916\u534A\u4FA7\u4E0D\u51FA\u753B\u5E03\u8FB9\u754C\uFF09\uFF0C\u77E9\u5F62\u53EA\u5403\u5BBF\u4E3B\u5F53\u524D\u5BBD\u9AD8\u3002
+    internal void RefreshGeometry(Control authored)
+    {
+        if (_disposed || !authored.IsValid || !_states.TryGetValue(authored, out var state)) return;
+        var canvas = state.Canvas;
+        if (!canvas.IsValid) return;
+        state.Width = MathF.Max(0f, authored.Width);
+        state.Height = MathF.Max(0f, authored.Height);
+        var grow = state.Thickness;
+        DjuiLayoutSessionV6.ApplyRect(canvas, new DjuiRectV6(-grow / 2f, -grow / 2f, state.Width + grow, state.Height + grow));
+    }
+
+    public void Think(int delta)
+    {
+        if (_disposed) return;
+        List<Control>? invalid = null;
+        foreach (var (authored, state) in _states)
+        {
+            if (!authored.IsValid || !state.Canvas.IsValid)
+            {
+                (invalid ??= new()).Add(authored);
+                continue;
+            }
+            var width = MathF.Max(0f, authored.Width);
+            var height = MathF.Max(0f, authored.Height);
+            if (state.Width != width || state.Height != height)
+                RefreshGeometry(authored);
+        }
+        if (invalid != null) foreach (var authored in invalid) _states.Remove(authored);
+    }
+
+    // \u7F16\u8F91\u5668\u753B\u5E03\u9ED8\u8BA4\u63CF\u8FB9\u8272\u4E3A\u767D\u8272\uFF08app.borderColor ?? '#FFFFFFFF'\uFF09\uFF0C\u7F3A\u7701/\u975E\u6CD5\u989C\u8272\u540C\u89C4\u5219\u515C\u767D\u3002
+    private static Color TryParseBorderColor(DjuiAppearanceV6? appearance)
+        => DjuiTreeBuilderV6.TryParseColor(appearance?.BorderColor, out var color) ? color : Color.White;
+
+    private void Remove(Control authored)
+    {
+        if (!_states.Remove(authored, out var state)) return;
+        state.Canvas.OnRender -= state.Draw;
+        state.Canvas.RemoveFromVisualTreeAndParent();
+        state.Canvas.Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        DoesThink = false;
+        Game.UnregisterThinker(this);
+        foreach (var state in _states.Values)
+        {
+            if (!state.Canvas.IsValid) continue;
+            state.Canvas.OnRender -= state.Draw;
+            state.Canvas.RemoveFromVisualTreeAndParent();
+            state.Canvas.Dispose();
+        }
+        _states.Clear();
+    }
+}
+
+#endif
+`;
+
 // raw:D:\git\DJUI\runtime\DjuiButtonStateV6.cs
 var DjuiButtonStateV6_default = '// DJUI Runtime - protocol v6 button visual state machine\n#if CLIENT\n\nusing System.Runtime.CompilerServices;\nusing GameUI.Control;\nusing GameUI.Control.Primitive;\n\nnamespace DjuiRuntime;\n\n/// <summary>\n/// Button \u56DB\u6001\u89C6\u89C9\uFF08normal/hover/pressed/disabled\uFF09\u7684 Runtime \u72B6\u6001\u673A\u3002\n/// StarEngine \u7684 Button \u53EA\u66B4\u9732 ImageHover/ImagePressed \u4E14\u6CA1\u6709 ImageDisabled\uFF1B\n/// \u800C v6 \u7684\u56FE\u7247\u7ED8\u5236\u5728 visual \u5B50 Panel \u4E0A\uFF08\u5BBF\u4E3B Image \u88AB\u6E05\u7A7A\uFF09\uFF0C\u5F15\u64CE\u72B6\u6001\u6362\u56FE\u5B9E\u9645\u4E0D\u53EF\u7528\u3002\n/// \u56E0\u6B64\u8FD9\u91CC\u76D1\u542C\u5BBF\u4E3B\u6307\u9488\u4E8B\u4EF6\uFF0C\u5728 visual \u5C42\u81EA\u7BA1\u6362\u56FE\uFF0C\u7981\u7528\u6001\u672A\u914D\u7F6E\u56FE\u7247\u65F6\u81EA\u52A8\u7070\u5316\u515C\u5E95\u3002\n/// </summary>\npublic sealed class DjuiButtonStateV6 : IDisposable\n{\n    /// <summary>Button \u5185\u5EFA\u6587\u672C\u5B50\u8282\u70B9\u540D\uFF0C\u4E0E DjuiTreeBuilderV6 \u521B\u5EFA\u7684 label \u5171\u7528\u3002</summary>\n    internal const string ButtonLabelName = "__djui.v6.visual.button-label";\n\n    /// <summary>\u7981\u7528\u515C\u5E95\uFF08\u672A\u914D\u7F6E\u7981\u7528\u56FE\uFF09\u65F6\u7684\u6574\u4F53\u900F\u660E\u5EA6\u7CFB\u6570\u3002\u89C6\u89C9\u5F3A\u5EA6\u5F85\u5B9E\u6D4B\u540E\u53EF\u8C03\u6574\u3002</summary>\n    public const float DisabledFallbackOpacity = 0.5f;\n\n    private readonly Control _button;\n    private readonly DjuiImageVisualLayerV6 _imageVisuals;\n    private DjuiButtonV6? _config;\n    private string? _normalImage;\n    private float _authoredOpacity;\n    private bool _authoredDesaturated;\n    private bool _hover;\n    private bool _pressed;\n    /// <summary>\u5F53\u524D\u89C6\u89C9\u5DF2\u5448\u73B0\u7684\u7981\u7528\u72B6\u6001\uFF1Bnull \u8868\u793A\u9700\u8981\u5F3A\u5236\u91CD\u5199\u4E00\u6B21\uFF08\u5982\u5BBD\u5C4F\u91CD\u653E\u540E\uFF09\u3002</summary>\n    private bool? _visualDisabled;\n\n    internal DjuiButtonStateV6(Control button, DjuiImageVisualLayerV6 imageVisuals, DjuiButtonV6? config, string? normalImage, float authoredOpacity, bool authoredDesaturated)\n    {\n        _button = button;\n        _imageVisuals = imageVisuals;\n        _config = config;\n        _normalImage = normalImage;\n        _authoredOpacity = authoredOpacity;\n        _authoredDesaturated = authoredDesaturated;\n    }\n\n    /// <summary>\u5BBF\u4E3B/\u5BBD\u5C4F\u91CD\u653E\u540E\u66F4\u65B0\u914D\u7F6E\u5E76\u91CD\u7B97\u89C6\u89C9\u3002</summary>\n    internal void Update(DjuiButtonV6? config, string? normalImage, float authoredOpacity, bool authoredDesaturated)\n    {\n        _config = config;\n        _normalImage = normalImage;\n        _authoredOpacity = authoredOpacity;\n        _authoredDesaturated = authoredDesaturated;\n        _visualDisabled = null;\n        Apply();\n    }\n\n    /// <summary>\u6309\u5F53\u524D\u6307\u9488/\u7981\u7528\u72B6\u6001\u91CD\u7B97 visual \u56FE\u7247\u3001\u7070\u5EA6\u4E0E\u6574\u4F53\u900F\u660E\u5EA6\u3002</summary>\n    internal void Apply()\n    {\n        if (!_button.IsValid) return;\n        var disabled = _button.IsActuallyDisabled;\n        var visual = _imageVisuals.GetVisual(_button);\n\n        string? image;\n        var desaturated = _authoredDesaturated;\n        // Opacity \u53EA\u5728\u7981\u7528\u6001\u5207\u6362\u65F6\u5199\u5165\uFF0C\u907F\u514D\u4E0E TouchBehavior \u7684\u6309\u538B\u7F29\u653E/\u900F\u660E\u52A8\u753B\u4E92\u76F8\u8986\u76D6\u3002\n        var writeOpacity = _visualDisabled != disabled;\n\n        if (disabled)\n        {\n            var disabledImage = _config?.ImageDisabled;\n            if (!string.IsNullOrEmpty(disabledImage))\n            {\n                image = disabledImage;\n            }\n            else\n            {\n                // \u7070\u5316\u515C\u5E95\uFF1A\u65E0\u7981\u7528\u56FE\u65F6\u4FDD\u6301 normal \u56FE\uFF0C\u5957\u7070\u5EA6\u5E76\u6574\u4F53\u964D\u900F\u660E\u3002\n                // Opacity \u4F9D\u8D56\u5F15\u64CE\u7684\u5408\u6210\u7EA7\u8054\uFF0Cvisual \u5B50\u56FE\u4E0E\u6587\u672C label \u4F1A\u4E00\u5E76\u53D8\u6DE1\u3002\n                image = _normalImage;\n                desaturated = true;\n                if (writeOpacity) _button.Opacity = _authoredOpacity * DisabledFallbackOpacity;\n            }\n        }\n        else\n        {\n            image = ResolveInteractiveImage();\n            if (writeOpacity) _button.Opacity = _authoredOpacity;\n        }\n        _visualDisabled = disabled;\n\n        if (visual != null)\n        {\n            visual.Image = image ?? "";\n            visual.Desaturated = desaturated;\n        }\n    }\n\n    private string? ResolveInteractiveImage()\n    {\n        if (_pressed && !string.IsNullOrEmpty(_config?.ImagePressed)) return _config!.ImagePressed;\n        if (_hover && !string.IsNullOrEmpty(_config?.ImageHover)) return _config!.ImageHover;\n        return _normalImage;\n    }\n\n    public void Dispose()\n    {\n        _button.OnPointerEntered -= HandlePointerEntered;\n        _button.OnPointerExited -= HandlePointerExited;\n        _button.OnPointerPressed -= HandlePointerPressed;\n        _button.OnPointerReleased -= HandlePointerReleased;\n    }\n\n    internal void HandlePointerEntered(object? sender, EventArgs e) { _hover = true; Apply(); }\n    internal void HandlePointerExited(object? sender, EventArgs e) { _hover = false; Apply(); }\n    internal void HandlePointerPressed(object? sender, PointerEventArgs e) { _pressed = true; Apply(); }\n    internal void HandlePointerReleased(object? sender, PointerEventArgs e) { _pressed = false; Apply(); }\n}\n\n/// <summary>\n/// \u6BCF\u68F5 v6 \u6811\u6301\u6709\u7684\u6309\u94AE\u72B6\u6001\u673A\u6CE8\u518C\u8868\uFF1B\u53E6\u4EE5\u5F31\u8868\u66B4\u9732\u5168\u5C40\u5237\u65B0\u901A\u9053\u7ED9\u7ED1\u5B9A\u7CFB\u7EDF\u4F7F\u7528\u3002\n/// </summary>\ninternal sealed class DjuiButtonStateRegistryV6 : IDisposable\n{\n    private static readonly ConditionalWeakTable<Control, DjuiButtonStateV6> States = new();\n\n    private readonly DjuiImageVisualLayerV6 _imageVisuals;\n    private readonly Dictionary<Control, DjuiButtonStateV6> _states = new();\n\n    public DjuiButtonStateRegistryV6(DjuiImageVisualLayerV6 imageVisuals) => _imageVisuals = imageVisuals;\n\n    /// <summary>\u4E3A Button \u5BBF\u4E3B\u521B\u5EFA\uFF08\u6216\u66F4\u65B0\uFF09\u72B6\u6001\u673A\u3002\u65E0 button \u914D\u7F6E\u7684\u6309\u94AE\u4E5F\u4F1A\u521B\u5EFA\u2014\u2014\u7981\u7528\u7070\u5316\u515C\u5E95\u4E0D\u4F9D\u8D56\u72B6\u6001\u56FE\u3002</summary>\n    internal void Attach(Control button, DjuiButtonV6? config, string? normalImage, float authoredOpacity, bool authoredDesaturated)\n    {\n        if (_states.TryGetValue(button, out var existing))\n        {\n            existing.Update(config, normalImage, authoredOpacity, authoredDesaturated);\n            return;\n        }\n        var state = new DjuiButtonStateV6(button, _imageVisuals, config, normalImage, authoredOpacity, authoredDesaturated);\n        _states[button] = state;\n        States.AddOrUpdate(button, state);\n        button.OnPointerEntered += state.HandlePointerEntered;\n        button.OnPointerExited += state.HandlePointerExited;\n        button.OnPointerPressed += state.HandlePointerPressed;\n        button.OnPointerReleased += state.HandlePointerReleased;\n        state.Apply();\n    }\n\n    /// <summary>\u7ED1\u5B9A\u7CFB\u7EDF/\u5E2E\u52A9 API \u901A\u9053\uFF1A\u6309\u63A7\u4EF6\u5237\u65B0\u7981\u7528\u89C6\u89C9\uFF08\u975E DJUI \u7BA1\u7406\u7684\u6309\u94AE\u662F no-op\uFF09\u3002</summary>\n    internal static void RefreshVisual(Control control)\n    {\n        if (States.TryGetValue(control, out var state)) state.Apply();\n    }\n\n    public void Dispose()\n    {\n        foreach (var state in _states.Values) state.Dispose();\n        _states.Clear();\n    }\n}\n\n/// <summary>\u6E38\u620F\u4FA7\u52A8\u6001\u7981\u7528\u5165\u53E3\uFF1A\u540C\u6B65\u5F15\u64CE\u4EA4\u4E92\u5C5E\u6027\u5E76\u5237\u65B0 DJUI \u7981\u7528\u89C6\u89C9\u3002</summary>\npublic static class DjuiButtonState\n{\n    /// <summary>\n    /// \u8FD0\u884C\u65F6\u5207\u6362\u63A7\u4EF6\u7981\u7528\u72B6\u6001\u3002\u76F4\u63A5\u7ED9\u5F15\u64CE\u63A7\u4EF6\u8D4B Disabled \u4E0D\u4F1A\u5237\u65B0 DJUI \u7981\u7528\u89C6\u89C9\n    /// \uFF08\u5F15\u64CE\u6CA1\u6709 Disabled \u53D8\u66F4\u901A\u77E5\uFF09\uFF0C\u9700\u8981\u52A8\u6001\u5207\u6362\u65F6\u8BF7\u4E00\u5F8B\u8D70\u672C\u65B9\u6CD5\u6216 disabled \u7ED1\u5B9A\u3002\n    /// </summary>\n    public static void SetDisabled(Control control, bool disabled)\n    {\n        control.Disabled = disabled;\n        DjuiButtonStateRegistryV6.RefreshVisual(control);\n    }\n}\n\n#endif\n';
 
@@ -1076,10 +1226,11 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     public bool OwnsHost { get; }
     private readonly DjuiImageVisualLayerV6 _imageVisuals;
     private readonly DjuiProgressVisualLayerV6 _progressVisuals;
+    private readonly DjuiBorderVisualLayerV6 _borderVisuals;
     private readonly DjuiButtonStateRegistryV6 _buttonStates;
     private readonly List<IDisposable> _bindingRegistrations;
 
-    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
+    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
     {
         Host = host;
         Root = root;
@@ -1087,6 +1238,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         OwnsHost = ownsHost;
         _imageVisuals = imageVisuals;
         _progressVisuals = progressVisuals;
+        _borderVisuals = borderVisuals;
         _buttonStates = buttonStates;
         _bindingRegistrations = bindingRegistrations;
     }
@@ -1096,6 +1248,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     // CloneControl \u6784\u5EFA\u7BA1\u7EBF\u5165\u53E3\uFF08BuildClone \u4F7F\u7528\uFF09
     internal DjuiImageVisualLayerV6 ImageVisuals => _imageVisuals;
     internal DjuiProgressVisualLayerV6 ProgressVisuals => _progressVisuals;
+    internal DjuiBorderVisualLayerV6 BorderVisuals => _borderVisuals;
     internal DjuiButtonStateRegistryV6 ButtonStates => _buttonStates;
 
     public void Dispose()
@@ -1119,6 +1272,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         Session.Dispose();
         _imageVisuals.Dispose();
         _progressVisuals.Dispose();
+        _borderVisuals.Dispose();
         _buttonStates.Dispose();
 
         // R5 \u515C\u5E95\uFF1A\u6811\u9500\u6BC1\u5206\u6B65\u9694\u79BB\u2014\u2014\u5355\u6B65\u5F02\u5E38\u4E0D\u963B\u65AD\u540E\u7EED\u6E05\u7406\uFF08Host \u60AC\u6302\u6CC4\u6F0F\u6BD4\u4E00\u6B21\u53EF\u6355\u83B7\u5F02\u5E38\u66F4\u7CDF\uFF09
@@ -1153,16 +1307,17 @@ public static class DjuiTreeBuilderV6
         var session = new DjuiLayoutSessionV6(windowInstanceId, project, page);
         var imageVisuals = new DjuiImageVisualLayerV6();
         var progressVisuals = new DjuiProgressVisualLayerV6();
+        var borderVisuals = new DjuiBorderVisualLayerV6();
         var buttonStates = new DjuiButtonStateRegistryV6(imageVisuals);
         var bindingRegistrations = new List<IDisposable>();
         Panel? root = null;
         try
         {
-            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
             root.Parent = host;
-            session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale));
+            session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, sceneScale));
             session.Relayout();
-            var instance = new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            var instance = new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
             session.Owner = instance;   // SetImage \u8FD0\u884C\u671F\u7ECF\u5B83\u53D6 ImageVisuals/ButtonStates\uFF08\u5EFA\u6811\u671F\u7ED1\u5B9A\u9996\u653E\u65F6\u4E3A null\uFF0CSetImageCore \u6709\u4E13\u95E8\u5904\u7406\uFF09
             return instance;
         }
@@ -1172,6 +1327,7 @@ public static class DjuiTreeBuilderV6
             session.Dispose();
             imageVisuals.Dispose();
             progressVisuals.Dispose();
+            borderVisuals.Dispose();
             buttonStates.Dispose();
             if (ownsHost) host.Dispose();
             else root?.Dispose();
@@ -1179,7 +1335,7 @@ public static class DjuiTreeBuilderV6
         }
     }
 
-    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true, float sceneScale = 1f)
+    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true, float sceneScale = 1f)
     {
         if (string.Equals(node.StarType, "TemplateInstance", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"DJUI v6: template node '{node.Id}' was not expanded.");
@@ -1198,7 +1354,7 @@ public static class DjuiTreeBuilderV6
             _ => throw new NotSupportedException($"DJUI v6: node '{node.Id}' uses unsupported starType '{node.StarType}'.")
         };
 
-        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale);
+        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, sceneScale);
         // \u6EDA\u52A8\u5BB9\u5668\u6052\u88C1\u5207\uFF08\u6EDA\u52A8\u8BED\u4E49\u7684\u4E00\u90E8\u5206\uFF0C\u4E0D\u53EF\u5173\uFF1B\u4E0E\u7F16\u8F91\u5668 normalize \u515C\u5E95\u540C\u8BED\u4E49\uFF0C\u9632\u672A\u7ECF\u7F16\u8F91\u5668\u7684\u65E7\u6570\u636E\uFF09
         if (control is PanelScrollable) control.ClipContent = true;
         ApplyInteraction(control, node.Interaction);
@@ -1215,7 +1371,7 @@ public static class DjuiTreeBuilderV6
         if (recurse)
             foreach (var childNode in node.Children)
             {
-                var child = BuildNode(childNode, session, defaultFont, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+                var child = BuildNode(childNode, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
                 child.Parent = control;
             }
         return control;
@@ -1227,12 +1383,12 @@ public static class DjuiTreeBuilderV6
     /// \uFF08\u5C40\u90E8\u77E9\u5F62\uFF0C\u514B\u9686\u4F53\u521D\u59CB\u4E0E\u6E90\u5B8C\u5168\u91CD\u53E0\uFF0C\u7236\u7EA7/\u4F4D\u7F6E\u5F52\u8C03\u7528\u65B9\uFF09\u3002
     /// \u514B\u9686\u8282\u70B9\u4EE5\u65B0 id \u767B\u8BB0\u8FDB\u5E03\u5C40\u4F1A\u8BDD\uFF1A\u4E0D\u53C2\u4E0E relayout\uFF0C\u4F46\u6811\u9500\u6BC1\u65F6 ClearBehaviors/\u7279\u6548\u6E05\u7406\u8986\u76D6\u514B\u9686\u4F53\uFF08R5 \u540C\u6B3E\u7ADE\u6001\u9632\u62A4\uFF09\u3002
     /// </summary>
-    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales = null)
+    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales = null)
     {
         var node = JsonSerializer.Deserialize<DjuiNodeV6>(JsonSerializer.Serialize(source, CloneJsonOptions), CloneJsonOptions)
             ?? throw new InvalidOperationException("DJUI v6: clone JSON round-trip failed");
         ApplyCloneIds(node, idSuffix);
-        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, null);
+        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, solved, sceneScales, null);
     }
 
     // \u514B\u9686\u8282\u70B9\u5F31\u8868\uFF1A\u514B\u9686 node \u6811\u672C\u662F JSON round-trip \u7684\u7528\u5B8C\u5373\u5F03\u4EA7\u7269\uFF0C\u5B58\u5F31\u8868\u540E SetImage(Control)
@@ -1251,11 +1407,11 @@ public static class DjuiTreeBuilderV6
         foreach (var child in node.Children) ApplyCloneIds(child, idSuffix);
     }
 
-    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales, DjuiRectV6? parentRect)
+    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales, DjuiRectV6? parentRect)
     {
         // \u514B\u9686\u4F53\u4E0D\u53C2\u4E0E relayout\uFF0C\u573A\u666F\u753B\u677F\u5B57\u53F7\u7F29\u653E\u987B\u5728\u5EFA\u6811\u65F6\u4E00\u6B21\u5230\u4F4D\uFF08\u6309\u514B\u9686\u6E90 id \u67E5\u7D2F\u8BA1\u7F29\u653E\uFF09
         var sceneScale = sceneScales != null && sceneScales.TryGetValue(origin.Id, out var scale) ? scale : 1f;
-        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
+        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
         CloneNodeIndex.AddOrUpdate(control, node);
         if (solved.TryGetValue(origin.Id, out var rect))
         {
@@ -1264,17 +1420,18 @@ public static class DjuiTreeBuilderV6
         }
         // BuildNode \u521D\u6B21\u5EFA\u5C42\u65F6\u5C1A\u65E0\u89E3\u7B97\u5BBD\u9AD8\uFF1B\u514B\u9686\u4E0D\u8D70 authored Relayout\uFF0C\u5FC5\u987B\u5728\u8FD4\u56DE\u524D\u8865\u9F50\u7ED8\u5236\u77E9\u5F62\u3002
         imageVisuals.RefreshGeometry(control);
+        borderVisuals.RefreshGeometry(control);
         if (control is Progress progress) progressVisuals.RefreshGeometry(progress);
         DjuiRectV6? ownRect = solved.TryGetValue(origin.Id, out var own) ? own : null;
         for (var i = 0; i < node.Children.Count; i++)
         {
-            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, ownRect);
+            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, solved, sceneScales, ownRect);
             child.Parent = control;
         }
         return control;
     }
 
-    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, float sceneScale = 1f)
+    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, float sceneScale = 1f)
     {
         // \u63A7\u4EF6 Name \u53D6\u9875\u9762 JSON \u7684 name \u5B57\u6BB5\u2014\u2014\u5F15\u64CE FindChild(name) / FindChildren(name) \u7684\u5BFB\u5740\u4F9D\u636E\uFF08\u542B\u514B\u9686\u4F53\uFF09
         if (!string.IsNullOrWhiteSpace(node.Name)) control.Name = node.Name;
@@ -1285,6 +1442,8 @@ public static class DjuiTreeBuilderV6
         var isRadialProgress = control is Progress progress && IsRadial(progress);
         ApplyText(control, node.Text, defaultFont, sceneScale);
         ApplyImageRefresh(control, node, imageVisuals, buttonStates);
+        // \u8FB9\u6846\u5C42\u5728\u56FE\u7247\u5C42\u4E4B\u540E\u6302\u8F7D\uFF08\u63CF\u8FB9\u76D6\u56FE\u3001\u4ECD\u5728 authored \u5B50\u9879\u4E4B\u4E0B\uFF09\uFF0Crelayout/SetImage \u91CD\u653E\u540C\u6784\u5237\u65B0
+        borderVisuals.Apply(node.Id, control, node.Appearance, sceneScale);
         if (control is Progress target)
         {
             if (isRadialProgress) ApplyNativeProgressImage(target, node.Appearance);
@@ -2861,7 +3020,7 @@ public static class DjuiWindowManagerV6
         var sceneScales = new Dictionary<string, float>();
         var solved = DjuiLayoutSolverV6.SolveV6(instance.Session.CurrentPage, instance.Session.CurrentPlan, sceneScales);
         var suffix = "#c" + (++_nextCloneSeq).ToString();
-        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.ButtonStates, suffix, solved, sceneScales);
+        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.BorderVisuals, instance.ButtonStates, suffix, solved, sceneScales);
     }
 
     /// <summary>
@@ -3047,13 +3206,14 @@ public static class DjuiWindowManagerV6
         return int.MaxValue;
     }
 
-    /// <summary>DJUI \u5185\u90E8 visual \u8F85\u52A9\u5C42\uFF08\u56FE\u7247/\u8FDB\u5EA6\u6761\u5B50\u5C42\u3001\u6309\u94AE\u6587\u672C Label\uFF09\u4E0D\u53C2\u4E0E\u5BB9\u5668\u6392\u5217\u3002</summary>
+    /// <summary>DJUI \u5185\u90E8 visual \u8F85\u52A9\u5C42\uFF08\u56FE\u7247/\u8FDB\u5EA6\u6761/\u8FB9\u6846\u5B50\u5C42\u3001\u6309\u94AE\u6587\u672C Label\uFF09\u4E0D\u53C2\u4E0E\u5BB9\u5668\u6392\u5217\u3002</summary>
     private static bool IsAuxiliaryVisual(Control control)
     {
         var name = control.Name;
         if (string.IsNullOrEmpty(name)) return false;
         return name.StartsWith(DjuiImageVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
             || name.StartsWith(DjuiProgressVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
+            || name.StartsWith(DjuiBorderVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
             || name == DjuiButtonStateV6.ButtonLabelName;
     }
 
@@ -3291,7 +3451,7 @@ var DjuiWindowTransitionV6_default = '#if CLIENT\r\nusing System.Numerics;\r\nus
 var AGENTS_default = '# DJUI Runtime \u90E8\u7F72\u5951\u7EA6\r\n\r\n> \u672C\u6587\u4EF6\u7531 DJUI \u7F16\u8F91\u5668\u968F Runtime \u5206\u53D1\uFF08`djui_version.txt` \u8BB0\u5F55\u7248\u672C\uFF09\u3002\r\n> \u63CF\u8FF0 Runtime \u4E0E\u661F\u706B\u5DE5\u7A0B\u4E4B\u95F4\u7684**\u90E8\u7F72\u5951\u7EA6\u4E0E\u4F7F\u7528\u8303\u5F0F**\u3002\u6539 Runtime \u884C\u4E3A\u8BF7\u56DE DJUI \u4ED3\u5E93 `runtime/` \u6E90\u6587\u4EF6\uFF0C\u52FF\u5728\u6B64\u624B\u6539 .cs\u3002\r\n\r\n## \u8DEF\u5F84\u5951\u7EA6\uFF08\u8C01\u5199\u54EA\u3001\u8C01\u8BFB\u54EA\uFF09\r\n\r\n| \u8D44\u6E90 | \u552F\u4E00\u5199\u5165\u65B9\uFF08DJUI\u300C\u53D1\u5E03\u300D\uFF09 | Runtime \u8BFB\u53D6\u8DEF\u5F84 | \u8BF4\u660E |\r\n|---|---|---|---|\r\n| \u9879\u76EE\u914D\u7F6E | `ui/AppBundle/user_files/djui/project.json` | `user_files/djui/project.json` | v6 Canvas\u3001\u5BBD\u5C4F\u9608\u503C\u548C\u9ED8\u8BA4\u5B57\u4F53\u7684\u552F\u4E00\u8FD0\u884C\u914D\u7F6E |\r\n| \u9875\u9762 JSON | `ui/AppBundle/user_files/djui/pages/` | \u76F8\u5BF9\u8DEF\u5F84 `user_files/djui/pages`\uFF08\u5BA2\u6237\u7AEF\u8FDB\u7A0B CWD=`ui/`\uFF09 | **\u670D\u52A1\u7AEF\u4E0D\u6D88\u8D39\u9875\u9762 JSON**\uFF08Runtime \u5168\u90E8 `#if CLIENT`\uFF09\uFF0C\u6839 AppBundle \u65E0\u9700\u53D1\u5E03 djui \u8D44\u6E90\u3002\u7F16\u8F91\u6E90\u5728 UI \u5DE5\u4F5C\u533A `.djui/layout/pages/`\uFF0C\u661F\u706B\u5DE5\u7A0B\u7684 `ui/djui` \u662F\u53D1\u5E03\u955C\u50CF\uFF0C\u8FD0\u884C\u4E0D\u8BFB |\r\n| \u97F3\u6548\u914D\u7F6E | `ui/AppBundle/user_files/djui/sounds.json` | `user_files/djui/sounds.json` | \u540C\u4E0A\uFF0C\u4EC5\u5BA2\u6237\u7AEF |\r\n| \u56FE\u7247\u7D20\u6750 | `ui/image/djui/` | \u5F15\u64CE\u76F4\u8BFB\uFF08`image/djui/...` \u76F8\u5BF9 `ui/` \u6839\uFF09\uFF0C\u4E0D\u8FDB AppBundle | \u63A7\u4EF6 `appearance.image` \u5199 `image/djui/...` |\r\n\r\n**\u5173\u952E\u70B9**\uFF1A\u9875\u9762/\u97F3\u6548\u7684\u552F\u4E00\u8FD0\u884C\u6D88\u8D39\u65B9\u662F\u5BA2\u6237\u7AEF\u8FDB\u7A0B\uFF08CWD=`ui/`\uFF09\uFF0C\u53D1\u5E03\u53EA\u5199 `ui/AppBundle`\u3002\u4EFB\u4F55\u624B\u5DE5\u62F7\u8D1D\u9875\u9762 JSON \u7684\u884C\u4E3A\u90FD\u88AB\u7981\u6B62\u2014\u2014\u62F7\u9519\u4F4D\u7F6E\uFF08\u5982\u62F7\u5230\u6839 AppBundle\uFF09\u6216\u7248\u672C\u9519\u4F4D\u6B63\u662F\u300C\u9875\u9762\u6CA1\u5F00 / \u56FE\u4E0D\u5BF9\u300D\u7C7B\u6545\u969C\u7684\u6839\u6E90\u3002\r\n\r\n## \u4F7F\u7528\u8303\u5F0F\uFF08\u5BA2\u6237\u7AEF\u4EE3\u7801\uFF09\r\n\r\n```csharp\r\nusing DjuiRuntime;\r\n\r\n// 1. \u521D\u59CB\u5316\uFF1A\u4E25\u683C\u52A0\u8F7D protocolVersion=6/schemaVersion=1 \u9879\u76EE\u4E0E\u9875\u9762\r\nDjuiWindowManagerV6.Initialize();\r\n\r\n// 2. \u9875\u9762\u5355\u4F8B\uFF1A\u91CD\u590D\u6253\u5F00\u540C\u4E00 pageId \u4E0D\u4F1A\u521B\u5EFA\u91CD\u590D\u7A97\u53E3\r\nPanel root = DjuiWindowManagerV6.OpenWindow("main_menu");\r\n\r\n// 3. \u9875\u9762\u4F5C\u7528\u57DF\u67E5\u8BE2\uFF1B\u4E0D\u8981\u4F7F\u7528\u5168\u5C40\u88F8\u8282\u70B9 ID\r\nvar btn = DjuiWindowManagerV6.GetSingletonControl<Button>("main_menu", "button_start");\r\n\r\n// 4. \u53EA\u6709\u786E\u5B9E\u9700\u8981\u540C\u9875\u591A\u5B9E\u4F8B\u65F6\u624D\u4F7F\u7528\u5B9E\u4F8B API\r\nstring instanceId = DjuiWindowManagerV6.OpenInstance("toast");\r\nvar label = DjuiWindowManagerV6.GetControl<Label>(instanceId, "toast_text");\r\n\r\n// 5. \u4E8B\u4EF6\u8DEF\u7531\uFF08\u9875\u9762 JSON \u4E2D djui.action \u58F0\u660E\u7684\u52A8\u4F5C\u540D\uFF09\r\nDjuiActionRouter.On("open_inventory", () => { ... });\r\n\r\n// 6. \u6570\u636E\u7ED1\u5B9A\uFF08Set \u540E\u7ED1\u5B9A\u8BE5 key \u7684\u63A7\u4EF6\u81EA\u52A8\u5237\u65B0\uFF09\r\nDjuiBindingSystem.Set("coin_count", 999);\r\n\r\n// 7. \u8FD0\u884C\u65F6\u52A8\u6001\u7981\u7528\uFF08\u8D70\u6B64\u65B9\u6CD5\u6216 disabled \u7ED1\u5B9A\u624D\u4F1A\u5237\u65B0 DJUI \u7981\u7528\u89C6\u89C9\uFF1B\r\n//    \u76F4\u63A5\u7ED9\u5F15\u64CE\u63A7\u4EF6\u8D4B Disabled \u53EA\u62E6\u622A\u70B9\u51FB\u3001\u4E0D\u53D8\u7070\u2014\u2014\u5F15\u64CE\u65E0 Disabled \u53D8\u66F4\u901A\u77E5\uFF09\r\nDjuiButtonState.SetDisabled(btn, false);\r\n\r\n// 8. \u8FD0\u884C\u65F6\u6362\u56FE\uFF08SetImage \u4E09\u53E3\u5F84\uFF0C\u8BE6\u89C1\u4E0B\u65B9\u300C\u8FD0\u884C\u65F6\u6362\u56FE\uFF08SetImage\uFF09\u300D\uFF09\r\nDjuiWindowManagerV6.SetImage(\u9875\u9762\u6807\u8BC6.\u5EFA\u7B51\u8BE6\u60C5, "building_detail_upgrade_button", "image/djui/buttons/\u5347\u7EA7\u7EFF\u5E95.png");\r\nDjuiWindowManagerV6.SetImage(\u683C\u5B50\u63A7\u4EF6\u5F15\u7528, \u54C1\u8D28\u5E95\u56FE\u8DEF\u5F84);   // \u76F4\u63A7\u53E3\u5F84\uFF1A\u514B\u9686\u4F53/authored \u901A\u5403\r\n```\r\n\r\n## \u6309\u94AE\u72B6\u6001\u89C6\u89C9\uFF08normal / hover / pressed / disabled\uFF09\r\n\r\n\u6309\u94AE\u56DB\u6001\u6362\u56FE\u4E0E\u7981\u7528\u7070\u5316\u7531 DJUI Runtime \u81EA\u7BA1\uFF08\u661F\u706B\u5F15\u64CE Button \u65E0 ImageDisabled\uFF0C\u4E14 v6 \u56FE\u7247\u753B\u5728\u5B50 Panel \u4E0A\u3001\u5F15\u64CE\u72B6\u6001\u6362\u56FE\u4E0D\u53EF\u7528\uFF09\uFF1A\r\n\r\n- `button.imageHover` / `button.imagePressed` / `button.imageDisabled`\uFF1A\u4E09\u4E2A\u53EF\u9009\u72B6\u6001\u56FE\uFF0C\u672A\u8BBE\u7F6E\u7684\u6001\u6CBF\u7528\u6B63\u5E38\u56FE\r\n- \u7981\u7528\u65F6\u672A\u914D\u7F6E `imageDisabled` \u2192 \u81EA\u52A8\u515C\u5E95\uFF1A\u56FE\u7247\u7070\u5EA6 + \u6574\u4F53\u900F\u660E\u5EA6\u964D\u4E3A 50%\uFF08\u5E38\u91CF `DjuiButtonStateV6.DisabledFallbackOpacity`\uFF0C\u5B9E\u6D4B\u540E\u53EF\u8C03\uFF09\r\n- \u52A8\u6001\u5207\u6362\u7981\u7528\uFF1A\u6570\u636E\u7ED1\u5B9A\u5C5E\u6027 `disabled`\uFF08`DjuiBindingSystem.Set("key", bool)`\uFF09\u6216 `DjuiButtonState.SetDisabled(control, bool)`\r\n- \u8FD0\u884C\u65F6\u6362 normal \u5E95\u56FE\uFF1A`DjuiWindowManagerV6.SetImage(...)`\u2014\u2014\u8D70 `DjuiButtonStateV6` \u72B6\u6001\u673A\u901A\u9053\uFF08`Attach \u2192 Update`\uFF09\uFF0Chover/pressed/disabled \u672A\u914D\u7F6E\u7684\u6001\u4E0E\u7981\u7528\u7070\u5316\u515C\u5E95\u81EA\u52A8\u8DDF\u968F\u65B0\u5E95\u56FE\uFF1B\u4E0E `SetDisabled` \u540C\u72B6\u6001\u673A\u5355\u70B9\u5199 visual\uFF0C\u4E92\u4E0D\u8986\u76D6\r\n\r\n## \u8FD0\u884C\u65F6\u6362\u56FE\uFF08SetImage\uFF09\r\n\r\n\u6E38\u620F\u4EE3\u7801\u53EF\u5728\u8FD0\u884C\u65F6\u66FF\u6362\u8282\u70B9\u56FE\u7247\uFF0C**\u53EA\u6362\u56FE\u4E0D\u52A8\u6392\u7248**\uFF1A`imageFit / sourceSize / focalX/focalY / slicedEdges / desaturated` \u7B49\u6CBF\u7528\u8BE5\u8282\u70B9\u539F appearance \u503C\uFF0C\u5BBF\u4E3B\u77E9\u5F62\u4E0D\u53D8\u3002\u4E09\u4E2A\u516C\u5F00\u91CD\u8F7D\uFF1A\r\n\r\n- `SetImage(pageId, nodeInstanceId, image)`\uFF1A\u5355\u4F8B\u9875\u53E3\u5F84\uFF08\u4E1A\u52A1\u6700\u5E38\u7528\uFF09\r\n- `SetImageByInstance(windowInstanceId, nodeInstanceId, image)`\uFF1A`OpenInstance` \u591A\u5B9E\u4F8B\u9875\u53E3\u5F84\uFF08\u5982\u98D8\u5B57\uFF09\r\n- `SetImage(control, image)`\uFF1A\u76F4\u63A7\u53E3\u5F84\uFF0C\u6309 `Control` \u5F15\u7528\u6362\u56FE\u2014\u2014**\u514B\u9686\u4F53\uFF08CloneControl \u4EA7\u7269\uFF09/ authored \u8282\u70B9\u901A\u5403**\uFF0C\u4E1A\u52A1\u624B\u91CC\u662F\u514B\u9686\u63A7\u4EF6\u5F15\u7528\u65F6\u7528\u8FD9\u4E2A\uFF08\u514B\u9686\u4F53\u4E0D\u80FD\u7528 id \u5BFB\u5740\u65F6\u4E5F\u515C\u5E95\u652F\u6301 `\u6E90id#cN`\uFF09\r\n\r\n\u884C\u4E3A\u53E3\u5F84\uFF1A\r\n\r\n- `image` \u4F20 `null`/\u7A7A\u4E32\uFF1D\u64A4\u9500\u56FE\u7247\uFF08\u56DE\u5230\u65E0\u56FE\u5F62\u6001\uFF09\r\n- authored \u7A7A\u56FE\u7247\u7684\u8282\u70B9\uFF08\u5982\u5BBF\u4E3B\u81EA\u6E32\u67D3\u7684\u98D8\u5B57\u56FE\u6807\uFF09\u6362\u56FE\u540E\u81EA\u52A8\u5207\u6362\u4E3A visual \u5B50\u5C42\u6E32\u67D3\uFF1B\u64A4\u9500\u540E\u8FD8\u539F\r\n- \u5DF2\u5F00\u7A97\u53E3\u6362\u56FE\u540E\uFF0C\u8F6C\u5C4F/\u89C6\u53E3\u53D8\u5316\u89E6\u53D1\u7684\u91CD\u65B0\u5E03\u5C40**\u4E0D\u4F1A\u628A\u56FE\u7247\u6062\u590D\u6210\u65E7\u503C**\uFF08\u6362\u56FE\u540C\u6B65\u5199\u5165\u5E03\u5C40\u6570\u636E\u6A21\u578B\uFF09\r\n- \u5BF9 Button\uFF1D\u66F4\u6362 normal \u5E95\u56FE\uFF0C\u4E0E `SetDisabled` \u7981\u7528\u7070\u5316\u81EA\u7136\u5171\u5B58\r\n- \u8FD4\u56DE `false`\uFF1D\u9875\u9762\u672A\u5F00 / \u8282\u70B9\u4E0D\u5B58\u5728 / \u8282\u70B9\u662F Progress\uFF0C\u5747\u8BB0 Warning \u65E5\u5FD7\u3001\u4E0D\u629B\u5F02\u5E38\r\n\r\n\u6570\u636E\u7ED1\u5B9A\u901A\u9053\uFF1A\u8282\u70B9 `djui.bindings` \u58F0\u660E `"image": "\u7ED1\u5B9Akey"` \u540E\uFF0C`DjuiBindingSystem.Set(key, \u56FE\u7247\u8DEF\u5F84)` \u5373\u6362\u56FE\uFF08\u4E0E SetImage \u540C\u4E00\u901A\u9053\uFF0C\u7A7A\u503C\u64A4\u9500\uFF09\u3002\u7ED1\u5B9A\u901A\u9053\u7684\u72EC\u7279\u4F18\u52BF\uFF1A**\u7A97\u53E3\u9500\u6BC1\u91CD\u5EFA\uFF08\u6C60\u6DD8\u6C70\uFF09\u540E\u65B0\u6811\u6CE8\u518C\u65F6\u81EA\u52A8\u6062\u590D\u6700\u8FD1\u4E00\u6B21\u56FE\u503C**\uFF1B\u76F4\u63A5 SetImage \u7684\u503C\u968F\u65E7\u6811\u9500\u6BC1\u4E22\u5931\uFF0C\u4E1A\u52A1\u9700\u5728 `OnCreate`/`OnOpen` \u91CC\u91CD\u653E\uFF08\u4E1A\u52A1\u5DF2\u6709\u91CD\u5F00\u5168\u91CF\u91CD\u5237\u60EF\u4F8B\uFF09\u3002\r\n\r\n**\u9650\u5236\uFF08\u9996\u7248\u53E3\u5F84\uFF09**\uFF1A\r\n\r\n1. Progress \u8FDB\u5EA6\u6761\u56FE\u7247\u4E0D\u652F\u6301\u8FD0\u884C\u65F6\u6362\u56FE\uFF08\u8D70\u4E13\u5C5E\u89C6\u89C9\u5C42\uFF0C\u4E09\u5904\u673A\u5236\u4E92\u4E0D\u76F8\u540C\uFF0C\u9996\u7248\u660E\u786E\u6392\u9664\uFF09\r\n2. \u8282\u70B9\u58F0\u660E\u4E86\u5BBD\u5C4F\u8986\u76D6 `responsive.wide.overrides` \u7684 `appearance.image` \u65F6\uFF0C\u5BBD\u5C4F\u6001 SetImage \u4E0D\u751F\u6548\uFF08\u5BBD\u5C4F\u5C42\u6BCF\u6B21\u89E3\u6790\u90FD\u4F1A\u628A\u8986\u76D6\u56FE\u76D6\u56DE\u6765\uFF09\u2014\u2014\u6539\u7528\u53CC\u8282\u70B9\u6CD5\u6216\u53BB\u6389\u8BE5\u8986\u76D6\uFF08\u4F1A\u6709\u4E00\u6B21\u6027 Warning \u63D0\u793A\uFF09\r\n3. \u7A97\u53E3\u6C60\u6DD8\u6C70\u9500\u6BC1\u91CD\u5EFA\u540E\uFF0C\u76F4\u63A5 SetImage \u7684\u503C\u4E22\u5931\u2014\u2014\u5728 `OnCreate`/`OnOpen` \u91CD\u653E\uFF0C\u6216\u6539\u8D70 image \u7ED1\u5B9A\r\n4. \u514B\u9686\u4F53\u65E0\u6570\u636E\u7ED1\u5B9A\uFF08\u514B\u9686\u4E0D\u7ED1\u884C\u4E3A\uFF09\uFF0C\u6362\u56FE\u53EA\u80FD\u8D70 `SetImage(Control, \u2026)`\r\n5. **\u5E26\u5B50\u4EF6\u7684\u8282\u70B9\uFF0C\u8FD0\u884C\u65F6\u5EFA\u5C42\u6216\u300C\u64A4\u9500\u56FE\u7247\u540E\u518D\u8BBE\u56DE\u300D\u90FD\u4F1A\u628A\u56FE\u7247\u7ED8\u5236\u5728\u5B50\u4EF6\u4E4B\u4E0A**\uFF08Z \u5E8F\u4E0E\u7F16\u8F91\u5668\u53CA\u521D\u59CB\u5EFA\u6811\u76F8\u53CD\uFF0C\u4E14\u4E0D\u4F1A\u88AB\u91CD\u653E\u7EA0\u6B63\uFF09\uFF1A\u7A7A\u56FE\u7247\u7684\u5BB9\u5668\u8282\u70B9\u9996\u6B21\u6362\u56FE\u3001\u4EE5\u53CA\u4EFB\u4F55\u8282\u70B9 `SetImage(null)` \u64A4\u9500\u540E\u518D\u8BBE\u56DE\uFF0C\u90FD\u4F1A\u89E6\u53D1\u3002**\u5E26\u5B50\u4EF6\u7684\u8282\u70B9\u5E94\u907F\u514D SetImage(null) \u64A4\u9500\u64CD\u4F5C**\uFF1B\u786E\u9700\u6062\u590D\u6B63\u786E\u5C42\u7EA7\u53EA\u80FD\u9500\u6BC1\u91CD\u5EFA\u7A97\u53E3\uFF08\u6C60\u6DD8\u6C70/CloseAll \u540E\u91CD\u5F00\uFF09\r\n\r\n## \u514B\u9686\u4E0E\u52A8\u6001\u5C3A\u5BF8\u7684\u56FE\u7247\u540C\u6B65\uFF08Runtime 0.8.10\uFF09\r\n\r\n`CloneControl` \u8FD4\u56DE\u524D\u4F1A\u6309\u514B\u9686\u7684\u6700\u7EC8\u89E3\u7B97\u77E9\u5F62\u540C\u6B65\u9884\u7F6E\u56FE\u7247\u4E0E\u7EBF\u6027\u8FDB\u5EA6\u6761\u7684\u7ED8\u5236\u5C42\uFF0C\u65E0\u9700\u91CD\u590D\u8BBE\u7F6E\u540C\u4E00\u5F20\u56FE\u7247\u3002\r\n\r\n- \u76F4\u63A5\u8BBE\u7F6E DJUI \u63A7\u4EF6\u7684\u663E\u5F0F `Width/Height` \u540E\uFF0C\u666E\u901A\u56FE\u7247\u5728\u4E0B\u4E00\u6B21 Runtime \u56FE\u7247\u540C\u6B65 `Think` \u81EA\u52A8\u91CD\u7B97\u77E9\u5F62\uFF1B\u9690\u85CF\u6216\u672A\u6302\u6811\u7684\u63A7\u4EF6\u540C\u6837\u540C\u6B65\u3002\u7EBF\u6027\u8FDB\u5EA6\u6761\u6CBF\u7528\u539F\u6709\u5E27\u540C\u6B65\u673A\u5236\u3002\r\n- \u9700\u8981\u672C\u6B21\u8C03\u7528\u5185\u540C\u6B65\u5B8C\u6210\u65F6\uFF0C\u4F7F\u7528 `public static bool DjuiWindowManagerV6.RefreshVisuals(Control control, bool recursive = true)`\uFF1B\u9ED8\u8BA4\u5237\u65B0\u63A7\u4EF6\u53CA\u5F53\u524D\u5DF2\u6302\u63A5\u7684\u5B50\u6811\uFF0C`recursive: false` \u53EA\u5237\u65B0\u672C\u63A7\u4EF6\u3002\u65E0\u6548\u63A7\u4EF6\u6216\u4E0D\u5C5E\u4E8E\u5B58\u6D3B DJUI \u4F1A\u8BDD\u7684\u63A7\u4EF6\u8FD4\u56DE `false`\u3002\r\n- \u63A5\u53E3\u53EA\u540C\u6B65\u73B0\u6709\u7ED8\u5236\u5C42\uFF1A\u4E0D\u6539\u5BBF\u4E3B\u4F4D\u7F6E/\u5C3A\u5BF8\u3001\u663E\u9690\u3001\u9875\u9762\u6570\u636E\u6216\u951A\u70B9/\u62C9\u4F38\u7EA6\u675F\uFF0C\u4E0D\u89E6\u53D1 authored \u5E03\u5C40\u91CD\u6392\uFF0C\u4E0D\u6362\u56FE\u7247\uFF1B\u56FE\u7247\u6BD4\u4F8B\u3001sourceSize\u3001\u7126\u70B9\u3001\u4E5D\u5BAB\u683C\u3001\u67D3\u8272\u548C\u6309\u94AE\u5F53\u524D\u72B6\u6001\u6CBF\u7528\u3002\u653E\u5C04\u72B6\u8FDB\u5EA6\u6761\u4ECD\u7531\u5F15\u64CE\u539F\u751F\u6E32\u67D3\u3002\r\n- \u5951\u7EA6\u662F **\u663E\u5F0F\u8BBE\u5B9A\u7684 Width/Height**\uFF0C\u4E0D\u4FDD\u8BC1\u5F15\u64CE Auto/\u767E\u5206\u6BD4\u5E03\u5C40\u8BA1\u7B97\u51FA\u7684 `ActualSize` \u540C\u6B65\u3002\u4E1A\u52A1\u4FEE\u6539\u591A\u4E2A\u5B50\u63A7\u4EF6\u65F6\uFF0C\u5148\u6302\u63A5\u5230\u514B\u9686\u6811\u3001\u6279\u91CF\u8BBE\u5B8C\u5C3A\u5BF8\uFF0C\u518D\u5237\u65B0\u514B\u9686\u6839\u3002\u4EC5\u6539\u53D8 Position/Visible \u65E0\u9700\u5237\u65B0\u3002\r\n- authored \u63A7\u4EF6\u7684\u4E1A\u52A1\u5C3A\u5BF8\u4FEE\u6539\u662F\u4E34\u65F6\u8986\u76D6\uFF0C\u540E\u7EED authored Relayout \u4ECD\u6309\u9875\u9762\u6A21\u578B\u91CD\u65B0\u5E03\u5C40\uFF1B\u514B\u9686\u4F53\u4FDD\u6301\u65E2\u6709\u300C\u4E0D\u53C2\u4E0E authored Relayout\u300D\u8BED\u4E49\u3002\u5C3A\u5BF8\u5237\u65B0\u4E0D\u7F29\u653E\u6216\u91CD\u65B0\u6392\u5E03\u4E1A\u52A1\u5B50\u63A7\u4EF6\u3002\r\n- \u65B0 API \u9700 Runtime \u2265 0.8.10\uFF1B\u65E2\u6709 CloneControl/SetImage/SetTint \u8C03\u7528\u517C\u5BB9\uFF0C\u9884\u7F6E\u56FE\u7247\u7684\u81EA\u52A8\u540C\u6B65\u4E0D\u8981\u6C42\u4FEE\u6539\u4E1A\u52A1\u4EE3\u7801\u3002\u540C\u6B65 Runtime \u4E0E\u811A\u672C\u533A\u540E\u518D\u63A5\u5165\u65B0 API\u3002\r\n\r\n```csharp\r\nvar cell = DjuiWindowManagerV6.CloneControl(windowInstanceId, templateNodeId);\r\ncell.Parent = list;\r\ncell.Width = 96;\r\ncell.Height = 96;\r\n// \u5B50\u63A7\u4EF6 Position/Width/Height \u6309\u4E1A\u52A1\u89C4\u5219\u8BBE\u7F6E\u5B8C\u6BD5\u4E4B\u540E\uFF1A\r\nDjuiWindowManagerV6.RefreshVisuals(cell); // \u672C\u6B21\u8C03\u7528\u5185\u540C\u6B65\u6574\u68F5\u514B\u9686\u5B50\u6811\r\nbadge.Visible = true;                    // \u9884\u7F6E\u56FE\u65E0\u9700\u91CD\u590D SetImage\r\n```\r\n\r\n## \u8FD0\u884C\u65F6\u67D3\u8272\uFF08SetTint\uFF09\r\n\r\n\u6E38\u620F\u4EE3\u7801\u53EF\u5728\u8FD0\u884C\u65F6\u7ED9\u8282\u70B9\u56FE\u7247\u67D3\u4E0A\u4E58\u7B97\u8272\uFF0C**\u53EA\u67D3\u8272\u4E0D\u52A8\u56FE\u7247\u4E0E\u6392\u7248**\u3002\u4E09\u4E2A\u516C\u5F00\u91CD\u8F7D\u4E0E SetImage \u4E00\u4E00\u540C\u6784\uFF1A\r\n\r\n- `SetTint(pageId, nodeInstanceId, tint)`\uFF1A\u5355\u4F8B\u9875\u53E3\u5F84\uFF08\u4E1A\u52A1\u6700\u5E38\u7528\uFF09\r\n- `SetTintByInstance(windowInstanceId, nodeInstanceId, tint)`\uFF1A`OpenInstance` \u591A\u5B9E\u4F8B\u9875\u53E3\u5F84\r\n- `SetTint(control, tint)`\uFF1A\u76F4\u63A7\u53E3\u5F84\uFF0C\u514B\u9686\u4F53 / authored \u8282\u70B9\u901A\u5403\r\n\r\n\u884C\u4E3A\u53E3\u5F84\uFF1A\r\n\r\n- \u67D3\u8272\u662F**\u4E58\u7B97**\uFF1A\u56FE\u7247\u50CF\u7D20 \xD7 \u989C\u8272\u3002\u767D\u8272\u7D20\u6750\uFF1D\u76F4\u63A5\u53D8\u6210\u8BE5\u989C\u8272\uFF08\u4E00\u5957\u767D\u56FE\u591A\u8272\u590D\u7528\uFF0C\u5982\u661F\u7EA7\u661F\u3001\u54C1\u8D28\u6846\uFF09\uFF1B**\u900F\u660E\u533A\u57DF\u4FDD\u6301\u900F\u660E**\uFF0C\u4E0D\u4F1A\u51FA\u73B0\u8272\u5757\r\n- \u989C\u8272\u5E26 alpha \u65F6\u6309 `\u539F\u56FE\xD7\u989C\u8272\xD7\u03B1 + \u539F\u56FE\xD7(1-\u03B1)` \u6DF7\u5408\uFF08\u534A\u900F\u660E\u67D3\u8272\uFF09\r\n- `tint` \u4F20 `null`/\u7A7A\u4E32\uFF1D\u64A4\u9500\u67D3\u8272\uFF1B\u683C\u5F0F `#RRGGBB` / `#RRGGBBAA` / `rgba()`\uFF0C\u975E\u6CD5\u503C\u8FD4\u56DE false \u5E76\u8BB0 Warning\r\n- \u6362\u56FE\u4E0D\u4E22\u67D3\u8272\uFF1A`SetImage` \u6362\u56FE\u540E tint \u6CBF\u7528\uFF08\u540C\u4E00 visual \u5C42\uFF09\uFF1BButton \u67D3 normal \u5E95\u56FE\u6240\u5728 visual\uFF0C\u672A\u914D\u7F6E\u7684 hover/pressed/disabled \u6001\u81EA\u52A8\u8DDF\u968F\r\n- Progress \u8FDB\u5EA6\u6761**\u652F\u6301\u67D3\u8272**\uFF08\u653E\u5C04\u72B6\u4E0E\u7EBF\u6027\u90FD\u8D70\u5EFA\u6811\u540C\u6B3E\u901A\u9053\uFF09\uFF0C\u8FD9\u70B9\u4E0E SetImage \u4E0D\u540C\uFF08SetImage \u4E0D\u652F\u6301 Progress\uFF09\r\n- \u9875\u9762 JSON \u91CC\u5199 `appearance.imageTint` \u5373\u5EFA\u6811\u671F\u9759\u6001\u67D3\u8272\uFF08\u7F16\u8F91\u5668\u53F3\u4FA7\u9762\u677F\u300C\u56FE\u7247\u67D3\u8272\u300D\uFF09\uFF0C\u8FD0\u884C\u65F6 SetTint \u8986\u76D6\u4E4B\r\n- \u5DF2\u5F00\u7A97\u53E3\u67D3\u8272\u540E\u8F6C\u5C4F/\u91CD\u5E03\u5C40\u4E0D\u56DE\u9000\uFF08\u540C\u6B65\u5199\u5165\u5E03\u5C40\u6570\u636E\u6A21\u578B\uFF09\uFF1B\u7A97\u53E3\u6C60\u9500\u6BC1\u91CD\u5EFA\u540E\u8FD0\u884C\u65F6\u503C\u4E22\u5931\uFF0C\u9700\u5728 `OnCreate`/`OnOpen` \u91CD\u653E\uFF08\u540C SetImage \u53E3\u5F84\uFF09\r\n- \u8282\u70B9\u58F0\u660E\u4E86\u5BBD\u5C4F\u8986\u76D6 `appearance.imageTint` \u65F6\u5BBD\u5C4F\u6001 SetTint \u4E0D\u751F\u6548\uFF08\u540C SetImage \u7684\u5BBD\u5C4F\u9650\u5236\uFF09\r\n\r\n```csharp\r\n// \u661F\u7EA7\u661F\u56FE\u67D3\u8272\uFF1A\u767D\u8272\u661F\u6BCD\u7248\u4E00\u5957\u56FE\uFF0C\u6309\u54C1\u8D28\u8FD0\u884C\u65F6\u53D8\u8272\r\nDjuiWindowManagerV6.SetTint(\u9875\u9762\u6807\u8BC6.\u827A\u4EBA\u5217\u8868, "star_icon_3", "#FFC53D");   // \u91D1\r\nDjuiWindowManagerV6.SetTint(\u683C\u5B50\u63A7\u4EF6\u5F15\u7528, "#7B61FF");                      // \u76F4\u63A7\u53E3\u5F84\uFF08\u514B\u9686\u683C\uFF09\r\nDjuiWindowManagerV6.SetTint(\u9875\u9762\u6807\u8BC6.\u827A\u4EBA\u5217\u8868, "star_icon_3", null);       // \u64A4\u9500\u67D3\u8272\r\n```\r\n\r\n## \u7A97\u53E3\u8F6C\u573A\uFF08Runtime 0.9.0\uFF09\r\n\r\n`mode: popup` \u7684\u5185\u7F6E pop / slide / fade \u8F6C\u573A\u81EA\u52A8\u6309\u5E03\u5C40\u7EA6\u675F\u534F\u8C03\uFF0C\u65E0\u9700\u65B0\u589E\u52A8\u6548\u76EE\u6807\u914D\u7F6E\uFF1A\r\n\r\n- \u6839\u5C42\u8282\u70B9\u58F0\u660E `stretch.style: Both`\uFF0C\u56DB\u8FB9 margins \u4E3A\u96F6\uFF08\u7701\u7565\u6309\u96F6\u5904\u7406\uFF09\uFF0C\u4E14 `anchor.target` \u4E3A `screen` \u6216 `parent`\uFF08\u7701\u7565\u6309 parent\uFF09\uFF0C\u8F6C\u573A\u4E2D\u4FDD\u6301\u539F\u6709\u4F4D\u7F6E\u548C\u5C3A\u5BF8\uFF0C\u4EC5\u7EE7\u627F\u6839\u8282\u70B9\u900F\u660E\u5EA6\u53D8\u5316\u3002\u5E26\u975E None \u5BBD\u9AD8\u6BD4\u7EA6\u675F\u7684\u8282\u70B9\u4E0D\u5C5E\u4E8E\u94FA\u6EE1\u5C42\u3002\r\n- \u5176\u4F59\u6839\u5C42\u5185\u5BB9\u4EE5\u9875\u9762\u4E2D\u5FC3\u6267\u884C\u540C\u4E00\u4E2A\u7F29\u653E/\u5E73\u79FB\u53D8\u6362\u3002\u72EC\u7ACB\u5173\u95ED\u63D0\u793A\u4E0E\u4E3B\u4F53\u7684\u76F8\u5BF9\u4F4D\u7F6E\u4E00\u8D77\u53D8\u5316\uFF1B\u5168\u5C4F\u5C42\u4E0B\u7684\u63D0\u793A\u968F\u5176\u539F\u6709\u7236\u5C42\u56FA\u5B9A\uFF0C\u4E0D\u642C\u8282\u70B9\u3001\u4E0D\u6539\u5C42\u7EA7\u3002\r\n- \u56E0\u6B64 popup \u7684\u4E3B\u4F53\u5982\u679C\u672C\u8EAB\u4E5F\u662F\u53CC\u5411\u96F6\u8FB9\u8DDD\u94FA\u6EE1\u5C42\uFF08\u4F8B\u5982\u5168\u5C4F\u62CD\u6444 sheet\uFF09\uFF0C\u81EA\u7136\u4EC5\u6DE1\u5165\u6DE1\u51FA\u3002`fullscreen` \u9875\u9762\u7EF4\u6301\u539F\u6709\u6574\u6839\u8F6C\u573A\uFF0C\u4E0D\u6309\u6A21\u6001\u89C4\u5219\u5206\u5C42\u3002\r\n- \u4FDD\u7559\u5168\u90E8\u8282\u70B9\u7684 Visible \u548C\u5B50\u5C42 Opacity\uFF1B\u9690\u85CF\u6982\u7387\u5C42\u3001\u900F\u660E\u5EA6\u96F6\u5C42\u4E0D\u4F1A\u88AB\u8F6C\u573A\u6062\u590D\u6210\u53EF\u89C1\u3002\u906E\u7F69 action \u539F\u6837\u6267\u884C\uFF0C\u961F\u5217\u7EE7\u7EED\u7B49\u4E1A\u52A1\u8BED\u4E49\u4ECD\u7531\u4E1A\u52A1\u5904\u7406\u3002\r\n- \u5173\u95ED\u671F\u95F4\u65B0\u589E\u65E0\u89C6\u89C9\u7684\u5168\u5C4F\u8F93\u5165\u963B\u6321\uFF0C\u52A8\u753B\u7ED3\u675F\u5E76\u89E6\u53D1 OnClose \u540E\u6458\u6808\uFF1B\u53D6\u6D88\u5173\u95ED\u79FB\u9664\u963B\u6321\uFF0C\u4E0D\u89E6\u53D1 OnClose/OnOpen\u3002\u91CD\u590D\u5173\u95ED\u88AB\u5408\u5E76\uFF0C\u6C60\u590D\u7528\u4E0E\u591A\u5B9E\u4F8B\u9500\u6BC1\u4F1A\u6E05\u7406\u4E34\u65F6\u53D8\u6362\u3002\r\n- \u8F6C\u5C4F\u65F6\u5148\u64A4\u9500\u8F6C\u573A\u51E0\u4F55\uFF0C\u6309\u65B0\u89C6\u53E3\u89E3\u7B97\uFF0C\u518D\u7EE7\u7EED\u540C\u4E00\u8FDB\u5EA6\u3002\u63A7\u4EF6 ID \u5BFB\u5740\u3001\u7236\u5B50\u6811\u3001\u514B\u9686\u3001action \u548C\u7ED1\u5B9A\u4FDD\u6301\u539F\u6709\u5951\u7EA6\u3002\r\n\r\n\u7EDD\u5BF9\u5B9A\u4F4D\u63A7\u4EF6\u7684 slide \u8F6C\u573A\u4F7F\u7528 Position\uFF08\u800C\u975E\u88AB\u7EDD\u5BF9\u5B9A\u4F4D\u5FFD\u7565\u7684 Margin\uFF09\u3002\u7EAF\u6DE1\u5165\u6DE1\u51FA\u548C none \u6CBF\u7528\u5DF2\u6709\u9884\u8BBE\u4E0E\u65F6\u5E8F\u3002\r\n\r\n\u81EA\u5B9A\u4E49 `DjuiTransitionPreset` \u9ED8\u8BA4\u4FDD\u7559\u5355\u63A7\u4EF6\u884C\u4E3A\uFF1B\u53EA\u5305\u542B\u7EDF\u4E00\u8F74\u5411\u7F29\u653E/\u5E73\u79FB/\u900F\u660E\u5EA6\uFF0C\u4E14\u7F29\u653E\u4E0E\u8282\u70B9\u65CB\u8F6C\u53EF\u4EA4\u6362\u7684\u81EA\u5B9A\u4E49\u9884\u8BBE\uFF0C\u53EF\u663E\u5F0F\u4F20 `coordinateWindowContent: true`\u3002\u4E0D\u8981\u5C06\u65CB\u8F6C\u3001\u91CD\u6392\u6216\u4EFB\u610F\u5C5E\u6027\u52A8\u753B\u58F0\u660E\u4E3A\u8BE5\u6A21\u5F0F\u3002\u5185\u7F6E pop \u4E3A\u7EDF\u4E00\u7B49\u6BD4\u4F8B\u7F29\u653E\u3002\r\n\r\n\u63A5\u5165\u65F6\u901A\u8FC7\u7F51\u9875\u300C\u66F4\u65B0 Runtime\u300D\u6216\u540C\u4EE3\u672C\u5730\u53D1\u5E03\u5668 `upgrade-runtime` \u66F4\u65B0\u6574\u5957\u6E90\u7801\uFF08\u7248\u672C\u6807\u8BB0\u4E3A 0.9.0\uFF09\uFF0C\u518D\u901A\u8FC7\u661F\u706B\u7F16\u8F91\u5668\u5B8C\u6574 `debug_start` \u7F16\u8BD1\u548C\u90E8\u7F72\u3002\u65E0\u9700\u4FEE\u6539\u73B0\u6709 Movie \u9875\u9762 JSON \u6216\u4E1A\u52A1\u906E\u7F69\u63A5\u7EBF\u3002\r\n\r\n## \u54CD\u5E94\u5F0F\u5BBD\u5C4F\u5C42\uFF08\u57FA\u7840\u5C42 / \u5BBD\u5C4F\u5C42\uFF09\r\n\r\n\u9875\u9762\u5206\u4E24\u5C42\uFF1A**\u57FA\u7840\u5C42**\uFF08\u9875\u9762 JSON \u91CC\u7684\u8282\u70B9\u4E0E\u5C5E\u6027\u672C\u4F53\uFF09\u4E0E**\u5BBD\u5C4F\u5C42**\uFF08`responsive.wide.overrides` \u5DEE\u5F02\u8865\u4E01\u8868\uFF09\u3002\u8FD0\u884C\u65F6\u6309**\u65B9\u5411\u611F\u77E5**\u89C4\u5219\u81EA\u52A8\u9009\u5C42\uFF1A\r\n\r\n- \u5224\u5B9A\uFF1A**\u7269\u7406\u5BBD / \u9AD8 \u2265 wideRatio**\uFF08`project.json` \u7684 `responsive.wideRatio`\uFF0C\u9ED8\u8BA4 1.25\uFF09\u624D\u8FDB\u5BBD\u5C4F\u5C42\uFF1B\u7AD6\u5C4F\u624B\u673A\uFF08\u5BBD < \u9AD8\uFF09\u6C38\u8FDC\u7528\u57FA\u7840\u5C42\r\n- \u9ED8\u8BA4 1.25 \u7684\u542B\u4E49\uFF1A\u6298\u53E0\u5C4F\u5C55\u5F00\u6A2A\u7528\uFF08\u6BD4\u503C 1.10~1.20\uFF09\u5F52\u57FA\u7840\u5C42\uFF1BiPad / \u5B89\u5353\u5E73\u677F\u6A2A\u7F6E\uFF081.33+\uFF09\u3001\u684C\u9762\u8FDB\u5BBD\u5C4F\u5C42\u3002\u9700\u8981\u6298\u53E0\u5C4F\u4E5F\u8D70\u5BBD\u5C4F\u5C42\u65F6\u628A\u9608\u503C\u964D\u5230\u7EA6 1.05\r\n- \u5BBD\u5C4F\u5C42\u751F\u6548\u65F6\uFF1A\u5148\u53D6\u57FA\u7840\u5C42\uFF0C\u518D\u628A\u8865\u4E01\u8868\u91CC\u7684\u5C5E\u6027\u76D6\u4E0A\u53BB\uFF1B**\u6CA1\u5199\u5728\u8865\u4E01\u8868\u91CC\u7684\u5C5E\u6027\u6CBF\u7528\u57FA\u7840\u5C42**\r\n\r\n### \u5BBD\u5C4F\u5C42\u5141\u8BB8\u8986\u76D6\u7684\u5B57\u6BB5\uFF08\u5C01\u95ED\u5217\u8868\uFF0C\u8D85\u5217\u5373\u6821\u9A8C\u5931\u8D25\uFF09\r\n\r\n| \u7C7B\u522B | \u5B57\u6BB5 |\r\n|---|---|\r\n| \u57FA\u7840 | `basic.visible`\u3001`basic.disabled` |\r\n| \u53D8\u6362 | `transform.x` / `y` / `width` / `height` |\r\n| \u5916\u89C2 | `appearance.image`\u3001`imageTint`\u3001`background`\u3001`imageFit`\u3001`focalX`\u3001`focalY`\u3001`borderThickness`\u3001`borderColor` |\r\n| \u6587\u672C | `text.text`\u3001`fontSize`\u3001`textColor`\u3001`strokeSize`\u3001`strokeColor`\u3001`bold`\u3001`font`\u3001`textWrap` |\r\n| \u6309\u94AE/\u8FDB\u5EA6 | `button.imageHover`\u3001`button.imagePressed`\u3001`button.imageDisabled`\u3001`progress.value` |\r\n\r\n### \u5168\u5C4F\u80CC\u666F\u6362\u56FE\u8303\u5F0F\uFF08\u53CC\u8282\u70B9\u6CD5\uFF09\r\n\r\n\u5BBD\u5C4F\u5C42**\u4E0D\u80FD\u8986\u76D6 `appearance.sourceSize`**\uFF08\u4E0D\u5728\u5141\u8BB8\u5217\u8868\uFF09\u3002\u7AD6\u7248 / \u5BBD\u7248\u4E24\u5957\u5168\u5C4F\u56FE\u7528\u4E24\u4E2A\u8282\u70B9 + `basic.visible` \u5207\u6362\uFF1A\r\n\r\n```json\r\n{ "id": "fullscreen_art_portrait", "basic": { "visible": true },\r\n  "appearance": { "image": "image/djui/backgrounds/bg_xxx_portrait.png",\r\n    "imageFit": "cover", "sourceSize": { "width": 1080, "height": 2400 } } },\r\n{ "id": "fullscreen_art_wide", "basic": { "visible": false },\r\n  "appearance": { "image": "image/djui/backgrounds/bg_xxx_wide.png",\r\n    "imageFit": "cover", "sourceSize": { "width": 1920, "height": 1200 } } }\r\n```\r\n\r\n\u5BBD\u5C4F\u5C42\u8865\u4E01\uFF1A\r\n\r\n```json\r\n"responsive": { "wide": { "overrides": {\r\n  "fullscreen_art_portrait": { "basic.visible": false },\r\n  "fullscreen_art_wide": { "basic.visible": true } } } }\r\n```\r\n\r\n\u6BCF\u4E2A\u8282\u70B9\u5404\u81EA\u643A\u5E26\u6B63\u786E\u7684 `sourceSize`\uFF08cover/contain \u7684\u88C1\u5207\u4F9D\u636E\uFF09\uFF0C\u8FD0\u884C\u65F6\u6309\u5C42\u5207\u6362\u53EF\u89C1\u6027\u5373\u53EF\u3002\r\n\r\n### \u573A\u666F\u753B\u677F\uFF08\u80CC\u666F\u4E0E\u7D20\u6750\u5750\u6807\u540C\u7F29\u653E\uFF09\r\n\r\n\u9700\u8981\u300C\u9489\u5728\u80CC\u666F\u56FE\u4E0A\u300D\u7684\u5185\u5BB9\uFF08\u573A\u666F\u5EFA\u7B51\u3001\u5730\u56FE\u6807\u8BB0\u7B49\uFF09\u4F7F\u7528 sceneFrame\uFF0C\u800C\u4E0D\u662F\u53EA\u4F9D\u8D56 target: image\uFF1A\r\n\r\n- \u80CC\u666F\u548C\u573A\u666F\u753B\u677F\u5FC5\u987B\u90FD\u662F\u9875\u9762\u6839\u4E0B\u8282\u70B9\uFF1B\u753B\u677F\u4EE5 sceneFrame.backgroundId \u663E\u5F0F\u6307\u5411\u80CC\u666F\uFF0C\u907F\u514D\u4F9D\u8D56\u8282\u70B9\u987A\u5E8F\u3002\r\n- \u753B\u677F\u672C\u8EAB\u5FC5\u987B anchor.target: image + stretch.style: Both\uFF1B\u5B83\u5148\u94FA\u6EE1\u80CC\u666F\u7684\u5B8C\u6574 contain/cover \u56FE\u5E27\u3002\r\n- sceneFrame.artboard \u662F\u7D20\u6750\u539F\u59CB\u753B\u5E45\u3002\u753B\u677F\u5185\u7684\u5B50\u6811\u4F7F\u7528\u8FD9\u5957\u5C40\u90E8\u5750\u6807\uFF0C\u8FD0\u884C\u65F6\u4E0E\u7F16\u8F91\u5668\u4E00\u8D77\u6309\u56FE\u5E27\u6A2A\u3001\u7EB5\u6BD4\u4F8B\u6620\u5C04\uFF0C**\u4F4D\u7F6E\u548C\u5C3A\u5BF8\u90FD\u4F1A\u968F\u80CC\u666F\u7F29\u653E**\u3002\r\n- \u753B\u677F\u5185\u5B50\u8282\u70B9\u53EA\u80FD\u7528 anchor.target: parent\uFF1B\u5C4F\u5E55 UI\uFF08\u8FD4\u56DE\u3001\u8D27\u5E01\u3001\u8BBE\u7F6E\u7B49\uFF09\u5FC5\u987B\u7559\u5728\u753B\u677F\u5916\uFF0C\u4F7F\u7528 safe / screen \u951A\u70B9\u3002\r\n\r\n~~~json\r\n{\r\n  "id": "building_group",\r\n  "anchor": { "target": "image", "side": "TopLeft" },\r\n  "stretch": { "style": "Both", "margins": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },\r\n  "sceneFrame": {\r\n    "backgroundId": "scene_background",\r\n    "artboard": { "width": 1080, "height": 2400 }\r\n  }\r\n}\r\n~~~\r\n\r\n\u65E7\u7684 target: image \u4ECD\u53EF\u7528\u4E8E\u201C\u53EA\u8DDF\u968F\u56FE\u5E27\u4F4D\u7F6E/\u8FB9\u754C\u201D\u7684\u666E\u901A\u5BB9\u5668\uFF0C\u4F46\u5B83**\u4E0D\u4F1A**\u628A\u7EDD\u5BF9\u5B9A\u4F4D\u7684\u5B50\u5143\u7D20\u7F29\u653E\uFF1B\u7D20\u6750\u5750\u6807\u573A\u666F\u5FC5\u987B\u5347\u7EA7\u4E3A sceneFrame\u3002\r\n\r\n## \u7A97\u53E3\u6C60\u5316\u4E0E\u751F\u547D\u5468\u671F\uFF080.8.0\uFF1A\u5173\u95ED\u4E0E\u9500\u6BC1\u5206\u79BB\uFF09\r\n\r\n`CloseWindow` \u53EA\u505A\u300C\u6458\u6808\uFF0B\u9690\u85CF\u300D\uFF08`IsOpen` \u7ACB\u5373 false\uFF0C\u5BFB\u5740\u6CE8\u518C\u8868\u540C\u6B65\u6CE8\u9500\u2014\u2014\u8BED\u4E49\u4E0E\u65E7\u7248\u4E00\u81F4\uFF09\uFF1B\u63A7\u4EF6\u6811\u8FDB\u5165**\u4FDD\u7559\u6C60**\u5F85\u590D\u7528\uFF0C\u4E0D\u518D\u540C\u5E27\u9500\u6BC1\uFF1A\r\n\r\n- **\u7A97\u53E3\u6C60**\uFF1A`OpenWindow` \u5355\u4F8B\u8DEF\u5F84\u7684\u5B9E\u4F8B\u5173\u95ED\u540E\u8FDB FIFO \u6C60\uFF08\u9ED8\u8BA4\u5BB9\u91CF `project.json` \u7684 `poolCapacity`\uFF1D5\uFF09\uFF1B\u91CD\u5F00\u547D\u4E2D\u6C60\uFF1D\u76F4\u63A5\u590D\u7528\uFF08\u4E0D\u91CD\u5EFA\u6811\u3001\u64AD open \u8F6C\u573A\uFF09\uFF1B\u590D\u7528\u540E\u518D\u5173\u95ED\u91CD\u65B0\u6392\u5230\u6700\u65B0\uFF1D\u9AD8\u9891\u9875\u5929\u7136\u7559\u6C60\r\n- **\u9489\u4F4F\u767D\u540D\u5355**\uFF1A`project.json` \u7684 `retainedPages: [...]` \u4E2D\u7684\u9875\u9762\u6C38\u4E0D\u6DD8\u6C70\u3001\u5E38\u9A7B\u590D\u7528\uFF08\u901A\u7528\u786E\u8BA4\u6846\u8FD9\u7C7B\u8FDE\u5F39\u9875\u5EFA\u8BAE\u9489\u4F4F\uFF09\r\n- **\u9500\u6BC1\u7F13\u51B2**\uFF1A\u6C60\u6DD8\u6C70 / `OpenInstance` \u591A\u5B9E\u4F8B\u5173\u95ED / `CloseAll` \u7EDF\u4E00\u7ECF 250ms \u7F13\u51B2\u518D\u771F\u6B63 `Dispose`\u2014\u2014\u6309\u538B\u56DE\u5F39\u52A8\u753B\u5728\u6D3B\u6811\u4E0A\u81EA\u7136\u64AD\u5B8C\uFF0C\u4E1A\u52A1\u4FA7**\u4E0D\u518D\u9700\u8981\u5EF6\u65F6\u5173\u7A97\u89C4\u907F**\uFF08\u76F4\u63A5 `CloseWindow` \u5373\u53EF\uFF09\r\n- `OpenInstance` \u663E\u5F0F\u591A\u5B9E\u4F8B\u4E0D\u5165\u6C60\u4E0D\u590D\u7528\uFF1B`CloseAll`/`Initialize` \u5168\u6E05\u6C60\uFF08\u9875\u9762 JSON \u66F4\u65B0\u540E\u65E7\u6811\u7EDD\u4E0D\u590D\u7528\uFF09\r\n\r\n### \u751F\u547D\u5468\u671F\u4E8B\u4EF6\uFF08\u4E1A\u52A1\u4FA7\u8303\u5F0F\uFF09\r\n\r\n```csharp\r\n// \u6A21\u5757\u521D\u59CB\u5316() \u91CC\u6CE8\u518C\u4E00\u6B21\uFF08Initialize \u4E4B\u540E\uFF1B\u8FDB\u7A0B\u7EA7\uFF0C\u591A\u8BA2\u9605\uFF09\uFF1A\r\nDjuiWindowManagerV6.OnCreate(\u9875, () => \u63A5\u7EBFX\u9875());   // \u5EFA\u6811\u540E\uFF08\u6C60\u6DD8\u6C70\u540E\u91CD\u5F00\uFF1D\u91CD\u5EFA\uFF1D\u518D\u6B21\u89E6\u53D1\uFF1BDjuiActionRouter.On \u4E3A\u8986\u76D6\u8BED\u4E49\uFF0C\u91CD\u590D\u63A5\u7EBF\u5B89\u5168\uFF09\r\nDjuiWindowManagerV6.OnOpen (\u9875, () => \u5237\u65B0X\u9875());    // \u6BCF\u6B21\u663E\u793A\uFF08\u65B0\u5EFA / \u6C60\u590D\u7528\uFF09\uFF0COpenWindow \u8FD4\u56DE\u524D\u540C\u6B65\u89E6\u53D1\r\nDjuiWindowManagerV6.OnClose(\u9875, () => \u6E05\u7406X\u9875());   // \u6458\u6808\u8FDB\u6C60\u524D\u2014\u2014\u5BFB\u5740\u4ECD\u53EF\u7528\uFF0C\u6E05\u56DE\u8C03\u5F15\u7528/\u91CD\u7F6E\u4E34\u65F6\u72B6\u6001\u7684\u6700\u540E\u673A\u4F1A\r\nDjuiWindowManagerV6.OnDestroy(\u9875, () => { });       // \u771F\u6B63\u9500\u6BC1\u524D\uFF08\u6781\u5C11\u7528\u5230\uFF1B\u6570\u636E\u8BA2\u9605\u6302\u6A21\u5757\u521D\u59CB\u5316\u3001\u52FF\u6302\u6B64\u5904\uFF09\r\n```\r\n\r\n- \u6253\u5F00\u65B9\u6CD5\u7626\u8EAB\u6210\u300C**\u5148\u5B58\u72B6\u6001\u5B57\u6BB5 \u2192 `OpenWindow(\u9875)`**\u300D\uFF0C\u5237\u65B0\u903B\u8F91\u653E `OnOpen`\uFF08\u7B49\u4EF7\u4E8E\u65E7\u300C\u6253\u5F00\u540E\u624B\u52A8\u5237\u65B0\u300D\uFF0C\u4E8C\u9009\u4E00\u5373\u53EF\uFF09\r\n- \u5173\u95ED\u8F6C\u573A\u4E2D\u9014\u91CD\u5F00\uFF08`CancelClosing`\uFF09\u4E0D\u89E6\u53D1\u4EFB\u4F55\u4E8B\u4EF6\u2014\u2014\u7A97\u53E3\u4ECE\u672A\u771F\u6B63\u5173\u95ED\r\n- **\u4E0D\u8981\u8DE8\u5173\u95ED\u7F13\u5B58\u63A7\u4EF6\u5F15\u7528**\uFF1A\u5173\u95ED\u540E\u91CD\u5F00\u53EF\u80FD\u62FF\u5230\u590D\u7528\u65E7\u6811\u6216\u91CD\u5EFA\u65B0\u6811\uFF0C\u4E00\u5F8B `GetSingletonControl` \u73B0\u67E5\u73B0\u7528\r\n- \u4E8B\u4EF6\u56DE\u8C03\u5F02\u5E38\u4F1A\u88AB\u9694\u79BB\u5E76\u8BB0\u65E5\u5FD7\uFF0C\u4E0D\u4F1A\u963B\u65AD\u7A97\u53E3\u72B6\u6001\u673A\uFF1B`GetLifecycleStats()` \u8FD4\u56DE\uFF08\u5EFA\u6811/\u590D\u7528/\u9500\u6BC1\uFF09\u8BA1\u6570\uFF0C\u4F9B\u9A8C\u6536\u6392\u969C\r\n\r\n### \u7A97\u53E3\u5C42\u5E8F\u7BA1\u7406\r\n\r\n\u7A97\u53E3\u9ED8\u8BA4\u6309\u6253\u5F00\u6B21\u5E8F\u53E0\u653E\uFF08\u540E\u5F00\u5728\u4E0A\uFF1B**\u547D\u4E2D\u5E8F\uFF1D\u89C6\u89C9\u6811\u5E8F\uFF0CZIndex \u4E0D\u53C2\u4E0E\u547D\u4E2D**\uFF09\uFF1A\r\n\r\n- `OpenWindow` \u5DF2\u5F00\u9875\uFF1D\u7F6E\u9876\u805A\u7126\uFF08\u81EA\u52A8\u91CD\u6302\u6811\u672B\u5C3E\uFF09\uFF0C\u5148\u5F00\u7684\u5F39\u7A97\u4E0D\u4F1A\u88AB\u540E\u5F00\u7684\u57FA\u7840\u9875\u76D6\u4F4F\r\n- `BringToFront(pageId)`\uFF1A\u628A\u5DF2\u5F00\u7A97\u53E3\u624B\u52A8\u79FB\u5230\u6700\u524D\uFF08\u6062\u590D\u88AB\u76D6\u4F4F\u5F39\u7A97\u7684\u53EF\u70B9\u6027\uFF09\r\n- `SendToBack(pageId)`\uFF1A\u628A\u5DF2\u5F00\u7A97\u53E3\u538B\u5230\u6700\u5E95\u2014\u2014\u573A\u666F\u7C7B\u57FA\u7840\u9875\u4E13\u7528\uFF0C\u4EFB\u4F55\u65F6\u523B\uFF08\u91CD\uFF09\u5F00\u90FD\u4E0D\u906E\u4E1A\u52A1\u5F39\u7A97\r\n\r\n## \u5B57\u4F53\r\n\r\n- \u9875\u9762\u63A7\u4EF6\u4E0D\u5199 `text.font` \u65F6\uFF0C\u7528 `project.json` \u7684 `defaultFont`\uFF1B`defaultFont` \u4E3A `null` \u65F6\u7528**\u5F15\u64CE\u9ED8\u8BA4\u5B57\u4F53**\r\n- \u81EA\u5B9A\u4E49\u5B57\u4F53 = **\u6807\u51C6\u5B57\u4F53\u6587\u4EF6**\uFF08.ttf / .otf / .ttc\uFF09\u653E `ui/font/<family>/`\uFF0C\u5E76\u5728 `ref/fontref.txt` \u52A0\u4E00\u884C family \u8DEF\u5F84\u3002\u5F15\u64CE\u4E0E DJUI \u753B\u5E03\u52A0\u8F7D\u540C\u4E00\u6587\u4EF6\uFF0C\u4E24\u7AEF\u4E00\u81F4\r\n- \u661F\u706B\u81EA\u5E26\u7684 `.otf` \u662F\u5F15\u64CE\u79C1\u6709\u5C01\u88C5\uFF0C\u4EC5\u5F15\u64CE\u53EF\u89E3\u7801\uFF1B\u753B\u5E03\u53EA\u80FD\u8FD1\u4F3C\u9884\u89C8\u3002\u7CFB\u7EDF\u5B57\u4F53\uFF08\u5982 `ui/font/msyh`\uFF09\u4E24\u7AEF\u90FD\u8C03\u64CD\u4F5C\u7CFB\u7EDF\u5B57\u4F53\uFF0C\u4E5F\u4E00\u81F4\r\n- \u63A8\u8350\u7528 DJUI \u7F16\u8F91\u5668\u7684\u300C\u5B57\u4F53\u7BA1\u7406\u300D\u5BFC\u5165\uFF0C\u81EA\u52A8\u5B8C\u6210\u62F7\u8D1D\u4E0E\u6CE8\u518C\uFF0C\u4E0D\u8981\u624B\u5DE5\u642C\u8FD0\u5B57\u4F53\u6587\u4EF6\r\n\r\n## \u6545\u969C\u5B9A\u4F4D\u8868\r\n\r\n| \u75C7\u72B6 | \u6839\u56E0 | \u4FEE\u590D |\r\n|---|---|---|\r\n| \u65E5\u5FD7\u300C\u9875\u9762\u76EE\u5F55\u4E0D\u5B58\u5728\u6216\u4E3A\u7A7A\u300D | `ui/AppBundle` \u65AD\u4F9B\uFF08\u53D1\u5E03\u540E\u624B\u5DE5\u5220\u4E86/\u672A\u53D1\u5E03\uFF09 | \u5728 DJUI \u7F16\u8F91\u5668\u91CD\u65B0\u70B9\u300C\u53D1\u5E03\u300D\uFF08\u5199\u5165 `ui/AppBundle/user_files/djui/pages`\uFF09 |\r\n| `OpenWindow` \u62A5\u300C\u9875\u9762 xxx \u4E0D\u5B58\u5728\u300D\u5E76\u5217\u51FA\u5DF2\u6CE8\u518C\u9875\u9762 | \u8BE5 pageId \u6CA1\u53D1\u5E03\uFF0C\u6216 pageId \u62FC\u5199\u4E0E JSON \u4E0D\u4E00\u81F4 | \u5BF9\u7167\u65E5\u5FD7\u5217\u51FA\u7684\u5DF2\u6CE8\u518C\u6E05\u5355\u68C0\u67E5\uFF1B\u91CD\u65B0\u53D1\u5E03 |\r\n| \u9875\u9762\u5F00\u4E86\u4F46\u56FE\u7247\u4E0D\u663E\u793A | \u56FE\u7247\u5F15\u7528\u8DEF\u5F84\u4E0D\u542B `image/djui/` \u524D\u7F00\uFF0C\u6216\u7D20\u6750\u672A\u53D1\u5E03\u5230 `ui/image/djui/` | \u68C0\u67E5\u63A7\u4EF6 `appearance.image` \u4E0E\u7D20\u6750\u53D1\u5E03\u72B6\u6001 |\r\n| \u9875\u9762\u62F7\u5230\u4E86\u6839 AppBundle \u4ECD\u4E0D\u751F\u6548 | \u6839 AppBundle \u4E0D\u662F\u6D88\u8D39\u65B9\uFF08\u670D\u52A1\u7AEF\u4E0D\u8BFB\u9875\u9762 JSON\uFF09 | \u53EA\u53D1\u5E03\u5230 `ui/AppBundle`\uFF1B\u7528\u7F16\u8F91\u5668\u53D1\u5E03\u800C\u975E\u624B\u5DE5\u62F7\u8D1D |\r\n| \u7AD6\u5C4F\u624B\u673A\u663E\u793A\u4E86\u5BBD\u5C4F\u5C42\u5185\u5BB9\uFF08\u5BBD\u56FE/\u5BBD\u5C4F\u6587\u6848\uFF09 | \u65E7\u7248 Runtime \u7528\u300C\u957F\u77ED\u8FB9\u6BD4\u503C\u300D\u5224\u5B9A\uFF0C\u7AD6\u5C4F 9:16 \u6BD4\u503C 1.78 \u4E5F\u88AB\u5224\u5BBD\u5C4F | \u5347\u7EA7 Runtime \u2265 0.7.9\uFF08\u65B9\u5411\u611F\u77E5\u5224\u5B9A\uFF1A\u7269\u7406\u5BBD/\u9AD8 \u2265 wideRatio\uFF09 |\r\n| \u6587\u5B57\u5B57\u4F53\u4E0E\u7F16\u8F91\u5668\u753B\u5E03\u4E0D\u4E00\u81F4 | \u7528\u4E86\u5F15\u64CE\u5C01\u88C5\u683C\u5F0F\u5B57\u4F53\uFF0C\u753B\u5E03\u65E0\u6CD5\u89E3\u7801\u53EA\u80FD\u8FD1\u4F3C | \u6539\u7528\u6807\u51C6\u5B57\u4F53\u6587\u4EF6\u6216\u7CFB\u7EDF\u5B57\u4F53\uFF1B\u5728 DJUI\u300C\u5B57\u4F53\u7BA1\u7406\u300D\u91CD\u65B0\u5BFC\u5165 |\r\n| cover \u80CC\u666F\u88C1\u5207\u65B9\u5411\u4E0D\u5BF9 | \u63A7\u4EF6 `appearance.sourceSize` \u4E0E\u7D20\u6750\u771F\u5B9E\u5C3A\u5BF8\u4E0D\u7B26 | \u5728\u7F16\u8F91\u5668\u53F3\u4FA7\u5C5E\u6027\u91CC\u4FEE\u6B63\u7D20\u6750\u539F\u59CB\u5C3A\u5BF8\uFF0C\u91CD\u65B0\u53D1\u5E03 |\r\n\r\n## \u7981\u6B62\r\n\r\n- \u7981\u6B62\u624B\u5DE5\u62F7\u8D1D\u9875\u9762 JSON \u5230\u4EFB\u4F55 AppBundle\uFF08\u7248\u672C\u9519\u4F4D\u6E90\u5934\uFF09\r\n- \u7981\u6B62\u76F4\u63A5\u4FEE\u6539\u672C\u76EE\u5F55 .cs \u6587\u4EF6\uFF08\u7F16\u8F91\u5668\u5347\u7EA7\u4F1A\u6574\u76EE\u5F55\u8986\u76D6\uFF1B\u6539\u52A8\u8BF7\u53BB DJUI \u4ED3\u5E93 `runtime/`\uFF09\r\n';
 
 // src/lib/runtimeBundle.ts
-var RUNTIME_VERSION = "0.12.0";
+var RUNTIME_VERSION = "0.13.0";
 var RUNTIME_FILES = [
   { name: "DjuiActionRouter.cs", content: DjuiActionRouter_default },
   { name: "DjuiAudioSystem.cs", content: DjuiAudioSystem_default },
@@ -3305,6 +3465,7 @@ var RUNTIME_FILES = [
   { name: "DjuiLayoutSessionV6.cs", content: DjuiLayoutSessionV6_default },
   { name: "DjuiImageVisualLayerV6.cs", content: DjuiImageVisualLayerV6_default },
   { name: "DjuiProgressVisualLayerV6.cs", content: DjuiProgressVisualLayerV6_default },
+  { name: "DjuiBorderVisualLayerV6.cs", content: DjuiBorderVisualLayerV6_default },
   { name: "DjuiButtonStateV6.cs", content: DjuiButtonStateV6_default },
   { name: "DjuiTreeBuilderV6.cs", content: DjuiTreeBuilderV6_default },
   { name: "DjuiModels.cs", content: DjuiModels_default },

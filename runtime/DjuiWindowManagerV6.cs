@@ -490,7 +490,7 @@ public static class DjuiWindowManagerV6
         var sceneScales = new Dictionary<string, float>();
         var solved = DjuiLayoutSolverV6.SolveV6(instance.Session.CurrentPage, instance.Session.CurrentPlan, sceneScales);
         var suffix = "#c" + (++_nextCloneSeq).ToString();
-        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.ButtonStates, suffix, solved, sceneScales);
+        return DjuiTreeBuilderV6.BuildClone(source, instance.Session, project.DefaultFont, instance.ImageVisuals, instance.ProgressVisuals, instance.BorderVisuals, instance.ButtonStates, suffix, solved, sceneScales);
     }
 
     /// <summary>
@@ -676,13 +676,14 @@ public static class DjuiWindowManagerV6
         return int.MaxValue;
     }
 
-    /// <summary>DJUI 内部 visual 辅助层（图片/进度条子层、按钮文本 Label）不参与容器排列。</summary>
+    /// <summary>DJUI 内部 visual 辅助层（图片/进度条/边框子层、按钮文本 Label）不参与容器排列。</summary>
     private static bool IsAuxiliaryVisual(Control control)
     {
         var name = control.Name;
         if (string.IsNullOrEmpty(name)) return false;
         return name.StartsWith(DjuiImageVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
             || name.StartsWith(DjuiProgressVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
+            || name.StartsWith(DjuiBorderVisualLayerV6.ReservedNamePrefix, StringComparison.Ordinal)
             || name == DjuiButtonStateV6.ButtonLabelName;
     }
 

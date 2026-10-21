@@ -28,10 +28,11 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     public bool OwnsHost { get; }
     private readonly DjuiImageVisualLayerV6 _imageVisuals;
     private readonly DjuiProgressVisualLayerV6 _progressVisuals;
+    private readonly DjuiBorderVisualLayerV6 _borderVisuals;
     private readonly DjuiButtonStateRegistryV6 _buttonStates;
     private readonly List<IDisposable> _bindingRegistrations;
 
-    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
+    internal DjuiTreeInstanceV6(Panel host, Panel root, DjuiLayoutSessionV6 session, bool ownsHost, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations)
     {
         Host = host;
         Root = root;
@@ -39,6 +40,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         OwnsHost = ownsHost;
         _imageVisuals = imageVisuals;
         _progressVisuals = progressVisuals;
+        _borderVisuals = borderVisuals;
         _buttonStates = buttonStates;
         _bindingRegistrations = bindingRegistrations;
     }
@@ -48,6 +50,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
     // CloneControl 构建管线入口（BuildClone 使用）
     internal DjuiImageVisualLayerV6 ImageVisuals => _imageVisuals;
     internal DjuiProgressVisualLayerV6 ProgressVisuals => _progressVisuals;
+    internal DjuiBorderVisualLayerV6 BorderVisuals => _borderVisuals;
     internal DjuiButtonStateRegistryV6 ButtonStates => _buttonStates;
 
     public void Dispose()
@@ -71,6 +74,7 @@ public sealed class DjuiTreeInstanceV6 : IDisposable
         Session.Dispose();
         _imageVisuals.Dispose();
         _progressVisuals.Dispose();
+        _borderVisuals.Dispose();
         _buttonStates.Dispose();
 
         // R5 兜底：树销毁分步隔离——单步异常不阻断后续清理（Host 悬挂泄漏比一次可捕获异常更糟）
@@ -105,16 +109,17 @@ public static class DjuiTreeBuilderV6
         var session = new DjuiLayoutSessionV6(windowInstanceId, project, page);
         var imageVisuals = new DjuiImageVisualLayerV6();
         var progressVisuals = new DjuiProgressVisualLayerV6();
+        var borderVisuals = new DjuiBorderVisualLayerV6();
         var buttonStates = new DjuiButtonStateRegistryV6(imageVisuals);
         var bindingRegistrations = new List<IDisposable>();
         Panel? root = null;
         try
         {
-            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            root = (Panel)BuildNode(session.CurrentPage.Root, session, project.DefaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
             root.Parent = host;
-            session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale));
+            session.SetNodeUpdater((node, control, sceneScale) => ApplyNodeFields(control, node, project.DefaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, sceneScale));
             session.Relayout();
-            var instance = new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+            var instance = new DjuiTreeInstanceV6(host, root, session, ownsHost, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
             session.Owner = instance;   // SetImage 运行期经它取 ImageVisuals/ButtonStates（建树期绑定首放时为 null，SetImageCore 有专门处理）
             return instance;
         }
@@ -124,6 +129,7 @@ public static class DjuiTreeBuilderV6
             session.Dispose();
             imageVisuals.Dispose();
             progressVisuals.Dispose();
+            borderVisuals.Dispose();
             buttonStates.Dispose();
             if (ownsHost) host.Dispose();
             else root?.Dispose();
@@ -131,7 +137,7 @@ public static class DjuiTreeBuilderV6
         }
     }
 
-    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true, float sceneScale = 1f)
+    private static Control BuildNode(DjuiNodeV6 node, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, List<IDisposable> bindingRegistrations, bool bindBehaviors = true, bool recurse = true, float sceneScale = 1f)
     {
         if (string.Equals(node.StarType, "TemplateInstance", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"DJUI v6: template node '{node.Id}' was not expanded.");
@@ -150,7 +156,7 @@ public static class DjuiTreeBuilderV6
             _ => throw new NotSupportedException($"DJUI v6: node '{node.Id}' uses unsupported starType '{node.StarType}'.")
         };
 
-        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, buttonStates, sceneScale);
+        ApplyNodeFields(control, node, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, sceneScale);
         // 滚动容器恒裁切（滚动语义的一部分，不可关；与编辑器 normalize 兜底同语义，防未经编辑器的旧数据）
         if (control is PanelScrollable) control.ClipContent = true;
         ApplyInteraction(control, node.Interaction);
@@ -167,7 +173,7 @@ public static class DjuiTreeBuilderV6
         if (recurse)
             foreach (var childNode in node.Children)
             {
-                var child = BuildNode(childNode, session, defaultFont, imageVisuals, progressVisuals, buttonStates, bindingRegistrations);
+                var child = BuildNode(childNode, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, bindingRegistrations);
                 child.Parent = control;
             }
         return control;
@@ -179,12 +185,12 @@ public static class DjuiTreeBuilderV6
     /// （局部矩形，克隆体初始与源完全重叠，父级/位置归调用方）。
     /// 克隆节点以新 id 登记进布局会话：不参与 relayout，但树销毁时 ClearBehaviors/特效清理覆盖克隆体（R5 同款竞态防护）。
     /// </summary>
-    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales = null)
+    internal static Control BuildClone(DjuiNodeV6 source, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, string idSuffix, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales = null)
     {
         var node = JsonSerializer.Deserialize<DjuiNodeV6>(JsonSerializer.Serialize(source, CloneJsonOptions), CloneJsonOptions)
             ?? throw new InvalidOperationException("DJUI v6: clone JSON round-trip failed");
         ApplyCloneIds(node, idSuffix);
-        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, null);
+        return BuildCloneNode(node, source, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, solved, sceneScales, null);
     }
 
     // 克隆节点弱表：克隆 node 树本是 JSON round-trip 的用完即弃产物，存弱表后 SetImage(Control)
@@ -203,11 +209,11 @@ public static class DjuiTreeBuilderV6
         foreach (var child in node.Children) ApplyCloneIds(child, idSuffix);
     }
 
-    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales, DjuiRectV6? parentRect)
+    private static Control BuildCloneNode(DjuiNodeV6 node, DjuiNodeV6 origin, DjuiLayoutSessionV6 session, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, IReadOnlyDictionary<string, DjuiRectV6> solved, IReadOnlyDictionary<string, float>? sceneScales, DjuiRectV6? parentRect)
     {
         // 克隆体不参与 relayout，场景画板字号缩放须在建树时一次到位（按克隆源 id 查累计缩放）
         var sceneScale = sceneScales != null && sceneScales.TryGetValue(origin.Id, out var scale) ? scale : 1f;
-        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
+        var control = BuildNode(node, session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, new List<IDisposable>(), bindBehaviors: false, recurse: false, sceneScale);
         CloneNodeIndex.AddOrUpdate(control, node);
         if (solved.TryGetValue(origin.Id, out var rect))
         {
@@ -216,17 +222,18 @@ public static class DjuiTreeBuilderV6
         }
         // BuildNode 初次建层时尚无解算宽高；克隆不走 authored Relayout，必须在返回前补齐绘制矩形。
         imageVisuals.RefreshGeometry(control);
+        borderVisuals.RefreshGeometry(control);
         if (control is Progress progress) progressVisuals.RefreshGeometry(progress);
         DjuiRectV6? ownRect = solved.TryGetValue(origin.Id, out var own) ? own : null;
         for (var i = 0; i < node.Children.Count; i++)
         {
-            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, buttonStates, solved, sceneScales, ownRect);
+            var child = BuildCloneNode(node.Children[i], origin.Children[i], session, defaultFont, imageVisuals, progressVisuals, borderVisuals, buttonStates, solved, sceneScales, ownRect);
             child.Parent = control;
         }
         return control;
     }
 
-    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiButtonStateRegistryV6 buttonStates, float sceneScale = 1f)
+    private static void ApplyNodeFields(Control control, DjuiNodeV6 node, string? defaultFont, DjuiImageVisualLayerV6 imageVisuals, DjuiProgressVisualLayerV6 progressVisuals, DjuiBorderVisualLayerV6 borderVisuals, DjuiButtonStateRegistryV6 buttonStates, float sceneScale = 1f)
     {
         // 控件 Name 取页面 JSON 的 name 字段——引擎 FindChild(name) / FindChildren(name) 的寻址依据（含克隆体）
         if (!string.IsNullOrWhiteSpace(node.Name)) control.Name = node.Name;
@@ -237,6 +244,8 @@ public static class DjuiTreeBuilderV6
         var isRadialProgress = control is Progress progress && IsRadial(progress);
         ApplyText(control, node.Text, defaultFont, sceneScale);
         ApplyImageRefresh(control, node, imageVisuals, buttonStates);
+        // 边框层在图片层之后挂载（描边盖图、仍在 authored 子项之下），relayout/SetImage 重放同构刷新
+        borderVisuals.Apply(node.Id, control, node.Appearance, sceneScale);
         if (control is Progress target)
         {
             if (isRadialProgress) ApplyNativeProgressImage(target, node.Appearance);

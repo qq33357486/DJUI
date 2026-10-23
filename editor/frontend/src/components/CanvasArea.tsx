@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
+import { Dropdown } from 'antd'
 import { Stage, Layer, Rect, Text, Group, Transformer, Line, Arrow, Image as KImage, Circle, Path } from 'react-konva'
 import { useEditorStore, createNode, findNode, findParent, findPath, getClipboard, setClipboard } from '@/store/editorStore'
 import { useProjectStore } from '@/store/projectStore'
@@ -55,6 +56,10 @@ function pickModifier(e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean
 // 指针位移低于此值（屏幕像素）视为「点击」，在 mouseUp 时才改变选中；
 // 超过则视为「拖动」，拖动 dragTarget（不触发对命中顶层节点的选中）。
 const CLICK_THRESHOLD_PX = 4
+
+// 同位置连点判定容差（屏幕像素）：两次点击的画布坐标距离小于此值（按当前缩放换算）
+// 视为「继续点击同一处」，触发逐层下钻；点到别处则重置回选最上层。
+const SAME_SPOT_PX = 5
 
 // 一次按下→弹起期间的指针会话
 interface PointerSession {
@@ -522,6 +527,42 @@ function pickDragTarget(chain: UiNode[] | null, _selectedIds: string[]): string 
   if (!chain || chain.length === 0) return null
   const hit = chain[chain.length - 1]
   return (!hit.editorLocked && hit.basic?.visible !== false) ? hit.id : null
+}
+
+// === 点击处逐层命中（几何法） ===
+// 用于「同位置连点逐层下钻」与「右键层列表」：收集画布坐标处的全部可选中节点。
+// 与 Konva 命中口径一致：矩形全几何（无 fill 的透明控件同样命中）、clip 不裁命中、
+// 锁定节点跳过（与画布点击一致）。圆角按外接矩形近似。
+function pointHitsEntry(px: number, py: number, entry: ProxyEntry): boolean {
+  const { rect, rotation } = entry
+  const halfW = rect.width / 2
+  const halfH = rect.height / 2
+  if (rotation) {
+    // 旋转矩形：把点绕矩形中心反旋转到局部坐标再判定
+    const cx = rect.x + halfW
+    const cy = rect.y + halfH
+    const rad = (-rotation * Math.PI) / 180
+    const dx = px - cx
+    const dy = py - cy
+    const lx = dx * Math.cos(rad) - dy * Math.sin(rad)
+    const ly = dx * Math.sin(rad) + dy * Math.cos(rad)
+    return Math.abs(lx) <= halfW && Math.abs(ly) <= halfH
+  }
+  return px >= rect.x && px <= rect.x + rect.width && py >= rect.y && py <= rect.y + rect.height
+}
+
+// allEntries 按树先序收集（先自己后子树），逆序即视觉从上到下——
+// 兄弟间后声明者在上、父的后代整体在父之上，先序逆序与 Konva 绘制顺序一致。
+function pickNodeIdsAtPoint(entries: ProxyEntry[], root: UiNode, x: number, y: number): string[] {
+  const ids: string[] = []
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (!pointHitsEntry(x, y, entry)) continue
+    const node = findNodeById(root, entry.id)
+    if (!node || node.editorLocked) continue
+    ids.push(entry.id)
+  }
+  return ids
 }
 
 function solveParentRectForNode(root: UiNode, id: string, canvasWidth: number, canvasHeight: number, safeRect?: LayoutRect, imageFrame?: LayoutRect | null): LayoutRect {
@@ -1629,7 +1670,11 @@ function computeRenderDims(
   const [previewPresetId, setPreviewPresetId] = useState<string | null>(null)
   const previewPreset = findDevicePresetV6(previewPresetId)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
-  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
+  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0, button: 0 })
+  // 右键原地松开弹出的「选择控件」层列表菜单（ids 按视觉从上到下）
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null)
+  // 上一次普通点击的画布坐标：同位置连点逐层下钻的判据
+  const lastClickRef = useRef<Vec2 | null>(null)
   // 当前按下→弹起的指针会话（统一管理「点击选中」与「拖动」）
   const pointerSession = useRef<PointerSession | null>(null)
   // 选中节点的拖动捕获层信息（每次渲染重新收集，供拖动定位用）
@@ -1645,6 +1690,17 @@ function computeRenderDims(
       nodeRefs.current.delete(id)
     }
   }, [])
+
+  // 屏幕坐标 → 画布坐标（供点击命中/右键菜单使用）
+  const clientToCanvas = useCallback((clientX: number, clientY: number): Vec2 | null => {
+    const stage = stageRef.current
+    if (!stage) return null
+    const rect = stage.container().getBoundingClientRect()
+    return {
+      x: (clientX - rect.left - viewport.x) / viewport.scale,
+      y: (clientY - rect.top - viewport.y) / viewport.scale,
+    }
+  }, [viewport.x, viewport.y, viewport.scale])
 
   // === 核心：选中变化时，将 Transformer 绑定到 Konva 节点 ===
   useEffect(() => {
@@ -2150,7 +2206,7 @@ function computeRenderDims(
     if (e.evt.button === 1 || e.evt.button === 2) {
       e.evt.preventDefault()
       setIsPanning(true)
-      panStart.current = { x: e.evt.clientX, y: e.evt.clientY, vx: viewport.x, vy: viewport.y }
+      panStart.current = { x: e.evt.clientX, y: e.evt.clientY, vx: viewport.x, vy: viewport.y, button: e.evt.button }
       return
     }
     if (e.evt.button !== 0) return
@@ -2265,10 +2321,64 @@ function computeRenderDims(
     }
   }
 
+  // 普通点击选中：默认选视觉最上层；同一位置连点时从当前选中层逐层下钻（到底后循环回最上层）。
+  // 统一走几何命中列表而不是 Konva 命中——已选节点的捕获层(Proxy)会拦截同位置的再次命中，
+  // 不绕开它的话「连点下钻」会一直停在已选节点上。
+  const clickSelectWithCycle = (session: PointerSession, evt: MouseEvent) => {
+    const hitId = session.hitTopId!
+    const canvasPos = clientToCanvas(evt.clientX, evt.clientY)
+    if (!canvasPos) {
+      selectNode(hitId, 'none')
+      lastClickRef.current = null
+      return
+    }
+    const hits = pickNodeIdsAtPoint(proxyEntriesRef.current, page.root, canvasPos.x, canvasPos.y)
+    if (hits.length === 0) {
+      // 几何未命中（罕见，如圆角外角）：回退旧语义按 Konva 命中选中
+      selectNode(hitId, 'none')
+      lastClickRef.current = null
+      return
+    }
+    const last = lastClickRef.current
+    const sameSpot = !!last
+      && Math.hypot(last.x - canvasPos.x, last.y - canvasPos.y) <= SAME_SPOT_PX / viewport.scale
+    const currentId = selectedIds.length === 1 ? selectedIds[0] : null
+    let targetId = hits[0]
+    if (sameSpot && currentId && hits.includes(currentId)) {
+      targetId = hits[(hits.indexOf(currentId) + 1) % hits.length]
+    }
+    selectNode(targetId, 'none')
+    lastClickRef.current = canvasPos
+  }
+
+  // 右键原地松开：弹出「选择控件」层列表菜单（视觉从上到下）
+  const openPickMenu = (clientX: number, clientY: number) => {
+    const canvasPos = clientToCanvas(clientX, clientY)
+    if (!canvasPos) return
+    const ids = pickNodeIdsAtPoint(proxyEntriesRef.current, page.root, canvasPos.x, canvasPos.y)
+    if (ids.length === 0) return
+    // 贴边收拢，避免一级/二级菜单超出视口
+    const x = Math.min(clientX, window.innerWidth - 360)
+    const y = Math.min(clientY, window.innerHeight - Math.min(ids.length * 30 + 60, 360))
+    setCtxMenu({ x, y, ids })
+  }
+
   const handleMouseUp = (e: any) => {
     const wasPanning = isPanning
+    const panButton = panStart.current.button
     setIsPanning(false)
-    if (wasPanning) { pointerSession.current = null; return }
+    if (wasPanning) {
+      pointerSession.current = null
+      // 右键未拖动（原地松开）→ 弹出点击处层列表；拖动过则维持平移语义
+      if (panButton === 2) {
+        const dx = e.evt.clientX - panStart.current.x
+        const dy = e.evt.clientY - panStart.current.y
+        if (Math.abs(dx) < CLICK_THRESHOLD_PX && Math.abs(dy) < CLICK_THRESHOLD_PX) {
+          openPickMenu(e.evt.clientX, e.evt.clientY)
+        }
+      }
+      return
+    }
 
     const session = pointerSession.current
     pointerSession.current = null
@@ -2278,9 +2388,16 @@ function computeRenderDims(
       // 未拖动 → 视为点击
       if (session.mode === 'blank') {
         clearSelection()
+        lastClickRef.current = null
       } else if (session.hitTopId) {
-        // 点击节点：按 modifier 语义选中（none 单选 / ctrl 单点 toggle / shift 范围）
-        selectNode(session.hitTopId, session.modifier)
+        if (session.modifier === 'none') {
+          // 普通点击：视觉最上层 + 同位置连点逐层下钻
+          clickSelectWithCycle(session, e.evt)
+        } else {
+          // Ctrl/Shift 多选：保持原语义（toggle / 范围），不参与下钻
+          selectNode(session.hitTopId, session.modifier)
+          lastClickRef.current = null
+        }
       }
       return
     }
@@ -2761,9 +2878,50 @@ function computeRenderDims(
           }}
           title="切换效果图显示"
         >
-          {referenceVisible ? '◉ 效果图' : '○ 效果图'}
+          {showEditorOverlay ? '◉ 效果图' : '○ 效果图'}
         </span>
       </div>
+
+      {/* === 右键层列表菜单：第一级「选择控件」，第二级列出点击处的所有层（视觉从上到下） === */}
+      {ctxMenu && (
+        <div
+          style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 9999 }}
+          onContextMenu={e => e.preventDefault()}
+        >
+          <Dropdown
+            menu={{
+              items: [{
+                key: 'pick-layer',
+                label: '选择控件',
+                children: ctxMenu.ids.map((id, index) => {
+                  const node = findNodeById(page.root, id)
+                  return {
+                    key: id,
+                    label: (
+                      <span>
+                        <span>{index + 1}. {node?.name || '未命名'}</span>
+                        <span style={{ color: '#8a93a8', marginLeft: 10, fontSize: 12 }}>{node?.starType ?? ''}</span>
+                      </span>
+                    ),
+                  }
+                }),
+              }],
+              onClick: ({ key }) => {
+                if (key === 'pick-layer') return
+                selectNode(key, 'none')
+                // 记录该右键位置：之后同位置左键连点可从选中的层继续下钻
+                lastClickRef.current = clientToCanvas(ctxMenu.x, ctxMenu.y)
+                setCtxMenu(null)
+              },
+            }}
+            open={true}
+            onOpenChange={(open) => { if (!open) setCtxMenu(null) }}
+            trigger={['contextMenu']}
+          >
+            <div style={{ width: 1, height: 1 }} />
+          </Dropdown>
+        </div>
+      )}
     </div>
   )
 }

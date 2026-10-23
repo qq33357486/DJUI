@@ -242,6 +242,56 @@ DjuiWindowManagerV6.OnDestroy(页, () => { });       // 真正销毁前（极少
 - `BringToFront(pageId)`：把已开窗口手动移到最前（恢复被盖住弹窗的可点性）
 - `SendToBack(pageId)`：把已开窗口压到最底——场景类基础页专用，任何时刻（重）开都不遮业务弹窗
 
+## 特效（DjuiFx，Runtime 0.14.0）
+
+代码层 2D 特效包装：**不进画布、不进页面 JSON**，全部是代码调用。DJUI 只提供包装与规范，具体特效内容由业务工程用 `DjuiFx.Define` 注册。
+
+### 依赖（DJUI 只检查，不安装）
+
+| 依赖 | 说明 | 缺失表现 |
+|---|---|---|
+| 渲染路径文件 `DjuiFxOptions.RenderPath`（默认 `Fx/RttAlpha.xml`，位于工程 `res/`） | 透明清屏的 RTT 渲染路径，由工程自备（可改 `DjuiFxOptions.RenderPath` 指向自己的路径） | 首次播放自动 `DjuiFx.Check()`，日志给出 Warning 与修复提示，特效不播放 |
+| 特效内用到的贴图、shader | 由注册特效的一方提供，DJUI 不带 | 构建部件时 Warning，该部件被跳过 |
+
+调用 `DjuiFx.Check()` 可随时手动预检；`DjuiFx.Describe()` 输出已注册特效目录与当前计数，**AI 使用特效前先读它**。
+
+### 意图 → 调用
+
+| 想做什么 | 调用 |
+|---|---|
+| 在某坐标或某控件中心放一次特效（爆炸、命中） | `DjuiFx.Play(页, 特效, 节点ID 或 (x, y))` |
+| 弹道：从 A 飞到 B | `DjuiFx.Cast(页, 特效, 起点, 终点)`（起点终点可为节点 ID 或 (x, y)） |
+| 给控件挂常驻/随控件的光效（宝箱光、夹在图标前后） | `DjuiFx.Attach(页, 节点ID, 特效)`，特效声明 `FxLayer.Back/Front` 部件 |
+| 提前结束 | `DjuiFx.Stop(句柄)`、`DjuiFx.StopAll(页)` |
+| 注册新特效 | `DjuiFx.Define(名, 描述, ctx => new FxDef(名, 秒数, parts), new FxInfo(...))` |
+
+- 页面必须已 `OpenWindow`。未注册、页面未开、节点缺失都只记 Warning 并返回 `null`，不抛异常。
+- 坐标是 UI 坐标（左上原点、y 向下、设计像素）。`FxContext` 给出窗口尺寸、起点、目标；节点锚点由 DJUI 换算（已补偿祖先 Scale），业务不要自己算屏幕坐标。
+- `Play/Cast` 画在窗口最上层（窗口级覆盖，所有部件不分前后）；`Attach` 的画布挂在节点下、随节点缩放位移，原点是节点中心。
+
+### 通用零件（FxKit）
+
+业务用 `FxKit` 拼装特效，DJUI 不带具体素材：
+
+- `FxKit.Sprite(new FxSprite { Texture, Layer, Start, End, Position, Width, Aspect, Angle, Alpha, Tint, Additive, Dissolve })`：贴图＋曲线的精灵层；`Dissolve` 非空走溶解 shader。
+- `FxKit.FollowParticle(位置曲线, fill)` / `FxKit.Particle(固定位置, fill)`：粒子部件（拖尾用 `localSpace:false`）。
+- `FxKit.ParticleMaterial(发射器, 贴图, additive)`、`FxKit.ArcPath`、`FxKit.FacingAngle`、`FxKit.EaseOut`。
+- 溶解 shader 契约：`DjuiFxOptions.DissolveTechnique`（边缘色取 `MatDiffColor.rgb`、进度取 `MatDiffColor.a`，噪声图绑 Normal 槽）、`DjuiFxOptions.NoiseTexture`。未配置则溶解层降级为淡出并记一次 Warning。
+- 加色混合下大量软光点叠加会爆白；黑色在加色下不显示。
+
+### 生命周期与泄漏（池与销毁）
+
+- 渲染单元（场景＋RTT）只由 DJUI 创建和销毁，业务只持有 `FxHandle`。
+- 句柄的四个出口：到期、`Stop`、窗口关闭、窗口销毁，全部销毁节点并归还渲染单元；失效句柄再 `Stop` 是空操作。
+- **窗口关闭时该窗口全部特效自动销毁**（含窗口池复用的窗口，重开后按需重建），业务无需写清理。
+- 渲染单元池：空闲单元最多保留 `DjuiFxOptions.MaxIdleCells` 个、超过 `IdleReleaseSeconds` 秒销毁。
+- 自检：`DjuiFx.GetStats()`。全部特效结束且窗口关闭后，`Surfaces / Handles / Nodes / InUseCells` 必须为 0。
+
+### 已知口径
+
+- 画布大小取窗口画布尺寸（`CanvasRect`），转屏改变尺寸后下一次空闲重建。
+- 节点锚点假设控件 `Scale` 的缩放原点是控件中心。
+
 ## 字体
 
 - 页面控件不写 `text.font` 时，用 `project.json` 的 `defaultFont`；`defaultFont` 为 `null` 时用**引擎默认字体**

@@ -6,6 +6,10 @@ import DjuiBindingSystem from '../../../../runtime/DjuiBindingSystem.cs?raw'
 import DjuiEffectPlayer from '../../../../runtime/DjuiEffectPlayer.cs?raw'
 import DjuiEffectPresets from '../../../../runtime/DjuiEffectPresets.cs?raw'
 import DjuiFlowBorder from '../../../../runtime/DjuiFlowBorder.cs?raw'
+import DjuiFx from '../../../../runtime/DjuiFx.cs?raw'
+import DjuiFxCore from '../../../../runtime/DjuiFxCore.cs?raw'
+import DjuiFxKit from '../../../../runtime/DjuiFxKit.cs?raw'
+import DjuiFxSurface from '../../../../runtime/DjuiFxSurface.cs?raw'
 import DjuiLayoutArranger from '../../../../runtime/DjuiLayoutArranger.cs?raw'
 import DjuiLayoutSolver from '../../../../runtime/DjuiLayoutSolver.cs?raw'
 import DjuiCanvasV6 from '../../../../runtime/DjuiCanvasV6.cs?raw'
@@ -29,7 +33,7 @@ import DjuiWindowManagerV6 from '../../../../runtime/DjuiWindowManagerV6.cs?raw'
 import DjuiWindowTransitionV6 from '../../../../runtime/DjuiWindowTransitionV6.cs?raw'
 import runtimeAgentsMd from '../../../../runtime/AGENTS.md?raw'
 
-export const RUNTIME_VERSION = '0.13.0'
+export const RUNTIME_VERSION = '0.14.0'
 
 export interface BundledRuntimeFile {
   name: string
@@ -43,6 +47,10 @@ export const RUNTIME_FILES: BundledRuntimeFile[] = [
   { name: 'DjuiEffectPlayer.cs', content: DjuiEffectPlayer },
   { name: 'DjuiEffectPresets.cs', content: DjuiEffectPresets },
   { name: 'DjuiFlowBorder.cs', content: DjuiFlowBorder },
+  { name: 'DjuiFx.cs', content: DjuiFx },
+  { name: 'DjuiFxCore.cs', content: DjuiFxCore },
+  { name: 'DjuiFxKit.cs', content: DjuiFxKit },
+  { name: 'DjuiFxSurface.cs', content: DjuiFxSurface },
   { name: 'DjuiLayoutArranger.cs', content: DjuiLayoutArranger },
   { name: 'DjuiLayoutSolver.cs', content: DjuiLayoutSolver },
   { name: 'DjuiCanvasV6.cs', content: DjuiCanvasV6 },

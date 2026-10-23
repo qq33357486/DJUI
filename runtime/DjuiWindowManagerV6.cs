@@ -116,9 +116,7 @@ public static class DjuiWindowManagerV6
             return open.Root;
         }
         if (TryReusePooled(pageId, out var reused)) return reused;
-        var id = OpenInstance(pageId);
-        SingletonInstances[pageId] = id;
-        SingletonOpened.Add(id);
+        var id = OpenInstanceCore(pageId, singleton: true);
         return Instances[id].Root;
     }
 
@@ -179,7 +177,10 @@ public static class DjuiWindowManagerV6
     }
 
     /// <summary>显式创建同一页面的独立窗口实例（多实例不复用、不入池，关闭走销毁缓冲）。</summary>
-    public static string OpenInstance(string pageId)
+    public static string OpenInstance(string pageId) => OpenInstanceCore(pageId, singleton: false);
+
+    /// <summary>单例路径必须在 OnCreate/OnOpen 触发前完成登记，回调里才能 IsOpen / GetSingletonControl（与池复用路径一致）。</summary>
+    private static string OpenInstanceCore(string pageId, bool singleton)
     {
         var project = _project ?? throw new InvalidOperationException("DJUI v6: 请先 Initialize");
         if (!Pages.TryGetValue(pageId, out var page)) throw new KeyNotFoundException($"DJUI v6: 页面不存在: {pageId}");
@@ -195,6 +196,11 @@ public static class DjuiWindowManagerV6
             Instances.Add(id, instance);
             if (!PageInstances.TryGetValue(pageId, out var list)) PageInstances[pageId] = list = new List<string>();
             list.Add(id);
+            if (singleton)
+            {
+                SingletonInstances[pageId] = id;
+                SingletonOpened.Add(id);
+            }
             DjuiTransitionPlayer.PlayWindow(instance, page.Window?.Transition?.Open);
             _buildCount++;
             Game.Logger.LogInformation("DJUI v6: 建树 {Page}#{Id}", pageId, id);
@@ -204,6 +210,8 @@ public static class DjuiWindowManagerV6
         }
         catch
         {
+            if (singleton && SingletonInstances.TryGetValue(pageId, out var registered) && registered == id) SingletonInstances.Remove(pageId);
+            SingletonOpened.Remove(id);
             host.RemoveFromVisualTreeAndParent();
             host.Dispose();
             throw;
@@ -755,6 +763,8 @@ public static class DjuiWindowManagerV6
 
         // OnClose 必须在注销寻址注册表之前触发——此时 IsOpen 仍为 true、GetSingletonControl 仍可用
         RaiseEvent(CloseHandlers, pageId, "OnClose");
+        try { WindowClosing?.Invoke(pageId, instance); }
+        catch (Exception ex) { Game.Logger.LogWarning("DJUI v6: WindowClosing 回调异常（已隔离）：{Page} {Message}", pageId, ex.Message); }
 
         ClosingTransitions.Remove(windowInstanceId);
         RemoveClosingInputGuard(windowInstanceId);
@@ -781,6 +791,13 @@ public static class DjuiWindowManagerV6
         entry.Node = Pool.AddLast(entry);
         TrimPool();
     }
+
+    /// <summary>窗口摘栈前（所有页面通用，进程级）：供 DjuiFx 等内部模块释放挂在该窗口上的资源。此时寻址仍可用。</summary>
+    internal static event Action<string, DjuiTreeInstanceV6>? WindowClosing;
+
+    /// <summary>已开单例页的窗口实例；未开返回 null。</summary>
+    internal static DjuiTreeInstanceV6? GetSingletonInstance(string pageId)
+        => SingletonInstances.TryGetValue(pageId, out var id) && Instances.TryGetValue(id, out var inst) ? inst : null;
 
     internal static bool IsClosing(string windowInstanceId) => ClosingTransitions.ContainsKey(windowInstanceId);
 

@@ -252,6 +252,7 @@ DjuiWindowManagerV6.OnDestroy(页, () => { });       // 真正销毁前（极少
 |---|---|---|
 | 渲染路径文件 `DjuiFxOptions.RenderPath`（默认 `Fx/RttAlpha.xml`，位于工程 `res/`） | 透明清屏的 RTT 渲染路径，由工程自备（可改 `DjuiFxOptions.RenderPath` 指向自己的路径） | 首次播放自动 `DjuiFx.Check()`，日志给出 Warning 与修复提示，特效不播放 |
 | 特效内用到的贴图、shader | 由注册特效的一方提供，DJUI 不带 | 构建部件时 Warning，该部件被跳过 |
+| shader 引用的引擎头（`res/Shaders/BLGL/` 下 8 个 `.sh`） | DJUI「发布」时按「缺则补、有则不管」放入，并写 `.djui-headers-version` 标记来源版本；**不是 Runtime 文件，不进 `src/DjuiRuntime`** | 缺头时星火编辑器编译 `.glsl` 报错、无法调试；重新发布即补齐 |
 
 调用 `DjuiFx.Check()` 可随时手动预检；`DjuiFx.Describe()` 输出已注册特效目录与当前计数，**AI 使用特效前先读它**。
 

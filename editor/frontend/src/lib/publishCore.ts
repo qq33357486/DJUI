@@ -11,6 +11,7 @@ import { DJUI_PROTOCOL_VERSION } from '../types/protocolV6'
 import { inspectPageV6, inspectProjectV6 } from './schemaV6'
 import { findStaticActionIssues, formatStaticActionWarning, type StaticActionIssue } from './clickGuard'
 import { RUNTIME_FILES, RUNTIME_VERSION, type BundledRuntimeFile } from './runtimeBundle'
+import { SHADER_HEADERS, SHADER_HEADERS_DIR, SHADER_HEADERS_MARKER, SHADER_HEADERS_VERSION } from './shaderHeaders'
 
 export type StoreEntry = { name: string; kind: 'file' | 'directory' }
 
@@ -70,6 +71,8 @@ export interface PublishCoreResult {
   copiedClientPages?: string[]
   copiedSoundsConfig?: boolean
   copiedConfig?: boolean
+  /** 本次补进星火工程的 shader 头（相对 res/Shaders/BLGL）；已存在的不动 */
+  installedShaderHeaders?: string[]
   warnings?: string[]
   targetDir?: string
   targetDirs?: { images?: string; clientPages?: string; clientSounds?: string }
@@ -420,6 +423,23 @@ export async function upgradeRuntimeCore(star: PublishStore, files: BundledRunti
   return { ok: true, version: RUNTIME_VERSION, targetDir: dir, copiedFiles: files.map(file => file.name) }
 }
 
+/** 缺则补、有则不管：绝不覆盖已有头（可能是用户手放或自行改过的版本） */
+export async function ensureShaderHeadersCore(star: PublishStore): Promise<string[]> {
+  const installed: string[] = []
+  for (const header of SHADER_HEADERS) {
+    const target = joinPath(SHADER_HEADERS_DIR, header.path)
+    if (await star.fileExists(target)) continue
+    await star.ensureDir(target.slice(0, target.lastIndexOf('/')))
+    await star.writeText(target, header.content)
+    installed.push(header.path)
+  }
+  const marker = joinPath(SHADER_HEADERS_DIR, SHADER_HEADERS_MARKER)
+  if (installed.length && !(await star.fileExists(marker))) {
+    await star.writeText(marker, SHADER_HEADERS_VERSION + '\n')
+  }
+  return installed
+}
+
 export async function publishCore(workspace: PublishStore, star: PublishStore): Promise<PublishCoreResult> {
   await migrateLegacyLayoutCore(workspace, star)
   const runtime = await checkRuntimeCore(star)
@@ -478,9 +498,12 @@ export async function publishCore(workspace: PublishStore, star: PublishStore): 
     await star.writeText(CLIENT_DJUI_DIR + '/sounds.json', sounds)
     copiedSoundsConfig = true
   }
+  const installedShaderHeaders = await ensureShaderHeadersCore(star)
+  if (installedShaderHeaders.length) warnings.push(`已补充特效 shader 依赖的头文件 ${installedShaderHeaders.length} 个到 ${SHADER_HEADERS_DIR}（已有的不覆盖）`)
   warnings.push(...validation.warnings)
   return {
     ok: true,
+    installedShaderHeaders,
     copiedAssets: new Array(assets.total).fill(''), copiedPages: new Array(serverPages.total).fill(''), copiedClientPages: new Array(clientPages.total).fill(''),
     copiedSoundsConfig, copiedConfig: true, warnings,
     targetDir: IMAGE_TARGET_DIR,

@@ -10,6 +10,7 @@ COPY editor/frontend/ ./
 # runtime 和 scripts 通过 ?raw 导入打包到 JS bundle
 COPY runtime /app/runtime
 COPY scripts /app/scripts
+COPY shader-headers /app/shader-headers
 COPY CHANGELOG.md /app/CHANGELOG.md
 RUN npm run build
 

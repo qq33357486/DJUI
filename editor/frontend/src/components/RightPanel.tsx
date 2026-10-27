@@ -288,6 +288,8 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
   const aspectLockDisabled = stretchWidth || stretchHeight
   const aspectLocked = node.editorLockAspect === true && !aspectLockDisabled
   const aspectRatioWH = (t.width ?? 100) / (t.height ?? 100)  // 当前 W:H
+  // 锁定时记录的 W:H；旧工程无记录时回退到当前尺寸比
+  const lockRatio = node.editorLockAspectRatio ?? aspectRatioWH
   const xLabel = anchor.side === 'None' ? (stretchWidth ? '基准X' : 'X') : (stretchWidth ? '基准X' : '偏移X')
   const yLabel = anchor.side === 'None' ? (stretchHeight ? '基准Y' : 'Y') : (stretchHeight ? '基准Y' : '偏移Y')
   // 多选：X/Y 调整不再是单节点绝对赋值，而是对全部选中控件做相对平移（画布按锚点/拉伸语义反算）
@@ -379,9 +381,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                   label={(autoWidth || stretchWidth) ? '基准宽' : '宽'}
                   value={t.width ?? 100}
                   onChange={v => {
-                    // 锁形开启且比例有效：同时按当前 W:H 反算高
-                    if (aspectLocked && aspectRatioWH > 0) {
-                      batchUpdateNode(node.id, { 'transform.width': v, 'transform.height': Math.max(1, Math.round(v / aspectRatioWH)) })
+                    // 锁形开启且比例有效：同时按锁定时的 W:H 反算高
+                    if (aspectLocked && lockRatio > 0) {
+                      batchUpdateNode(node.id, { 'transform.width': v, 'transform.height': Math.max(1, Math.round(v / lockRatio)) })
                     } else {
                       updateNodeField(node.id, 'transform.width', v)
                     }
@@ -391,7 +393,12 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                 {/* 锁链 toggle：保持当前宽高比 */}
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '-2px 0' }}>
                   <span
-                    onClick={() => { if (!aspectLockDisabled) updateNodeField(node.id, 'editorLockAspect', !aspectLocked) }}
+                    onClick={() => {
+                      if (aspectLockDisabled) return
+                      if (aspectLocked) updateNodeField(node.id, 'editorLockAspect', false)
+                      // 开锁时记录当前浮点比例，后续输入全部按它反算
+                      else batchUpdateNode(node.id, { 'editorLockAspect': true, 'editorLockAspectRatio': aspectRatioWH })
+                    }}
                     title={aspectLockDisabled ? '拉伸轴下尺寸由父容器决定，无法锁定比例' : (aspectLocked ? '已锁定宽高比，点击解锁' : '锁定宽高比')}
                     style={{
                       fontSize: 14,
@@ -411,9 +418,9 @@ function InspectorContent({ node, updateNodeField, batchUpdateNode, openAssetPic
                   label={(autoHeight || stretchHeight) ? '基准高' : '高'}
                   value={t.height ?? 100}
                   onChange={v => {
-                    // 锁形开启且比例有效：同时按当前 W:H 反算宽
-                    if (aspectLocked && aspectRatioWH > 0) {
-                      batchUpdateNode(node.id, { 'transform.height': v, 'transform.width': Math.max(1, Math.round(v * aspectRatioWH)) })
+                    // 锁形开启且比例有效：同时按锁定时的 W:H 反算宽
+                    if (aspectLocked && lockRatio > 0) {
+                      batchUpdateNode(node.id, { 'transform.height': v, 'transform.width': Math.max(1, Math.round(v * lockRatio)) })
                     } else {
                       updateNodeField(node.id, 'transform.height', v)
                     }

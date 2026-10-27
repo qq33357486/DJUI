@@ -208,6 +208,7 @@ export interface UiNode {
   // 编辑器专用（不序列化到运行时 JSON）
   editorLocked?: boolean    // 锁定：无法在画布选中
   editorLockAspect?: boolean  // 锁定宽高比：拖拽缩放与 W/H 输入时保持当前比例
+  editorLockAspectRatio?: number  // 开锁时记录的 W:H 浮点比例：输入时按它反算，避免按取整后的尺寸反推导致漂移
   children: UiNode[]
 }
 

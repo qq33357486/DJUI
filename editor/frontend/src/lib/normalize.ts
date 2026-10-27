@@ -126,6 +126,7 @@ export function normalizeNode(raw: unknown): UiNode {
   if (isRecord(raw.djui)) node.djui = raw.djui as UiNode['djui']
   if (typeof raw.editorLocked === 'boolean') node.editorLocked = raw.editorLocked
   if (typeof raw.editorLockAspect === 'boolean') node.editorLockAspect = raw.editorLockAspect
+  if (typeof raw.editorLockAspectRatio === 'number') node.editorLockAspectRatio = raw.editorLockAspectRatio
 
   return node
 }

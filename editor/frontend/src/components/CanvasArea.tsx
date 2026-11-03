@@ -115,6 +115,16 @@ function positiveNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+// 传入 Konva Rect 的圆角必须先做同款截断：Konva 内部 drawRoundedRectPath 会把半径
+// 截断为 min(圆角, 宽/2, 高/2) 再喂给 canvas arc，任一项为负（负圆角数据、
+// 锚点拉伸反算出负显示宽高）都会抛 IndexSizeError 整页渲染崩溃（0.34.3 用户实测）。
+// 这里钳非负后入 Konva；结果为 0 时 Konva 走方角路径，天然不经过 arc
+function safeCornerRadius(value: unknown, width: number, height: number) {
+  const cr = positiveNumber(value)
+  if (cr === 0) return 0
+  return Math.max(0, Math.min(cr, width / 2, height / 2))
+}
+
 /**
  * 解析图片染色色值（#RGB / #RRGGBB / #RRGGBBAA）为等价纯乘算色。
  * 引擎语义（1003 探针实锤）：result = img×tint×α + img×(1-α)，透明像素保持透明（顶点色式，非叠加层）。
@@ -876,7 +886,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
         rotation={rotation}
         opacity={opacity}
         fill={fillColor}
-        cornerRadius={app.cornerRadius ?? 0}
+        cornerRadius={safeCornerRadius(app.cornerRadius, width, height)}
         listening={false}
       />
       {hasImage && (() => {
@@ -928,7 +938,7 @@ function TemplatePreviewShape({ node, parentRect, canvasWidth, canvasHeight, scr
           opacity={opacity}
           stroke={app.borderColor ?? '#FFFFFFFF'}
           strokeWidth={borderThickness}
-          cornerRadius={app.cornerRadius ?? 0}
+          cornerRadius={safeCornerRadius(app.cornerRadius, width, height)}
           listening={false}
         />
       )}
@@ -1238,7 +1248,7 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
         fill={fillColor}
         stroke={showEditorOverlay ? (isSelected ? '#5ab9ff' : '#7a8aa8') : undefined}
         strokeWidth={isSelected ? 2.5 : 1.5}
-        cornerRadius={app.cornerRadius ?? 0}
+        cornerRadius={safeCornerRadius(app.cornerRadius, width, height)}
         dash={node.basic?.isStatic ? [5, 5] : undefined}
         draggable={isSelected && !node.editorLocked && !readOnly}
         listening={!node.editorLocked && !readOnly}
@@ -1360,7 +1370,7 @@ export function NodeShape({ node, isSelected, selectedIds, onSelect, onDragEnd, 
           opacity={renderOpacity}
           stroke={app.borderColor ?? '#FFFFFFFF'}
           strokeWidth={borderThickness}
-          cornerRadius={app.cornerRadius ?? 0}
+          cornerRadius={safeCornerRadius(app.cornerRadius, width, height)}
           listening={false}
         />
       )}

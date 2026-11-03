@@ -79,6 +79,14 @@ export function normalizeNode(raw: unknown): UiNode {
     // 滚动容器恒裁切（滚动语义的一部分，不可关）：溢出子控件裁掉、滚动可见。
     // 画布（Konva clip）与运行时（TreeBuilder 强制 ClipContent）两侧同语义
     if (starType === 'PanelScrollable') a.clipContent = true
+    // cornerRadius 值域必须为非负有限数：Konva 内部对半径做 min(圆角, 宽/2, 高/2) 截断，
+    // 负圆角或负宽高会让 canvas arc 抛 IndexSizeError 整页渲染崩溃（0.34.3 用户实测）。
+    // 非法类型丢弃回退默认；负数钳回 0（无圆角），合法正数原样保留
+    if (a.cornerRadius !== undefined && a.cornerRadius !== null) {
+      const cr = a.cornerRadius
+      if (typeof cr !== 'number' || !Number.isFinite(cr)) delete a.cornerRadius
+      else if (cr < 0) a.cornerRadius = 0
+    }
     node.appearance = a as UiNode['appearance']
   }
   if (isRecord(raw.layout)) {

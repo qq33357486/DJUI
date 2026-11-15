@@ -50,9 +50,11 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         _viewport = viewport ?? DeviceInfo.PrimaryViewport;
         CurrentPlan = CreateCurrentPlan();
         CurrentPage = DjuiResponsiveResolverV6.Resolve(_page, CurrentPlan.Wide);
-        _sizeChanged = (_, _) => Relayout();
-        _orientationChanged = _ => Relayout();
-        _dprChanged = _ => Relayout();
+        // 视口粒度事件到达时 Size/SafeZonePadding/物理像素未必已收敛到终值（引擎仅对统一事件
+        // OnViewportChanged 承诺"完成更新后触发"），事件只置脏，等读数连续多帧稳定再重排——见文末去抖器
+        _sizeChanged = (_, _) => MarkViewportDirty();
+        _orientationChanged = _ => MarkViewportDirty();
+        _dprChanged = _ => MarkViewportDirty();
         _viewport.OnSizeChanged += _sizeChanged;
         _viewport.OnOrientationChanged += _orientationChanged;
         _viewport.OnDevicePixelRatioChanged += _dprChanged;
@@ -167,6 +169,8 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     public void Relayout()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // 手动重算已按当前读数解算，作废视口等待（防紧随其后的去抖重排重复算一遍）
+        ForgetViewportPending(this);
         BeforeRelayout?.Invoke();
         CurrentPlan = CreateCurrentPlan();
         CurrentPage = DjuiResponsiveResolverV6.Resolve(_page, CurrentPlan.Wide);
@@ -243,8 +247,103 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         _viewport.OnSizeChanged -= _sizeChanged;
         _viewport.OnOrientationChanged -= _orientationChanged;
         _viewport.OnDevicePixelRatioChanged -= _dprChanged;
+        ForgetViewportPending(this);
         _controls.Clear();
         _controlIds.Clear();
+    }
+
+    // ===== 视口变化去抖 =====
+    // 引擎的 OnSizeChanged 等粒度事件到达时读数可能是中间值（如切换比例时"事件先到、值后到"），
+    // 事件只置脏；Thinker 每帧比对视口签名（逻辑尺寸 + 物理像素 + 安全区），连续 StableFrames 帧
+    // 不变（或超过 MaxWaitMs 兜底）才真正重排，保证最终按收敛值解算。零引擎改动。
+    // 主线程约定：事件回调与 Think 同在游戏主线程，等待队列不加锁（先例：DjuiWindowManagerV6.RetentionThinker）。
+    private const int ViewportStableFrames = 2;
+    private const int ViewportMaxWaitMs = 300;
+    private static ViewportRelayoutThinker? _viewportThinker;
+
+    private static ViewportRelayoutThinker EnsureViewportThinker()
+    {
+        if (_viewportThinker == null)
+        {
+            _viewportThinker = new ViewportRelayoutThinker();
+            Game.RegisterThinker(_viewportThinker);
+        }
+        return _viewportThinker;
+    }
+
+    /// <summary>视口事件入口：以当前读数为基准挂入等待队列（已在队列则仅刷新基准，等待时长累计保留防事件风暴无限延期）。</summary>
+    private void MarkViewportDirty()
+    {
+        if (_disposed) return;
+        EnsureViewportThinker().Mark(this);
+    }
+
+    private static void ForgetViewportPending(DjuiLayoutSessionV6 session)
+        => _viewportThinker?.Forget(session);
+
+    /// <summary>视口读数稳定确认器（与 RetentionThinker / DjuiTransitionPlayer 同款 IThinker 帧驱动模式）。</summary>
+    private sealed class ViewportRelayoutThinker : IThinker
+    {
+        private sealed class Pending
+        {
+            public DjuiLayoutSessionV6 Session = null!;
+            public (float W, float H, int PxW, int PxH, float SL, float ST, float SR, float SB) Baseline;
+            public int StableFrames;
+            public int WaitedMs;
+        }
+
+        private readonly List<Pending> _pending = new();
+        public bool DoesThink { get; set; } = true;
+
+        public void Mark(DjuiLayoutSessionV6 session)
+        {
+            var signature = ReadSignature(session._viewport);
+            foreach (var pending in _pending)
+            {
+                if (!ReferenceEquals(pending.Session, session)) continue;
+                pending.Baseline = signature;
+                pending.StableFrames = 0;
+                return;
+            }
+            _pending.Add(new Pending { Session = session, Baseline = signature });
+        }
+
+        public void Forget(DjuiLayoutSessionV6 session)
+        {
+            for (var i = _pending.Count - 1; i >= 0; i--)
+                if (ReferenceEquals(_pending[i].Session, session)) _pending.RemoveAt(i);
+        }
+
+        public void Think(int delta)
+        {
+            for (var i = _pending.Count - 1; i >= 0; i--)
+            {
+                var pending = _pending[i];
+                if (pending.Session._disposed) { _pending.RemoveAt(i); continue; }
+                pending.WaitedMs += delta;
+                var signature = ReadSignature(pending.Session._viewport);
+                if (signature == pending.Baseline) pending.StableFrames++;
+                else
+                {
+                    pending.Baseline = signature;
+                    pending.StableFrames = 0;
+                }
+                if (pending.StableFrames < ViewportStableFrames && pending.WaitedMs < ViewportMaxWaitMs) continue;
+                _pending.RemoveAt(i);   // 先出队再重排——重排后新到的事件重新入队
+                try { pending.Session.Relayout(); }
+                catch (Exception ex)
+                {
+                    Game.Logger.LogWarning("DJUI v6: 视口稳定后重排异常（已隔离）：{Id} {Message}", pending.Session.WindowInstanceId, ex.Message);
+                }
+            }
+        }
+
+        private static (float, float, int, int, float, float, float, float) ReadSignature(ScreenViewport viewport)
+        {
+            var size = viewport.Size;
+            var safe = viewport.SafeZonePadding;
+            return (size.Width, size.Height, viewport.WidthPx, viewport.HeightPx, safe.Left, safe.Top, safe.Right, safe.Bottom);
+        }
     }
 }
 

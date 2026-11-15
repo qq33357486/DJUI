@@ -27,7 +27,7 @@ source.Children[0].Appearance!.SourceSize = new() { Width = 100, Height = 100 };
 var page = new DjuiPageV6 { PageId = "test", Root = new() { Id = "root", StarType = "Panel", Children = [source] } };
 using var tree = DjuiTreeBuilderV6.Build("test#1", project, page);
 var solved = DjuiLayoutSolverV6.SolveV6(tree.Session.CurrentPage, tree.Session.CurrentPlan);
-var clone = DjuiTreeBuilderV6.BuildClone(source, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.ButtonStates, "#c1", solved);
+var clone = DjuiTreeBuilderV6.BuildClone(source, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.BorderVisuals, tree.ButtonStates, "#c1", solved, null);
 var badge = tree.GetControl<Panel>("badge#c1")!;
 var badgeVisual = tree.ImageVisuals.GetVisual(badge)!;
 Rect(badge, 7, 9, 24, 24);
@@ -112,7 +112,7 @@ foreach (var fit in new[] { "contain", "cover", "stretch" })
 var buttonNode = ImageNode("button", "stretch", "Button");
 buttonNode.Button = new() { ImageHover = "hover.png", ImagePressed = "pressed.png" };
 var buttonSolved = new Dictionary<string, DjuiRectV6> { ["button"] = new(0, 0, 60, 30) };
-var button = (Button)DjuiTreeBuilderV6.BuildClone(buttonNode, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.ButtonStates, "#c2", buttonSolved);
+var button = (Button)DjuiTreeBuilderV6.BuildClone(buttonNode, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.BorderVisuals, tree.ButtonStates, "#c2", buttonSolved, null);
 var bv = tree.ImageVisuals.GetVisual(button)!;
 button.Hover(); button.Press();
 Check(bv.Image == "pressed.png", "按压图片");
@@ -133,7 +133,7 @@ Check(bv.Image == "new.png" && bv.Background == Color.FromArgb(255, 171, 205, 23
 
 var progressNode = ImageNode("progress", "stretch", "Progress");
 progressNode.Progress = new() { Value = .5f, ProgressionMode = "LeftToRight" };
-var progress = (Progress)DjuiTreeBuilderV6.BuildClone(progressNode, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.ButtonStates, "#c3", new Dictionary<string, DjuiRectV6> { ["progress"] = new(0, 0, 80, 40) });
+var progress = (Progress)DjuiTreeBuilderV6.BuildClone(progressNode, tree.Session, null, tree.ImageVisuals, tree.ProgressVisuals, tree.BorderVisuals, tree.ButtonStates, "#c3", new Dictionary<string, DjuiRectV6> { ["progress"] = new(0, 0, 80, 40) }, null);
 var fill = progress.Children.Single();
 Rect(fill, 0, 0, 40, 40);
 Rect(fill.Children.Single(), 0, 0, 80, 40);
@@ -148,4 +148,47 @@ Check(tree.ImageVisuals.GetVisual(badge) == null, "已销毁克隆视觉索引�
 Check(!DjuiWindowManagerV6.RefreshVisuals(badge), "无效控件返回 false");
 tree.Dispose(); Game.Tick();
 Check(!DjuiWindowManagerV6.RefreshVisuals(clone), "已销毁树返回 false");
-Console.WriteLine($"PASS: {checks} checks; production clone/layout/image/button/progress/public API paths");
+
+// ===== 视口变化去抖：引擎事件先到/值后到时，等读数连续帧稳定才重排 =====
+var vp = new GameUI.Device.ScreenViewport();
+var vpProject = new DjuiProjectV6();
+var vpPage = new DjuiPageV6 { PageId = "vp", Root = new() { Id = "root", StarType = "Panel" } };
+using var vpSession = new DjuiLayoutSessionV6("vp#1", vpProject, vpPage, vp);
+var vpRoot = new Panel();
+vpSession.Register("root", vpRoot);
+
+// a) 事件先到（此刻读数仍是初始 900x1600）、值后到：最终必须按终值 1600x900 重排
+vp.Notify();
+vp.SetDesignResolution(1600, 900, ScaleMode.Contain);
+Game.Tick();   // 读数与基准不一致（值刚变）：仅更新基准
+Check(vpRoot.Width == 100, "未满足稳定帧前不得套用新布局");
+Game.Tick();   // 稳定第 1 帧
+Check(vpRoot.Width == 100, "稳定第 1 帧仍未套用");
+Game.Tick();   // 稳定第 2 帧 → 重排
+Rect(vpRoot, 0, 0, 1600, 900);
+Check(vpSession.CurrentPlan.CanvasRect.Width == 1600 && vpSession.CurrentPlan.CanvasRect.Height == 900, "重排按收敛后的读数解算");
+
+// b) 事件风暴：连续两次变化合并，只按最终值重排
+vp.Notify(); vp.SetDesignResolution(1280, 720, ScaleMode.Contain);
+Game.Tick();
+vp.Notify(); vp.SetDesignResolution(1920, 1080, ScaleMode.Contain);
+Game.Tick();
+Check(vpRoot.Width == 1600, "风暴期间未到稳定帧不得重排");
+Game.Tick();   // 稳定第 1 帧
+Game.Tick();   // 稳定第 2 帧 → 重排
+Rect(vpRoot, 0, 0, 1920, 1080);
+
+// d) 手动重算作废等待：事件后立即手动 Relayout，去抖队列不得再重复套用
+vp.Notify(); vp.SetDesignResolution(900, 1600, ScaleMode.Contain);
+vpSession.Relayout();
+Rect(vpRoot, 0, 0, 900, 1600);
+var vpWrites = vpRoot.RectWrites;
+Game.Tick(); Game.Tick(); Game.Tick();
+Check(vpRoot.RectWrites == vpWrites, "手动重算后去抖不得重复套用");
+
+// c) 等待期间销毁会话：后续帧不得抛异常
+vp.Notify();
+vpSession.Dispose();
+Game.Tick(); Game.Tick(); Game.Tick();
+
+Console.WriteLine($"PASS: {checks} checks; production clone/layout/image/button/progress/public API/viewport debounce paths");

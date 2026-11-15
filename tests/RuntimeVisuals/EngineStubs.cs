@@ -33,6 +33,17 @@ namespace GameUI.Struct
 {
     public record struct UIPosition(float X, float Y);
     public record struct Thickness(float Left, float Top, float Right, float Bottom);
+    /// <summary>引擎"支持 Auto"的控件长度语义桩：双向隐式 float，显式值语境同步可读（NaN 表示 Auto）。</summary>
+    public readonly struct ControlLength
+    {
+        public static ControlLength Auto => new(float.NaN);
+        public bool IsAuto => float.IsNaN(_value);
+        public float Value => _value;
+        private readonly float _value;
+        public ControlLength(float value) { _value = value; }
+        public static implicit operator ControlLength(float value) => new(value);
+        public static implicit operator float(ControlLength length) => length._value;
+    }
 }
 namespace GameUI.Control.Primitive { public sealed class PointerEventArgs : EventArgs { } }
 namespace GameUI.Control.Behavior { public sealed class StubBehavior { } }
@@ -50,8 +61,10 @@ namespace GameUI.Control
         }
         public List<Control> Children { get; } = [];
         // Setter 故意没有尺寸事件，测试覆盖未挂树/隐藏控件也可同步的公共尺寸契约。
-        public float Width { get; set; } = 100;
-        public float Height { get; set; } = 100;
+        public ControlLength Width { get; set; } = 100;
+        public ControlLength Height { get; set; } = 100;
+        // 引擎语义：ActualSize 帧末才生效；桩同步回显当前显式值，仅满足编译与读取。
+        public SizeF ActualSize => new(Width, Height);
         public int RectWrites { get; private set; }
         private UIPosition _position;
         public UIPosition Position { get => _position; set { _position = value; RectWrites++; } }
@@ -126,6 +139,24 @@ namespace GameUI.Control.Extensions
         public static void AddTouchBehavior(this Control control, float scale, bool animation, bool longPress) { }
         public static void RemoveFromVisualTreeAndParent(this Control control) => control.Parent = null;
         public static void AddToVisualTree(this Control control) { }
+    }
+}
+namespace GameUI.Graphics
+{
+    // 引擎自绘描边层的最小桩：仅满足编译与树结构，不模拟绘制（Render 留作测试手动触发）。
+    public sealed class SolidPaint
+    {
+        public SolidPaint(Color color) { Color = color; }
+        public Color Color { get; set; }
+    }
+    public sealed class Canvas : GameUI.Control.Control
+    {
+        public SolidPaint? StrokePaint { get; set; }
+        public float StrokeWidth { get; set; }
+        public event EventHandler? OnRender;
+        public void Render() => OnRender?.Invoke(this, EventArgs.Empty);
+        public void StrokeRectangle(float x, float y, float w, float h) { }
+        public void StrokeRoundedRectangle(float x, float y, float w, float h, float r) { }
     }
 }
 namespace GameUI.Extensions

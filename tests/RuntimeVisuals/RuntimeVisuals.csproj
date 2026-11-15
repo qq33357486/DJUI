@@ -14,11 +14,13 @@
     <Compile Include="../../runtime/DjuiCanvasV6.cs" Link="Runtime/DjuiCanvasV6.cs" />
     <Compile Include="../../runtime/DjuiResponsiveResolverV6.cs" Link="Runtime/DjuiResponsiveResolverV6.cs" />
     <Compile Include="../../runtime/DjuiTemplateExpanderV6.cs" Link="Runtime/DjuiTemplateExpanderV6.cs" />
+    <Compile Include="../../runtime/DjuiLayoutArranger.cs" Link="Runtime/DjuiLayoutArranger.cs" />
     <Compile Include="../../runtime/DjuiLayoutSessionV6.cs" Link="Runtime/DjuiLayoutSessionV6.cs" />
     <Compile Include="../../runtime/DjuiTreeBuilderV6.cs" Link="Runtime/DjuiTreeBuilderV6.cs" />
     <Compile Include="../../runtime/DjuiWindowManagerV6.cs" Link="Runtime/DjuiWindowManagerV6.cs" />
     <Compile Include="../../runtime/DjuiImageVisualLayerV6.cs" Link="Runtime/DjuiImageVisualLayerV6.cs" />
     <Compile Include="../../runtime/DjuiProgressVisualLayerV6.cs" Link="Runtime/DjuiProgressVisualLayerV6.cs" />
+    <Compile Include="../../runtime/DjuiBorderVisualLayerV6.cs" Link="Runtime/DjuiBorderVisualLayerV6.cs" />
     <Compile Include="../../runtime/DjuiButtonStateV6.cs" Link="Runtime/DjuiButtonStateV6.cs" />
   </ItemGroup>
 </Project>

@@ -33,10 +33,6 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
 
     public string WindowInstanceId { get; }
     public IReadOnlyDictionary<string, Control> Controls => _controls;
-    /// <summary>窗口挂载边界宿主（DjuiTreeBuilderV6.Build 赋值）。host 建窗时 FullScreen() 的弹性设置是一次性的，
-    /// 引擎不保证视口变化后重排视觉树根下的弹性控件（实证快照：外层 host 停旧值 vs 内部解算新值 → 黑边）——
-    /// 每轮 Relayout 用与 root 同款的确定式矩形显式同步，覆盖视口去抖/建树收尾/池复用/取消关闭全部路径。</summary>
-    internal Panel? MountHost { get; set; }
     /// <summary>持有本会话的树实例（DjuiTreeBuilderV6.Build 收尾赋值；建树期内为 null）。
     /// SetImage 运行期取 ImageVisuals/ButtonStates 刷新 visual 用。</summary>
     internal DjuiTreeInstanceV6? Owner { get; set; }
@@ -199,24 +195,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
             if (_nodeUpdater != null && nodes.TryGetValue(nodeId, out var node))
                 _nodeUpdater(node, control, sceneScales.TryGetValue(nodeId, out var sceneScale) ? sceneScale : 1f);
         }
-        SyncMountHost();
         AfterRelayout?.Invoke();
-    }
-
-    /// <summary>把宿主显式同步为当前画布矩形（与 root 同款确定式写入）。尺寸未变时跳过（含首排读数已相等的情形）。</summary>
-    private void SyncMountHost()
-    {
-        if (MountHost == null) return;
-        var width = CurrentPlan.CanvasRect.Width;
-        var height = CurrentPlan.CanvasRect.Height;
-        // Width 读法同 DjuiWindowManagerV6.ReadWidth：未显式设置时为 Auto，显式回显 NaN → 视为"有变化"落入写入分支
-        var hostWidth = MountHost.Width.IsAuto ? float.NaN : MountHost.Width.Value;
-        var hostHeight = MountHost.Height.IsAuto ? float.NaN : MountHost.Height.Value;
-        // NaN（Auto 未设值）参与比较恒为 false → 视为"有变化"落入写入分支
-        var unchanged = Math.Abs(hostWidth - width) < 0.01f && Math.Abs(hostHeight - height) < 0.01f;
-        if (unchanged) return;
-        Game.Logger.LogInformation($"DJUI v6 host sync {MountHost.Name}: {hostWidth:F0}x{hostHeight:F0} -> {width:F0}x{height:F0}");
-        ApplyRect(MountHost, new DjuiRectV6(0, 0, width, height));
     }
 
     private static void IndexNodes(DjuiNodeV6 node, Dictionary<string, DjuiNodeV6> nodes)
@@ -332,8 +311,6 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
                 pending.StableFrames = 0;
                 return;
             }
-            // 证据链第一环：事件到达 → 等待读数稳定（后续由 layout/host sync 日志衔接）；已在队列的重触发不打，防事件风暴刷屏
-            Game.Logger.LogInformation($"DJUI v6 viewport event -> relayout pending (size={signature.W:F0}x{signature.H:F0} px={signature.PxW}x{signature.PxH})");
             _pending.Add(new Pending { Session = session, Baseline = signature });
         }
 
@@ -367,7 +344,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
             }
         }
 
-        private static (float W, float H, int PxW, int PxH, float SL, float ST, float SR, float SB) ReadSignature(ScreenViewport viewport)
+        private static (float, float, int, int, float, float, float, float) ReadSignature(ScreenViewport viewport)
         {
             var size = viewport.Size;
             var safe = viewport.SafeZonePadding;

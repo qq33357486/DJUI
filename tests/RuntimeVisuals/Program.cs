@@ -187,16 +187,6 @@ Check(vpRoot.Width == 1920, "统一事件路径稳定第 1 帧仍未套用");
 Game.Tick();   // 稳定第 2 帧 → 重排（0.35.1 只订粒度事件时此处永不发生，布局停留旧宽度 718 类症状）
 Rect(vpRoot, 0, 0, 589, 900);
 
-// f) host 同步：fullscreen 宿主每轮 relayout 跟到最新视口（0.14.3 缺口：外层 host 停旧值 vs 内部解算新值 → 黑边）
-var vpHost = new Panel { Name = "DJUI.v6.vp.w9" };
-vpHost.Width = 900; vpHost.Height = 1600;   // 模拟建窗时 FullScreen() 固化的旧尺寸
-vpSession.MountHost = vpHost;
-vp.SetDesignResolution(718, 1278, ScaleMode.Contain);
-vp.NotifyUnified();
-Game.Tick(); Game.Tick();   // 稳定 2 帧 → 重排 + host 同步
-Rect(vpRoot, 0, 0, 718, 1278);
-Rect(vpHost, 0, 0, 718, 1278);   // 旧实现挂：host 停在 900x1600（外层 575/内部 606 分离同型症状）
-
 // d) 手动重算作废等待：事件后立即手动 Relayout，去抖队列不得再重复套用
 vp.Notify(); vp.SetDesignResolution(900, 1600, ScaleMode.Contain);
 vpSession.Relayout();

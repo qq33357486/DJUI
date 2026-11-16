@@ -107,7 +107,6 @@ public static class DjuiTreeBuilderV6
         host.ClipContent = true;
 
         var session = new DjuiLayoutSessionV6(windowInstanceId, project, page);
-        session.MountHost = host;   // host 由布局会话每轮 Relayout 显式同步（引擎不保证视口变化后重排根下弹性宿主）
         var imageVisuals = new DjuiImageVisualLayerV6();
         var progressVisuals = new DjuiProgressVisualLayerV6();
         var borderVisuals = new DjuiBorderVisualLayerV6();

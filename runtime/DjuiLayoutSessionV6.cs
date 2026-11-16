@@ -28,6 +28,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
     private readonly Action<int, int> _sizeChanged;
     private readonly Action<DisplayOrientations> _orientationChanged;
     private readonly Action<float> _dprChanged;
+    private readonly Action _viewportChanged;
     private bool _disposed;
 
     public string WindowInstanceId { get; }
@@ -50,14 +51,18 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         _viewport = viewport ?? DeviceInfo.PrimaryViewport;
         CurrentPlan = CreateCurrentPlan();
         CurrentPage = DjuiResponsiveResolverV6.Resolve(_page, CurrentPlan.Wide);
-        // 视口粒度事件到达时 Size/SafeZonePadding/物理像素未必已收敛到终值（引擎仅对统一事件
-        // OnViewportChanged 承诺"完成更新后触发"），事件只置脏，等读数连续多帧稳定再重排——见文末去抖器
+        // 视口变化统一走文末去抖器。两类入口并存：
+        // ① 统一事件 OnViewportChanged（引擎唯一文档化事件，"完成更新后触发"，新客户端路径只发它——
+        //    实证 0.35.1 快照：编辑器切分辨率只改实际尺寸时不发粒度事件，漏订导致布局永不重排）；
+        // ② 三个粒度事件（未文档化，旧客户端兼容路径才发；到达时读数可能是中间值）。
         _sizeChanged = (_, _) => MarkViewportDirty();
         _orientationChanged = _ => MarkViewportDirty();
         _dprChanged = _ => MarkViewportDirty();
+        _viewportChanged = MarkViewportDirty;
         _viewport.OnSizeChanged += _sizeChanged;
         _viewport.OnOrientationChanged += _orientationChanged;
         _viewport.OnDevicePixelRatioChanged += _dprChanged;
+        _viewport.OnViewportChanged += _viewportChanged;
     }
 
     public void Register(string nodeInstanceId, Control control)
@@ -247,6 +252,7 @@ public sealed class DjuiLayoutSessionV6 : IDisposable
         _viewport.OnSizeChanged -= _sizeChanged;
         _viewport.OnOrientationChanged -= _orientationChanged;
         _viewport.OnDevicePixelRatioChanged -= _dprChanged;
+        _viewport.OnViewportChanged -= _viewportChanged;
         ForgetViewportPending(this);
         _controls.Clear();
         _controlIds.Clear();

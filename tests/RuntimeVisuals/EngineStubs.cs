@@ -180,8 +180,11 @@ namespace GameUI.Device
         public event Action<int, int>? OnSizeChanged;
         public event Action<DisplayOrientations>? OnOrientationChanged;
         public event Action<float>? OnDevicePixelRatioChanged;
+        // 引擎唯一文档化事件："完成更新后触发"；新客户端路径（切分辨率等）只发它不发粒度事件
+        public event Action? OnViewportChanged;
         public void SetDesignResolution(float w, float h, ScaleMode mode) => Size = new(w, h);
         public void Notify() { OnSizeChanged?.Invoke(WidthPx, HeightPx); OnOrientationChanged?.Invoke(DisplayOrientations.Portrait); OnDevicePixelRatioChanged?.Invoke(1); }
+        public void NotifyUnified() => OnViewportChanged?.Invoke();
     }
 }
 namespace DjuiRuntime

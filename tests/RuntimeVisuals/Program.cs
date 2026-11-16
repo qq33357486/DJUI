@@ -178,6 +178,15 @@ Game.Tick();   // 稳定第 1 帧
 Game.Tick();   // 稳定第 2 帧 → 重排
 Rect(vpRoot, 0, 0, 1920, 1080);
 
+// e) 引擎新路径（0.35.1 漏订缺口实锤场景）：改分辨率只发统一事件，三个粒度事件全都不来
+vp.SetDesignResolution(589, 900, ScaleMode.Contain);
+vp.NotifyUnified();   // 只发 OnViewportChanged
+Check(vpRoot.Width == 1920, "统一事件后未满足稳定帧前不得套用新布局");
+Game.Tick();   // 稳定第 1 帧
+Check(vpRoot.Width == 1920, "统一事件路径稳定第 1 帧仍未套用");
+Game.Tick();   // 稳定第 2 帧 → 重排（0.35.1 只订粒度事件时此处永不发生，布局停留旧宽度 718 类症状）
+Rect(vpRoot, 0, 0, 589, 900);
+
 // d) 手动重算作废等待：事件后立即手动 Relayout，去抖队列不得再重复套用
 vp.Notify(); vp.SetDesignResolution(900, 1600, ScaleMode.Contain);
 vpSession.Relayout();
